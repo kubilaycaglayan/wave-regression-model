@@ -1,5 +1,5 @@
-raw-data/*
-!raw-data/.gitkeep
+step-0-raw-data/*
+!step-0-raw-data/.gitkeep
 
 # Input images and previews that may reveal the user's location or surroundings.
 **/*_original.*

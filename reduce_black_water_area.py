@@ -192,7 +192,9 @@ def write_gallery(entries: list[tuple[str, Path]], input_dir: Path, output_dir: 
     cards = []
     for filename, result_path in sorted(entries, key=lambda entry: entry[0].lower()):
         safe_name = html.escape(filename)
-        current_url = quote(os.path.relpath(input_dir / filename, output_dir).replace(os.sep, "/"))
+        namespaced_source = input_dir / f"step-1_{filename}"
+        source_path = namespaced_source if namespaced_source.exists() else input_dir / filename
+        current_url = quote(os.path.relpath(source_path, output_dir).replace(os.sep, "/"))
         result_url = quote(result_path.name)
         cards.append(
             f'<article class="card"><h2>{safe_name}</h2><div class="images">'
@@ -225,8 +227,8 @@ def diagnostic_line(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input-dir", type=Path, default=Path("processed-data"))
-    parser.add_argument("--output-dir", type=Path, default=Path("final-water-data"))
+    parser.add_argument("--input-dir", type=Path, default=Path("step-1-processed-data"))
+    parser.add_argument("--output-dir", type=Path, default=Path("step-2-final-water-data"))
     parser.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")
     args = parser.parse_args()
 
@@ -234,6 +236,9 @@ def main() -> None:
     # Ignore source copies left by older pipeline runs; only the last step's
     # standardized image is a valid input to this step.
     image_paths = [p for p in iter_images(args.input_dir) if not p.stem.lower().endswith("_original")]
+    namespaced = [p for p in image_paths if p.stem.lower().startswith("step-1_")]
+    if namespaced:
+        image_paths = namespaced
     if not image_paths:
         raise SystemExit(f"No supported images found in {args.input_dir}")
 
@@ -244,12 +249,14 @@ def main() -> None:
     total_started = time.perf_counter()
     for index, source_path in enumerate(image_paths, 1):
         item_started = time.perf_counter()
-        result_path = args.output_dir / f"step-2_{source_path.stem}{source_path.suffix.lower()}"
+        logical_stem = source_path.stem.removeprefix("step-1_")
+        logical_name = f"{logical_stem}{source_path.suffix.lower()}"
+        result_path = args.output_dir / f"step-2_{logical_name}"
         if result_path.exists():
             skipped += 1
-            entries.append((source_path.name, result_path))
+            entries.append((logical_name, result_path))
             print(f"[{index}/{len(image_paths)}] " + diagnostic_line(
-                source_path.name, None, None, None, None, None,
+                logical_name, None, None, None, None, None,
                 "skipped: output already exists",
             ) + f" | time={time.perf_counter() - item_started:.3f}s")
             continue
@@ -267,7 +274,7 @@ def main() -> None:
                 skipped += 1
                 reason = "no reliable lower-water crop"
                 print(f"[{index}/{len(image_paths)}] " + diagnostic_line(
-                    source_path.name, float(source_black_mask.mean()), None, None, None, None,
+                    logical_name, float(source_black_mask.mean()), None, None, None, None,
                     f"skipped: {reason}",
                 ) + f" | time={time.perf_counter() - item_started:.3f}s")
                 continue
@@ -279,11 +286,11 @@ def main() -> None:
             final_black = black_ratio(persisted)
             final_water_mask = project_mask(water_mask, crop.box)
             final_water_ratio = float(final_water_mask.mean())
-            entries.append((source_path.name, result_path))
+            entries.append((logical_name, result_path))
             processed += 1
             elapsed = time.perf_counter() - item_started
             print(f"[{index}/{len(image_paths)}] " + diagnostic_line(
-                source_path.name,
+                logical_name,
                 float(source_black_mask.mean()),
                 final_black,
                 final_water_ratio,
