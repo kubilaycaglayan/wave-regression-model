@@ -7,4 +7,5 @@ raw-data/*
 
 # Local Python bytecode.
 __pycache__/
+__pycache__/*
 *.py[cod]
