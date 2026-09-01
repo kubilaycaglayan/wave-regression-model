@@ -15,3 +15,5 @@
 - This project is mainly for learning purposes, so keep the coat clean and keep the processes as separate as possible with information transparent.
 
 - Each step up model training processes should work on the file that was the output of the last spec. Do not work on the original file for an intermediate step. Only the first step should work on the original file and then it's output should be used for the next step.
+
+- Treat this as a pipeline so that there could be new files any time. When new files are processed the older files shouldn't be a repprocessed again if they already processed.
