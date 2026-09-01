@@ -1,2 +1,10 @@
 raw-data/*
 !raw-data/.gitkeep
+
+# Input images and previews that may reveal the user's location or surroundings.
+**/*_original.*
+**/*_overlay.*
+
+# Local Python bytecode.
+__pycache__/
+*.py[cod]
