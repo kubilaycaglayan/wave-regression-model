@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import html
+import os
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 import numpy as np
 from PIL import Image, ImageFilter
@@ -58,11 +60,12 @@ def standardized_model_input(image: Image.Image, water_mask: np.ndarray) -> Imag
 
 def write_gallery(entries: list[tuple[str, Path, Path]], output_dir: Path) -> None:
     cards = []
-    for filename, original, standardized in entries:
+    for filename, source, standardized in entries:
         safe_name = html.escape(filename)
+        source_url = quote(os.path.relpath(source, output_dir).replace(os.sep, "/"))
         cards.append(
             f'<article class="card"><h2>{safe_name}</h2><div class="images">'
-            f'<figure><figcaption>original</figcaption><a href="{original.name}" target="_blank"><img src="{original.name}" alt="Original {safe_name}" loading="lazy"></a></figure>'
+            f'<figure><figcaption>source image</figcaption><a href="{source_url}" target="_blank"><img src="{source_url}" alt="Source {safe_name}" loading="lazy"></a></figure>'
             f'<figure><figcaption>standardized model input</figcaption><a href="{standardized.name}" target="_blank"><img src="{standardized.name}" alt="Standardized model input {safe_name}" loading="lazy"></a></figure>'
             '</div></article>'
         )
@@ -70,12 +73,9 @@ def write_gallery(entries: list[tuple[str, Path, Path]], output_dir: Path) -> No
     (output_dir / "index.html").write_text(text, encoding="utf-8")
 
 
-def processed_paths(source_path: Path, output_dir: Path) -> tuple[Path, Path]:
-    """Return the original preview and standardized files for one source image."""
-    return (
-        output_dir / f"{source_path.stem}_original.jpg",
-        output_dir / f"{source_path.stem}.jpg",
-    )
+def processed_paths(source_path: Path, output_dir: Path) -> Path:
+    """Return the standardized output path; source images stay in the input step."""
+    return output_dir / f"step-1_{source_path.stem}.jpg"
 
 
 def main() -> None:
@@ -95,10 +95,10 @@ def main() -> None:
     for index, source_path in enumerate(image_paths, 1):
         image_started = time.perf_counter()
         try:
-            original_path, standardized_path = processed_paths(source_path, args.output_dir)
-            if original_path.exists() and standardized_path.exists():
+            standardized_path = processed_paths(source_path, args.output_dir)
+            if standardized_path.exists():
                 print(f"[{index}/{len(image_paths)}] {source_path.name}: skipped (standardized input already exists)")
-                entries.append((source_path.name, original_path, standardized_path))
+                entries.append((source_path.name, source_path, standardized_path))
                 already_present += 1
                 continue
             if model is None:
@@ -110,9 +110,8 @@ def main() -> None:
                 print(f"[{index}/{len(image_paths)}] {source_path.name}: WARNING: no reliable water region; skipped")
                 skipped.append(source_path.name)
                 continue
-            image.save(original_path, format="JPEG", quality=92)
             standardized.save(standardized_path, format="JPEG", quality=95)
-            entries.append((source_path.name, original_path, standardized_path))
+            entries.append((source_path.name, source_path, standardized_path))
             elapsed = time.perf_counter() - image_started
             processing_seconds += elapsed
             print(f"[{index}/{len(image_paths)}] {source_path.name}: processed ({elapsed:.3f}s)")

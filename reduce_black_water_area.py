@@ -196,10 +196,10 @@ def write_gallery(entries: list[tuple[str, Path]], input_dir: Path, output_dir: 
         result_url = quote(result_path.name)
         cards.append(
             f'<article class="card"><h2>{safe_name}</h2><div class="images">'
-            f'<figure><figcaption>current processed image</figcaption><a href="{current_url}" target="_blank">'
-            f'<img src="{current_url}" alt="Current processed image {safe_name}" loading="lazy"></a></figure>'
-            f'<figure><figcaption>new reduced-black result</figcaption><a href="{result_url}" target="_blank">'
-            f'<img src="{result_url}" alt="Reduced-black result {safe_name}" loading="lazy"></a></figure>'
+            f'<figure><figcaption>last step image</figcaption><a href="{current_url}" target="_blank">'
+            f'<img src="{current_url}" alt="Last step image {safe_name}" loading="lazy"></a></figure>'
+            f'<figure><figcaption>this step image</figcaption><a href="{result_url}" target="_blank">'
+            f'<img src="{result_url}" alt="This step image {safe_name}" loading="lazy"></a></figure>'
             '</div></article>'
         )
     document = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reduced-black water images</title><style>*{box-sizing:border-box}body{margin:0;padding:16px;background:#eef2f5;color:#17212b;font:14px system-ui,sans-serif}h1{font-size:21px;margin:0 0 14px}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px}.card{min-width:0;background:#fff;padding:10px;border-radius:8px;box-shadow:0 1px 5px #0002}.card h2{font-size:13px;margin:0 0 9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.images{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}figure{margin:0;min-width:0}figcaption{font-size:12px;color:#52606d;margin-bottom:5px}figure a{display:block;background:#111;aspect-ratio:1/1;overflow:hidden}img{display:block;width:100%;height:100%;object-fit:contain}@media(max-width:560px){.gallery{grid-template-columns:1fr}.images{gap:6px}}</style></head><body><h1>Reduced-black water images</h1><main class="gallery">''' + ''.join(cards) + '</main></body></html>'
@@ -231,7 +231,9 @@ def main() -> None:
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    image_paths = iter_images(args.input_dir)
+    # Ignore source copies left by older pipeline runs; only the last step's
+    # standardized image is a valid input to this step.
+    image_paths = [p for p in iter_images(args.input_dir) if not p.stem.lower().endswith("_original")]
     if not image_paths:
         raise SystemExit(f"No supported images found in {args.input_dir}")
 
@@ -242,7 +244,7 @@ def main() -> None:
     total_started = time.perf_counter()
     for index, source_path in enumerate(image_paths, 1):
         item_started = time.perf_counter()
-        result_path = args.output_dir / source_path.name
+        result_path = args.output_dir / f"step-2_{source_path.stem}{source_path.suffix.lower()}"
         if result_path.exists():
             skipped += 1
             entries.append((source_path.name, result_path))
