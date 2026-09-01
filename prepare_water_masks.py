@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create visual water-segmentation previews for images in ./raw-data/."""
+"""Create visual water-segmentation previews for images in ./step-0-raw-data/."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def write_gallery(entries: list[tuple[str, Path, Path]], output_dir: Path) -> No
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input-dir", type=Path, default=Path("raw-data"))
+    parser.add_argument("--input-dir", type=Path, default=Path("step-0-raw-data"))
     parser.add_argument("--output-dir", type=Path, default=Path("water-mask-preview"))
     parser.add_argument("--device", default=None)
     args = parser.parse_args()

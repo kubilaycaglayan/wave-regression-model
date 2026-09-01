@@ -80,8 +80,8 @@ def processed_paths(source_path: Path, output_dir: Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input-dir", type=Path, default=Path("raw-data"))
-    parser.add_argument("--output-dir", type=Path, default=Path("processed-data"))
+    parser.add_argument("--input-dir", type=Path, default=Path("step-0-raw-data"))
+    parser.add_argument("--output-dir", type=Path, default=Path("step-1-processed-data"))
     parser.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
