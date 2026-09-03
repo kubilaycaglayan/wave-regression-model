@@ -20,11 +20,11 @@ def _save_tensor(tensor: torch.Tensor, path: Path) -> None:
     Image.fromarray(image, mode="RGB").save(path, quality=94)
 
 
-def _write_gallery(output_dir: Path, dataset: WaveDataset, count: int, variants: int) -> None:
+def _write_gallery(output_dir: Path, dataset: WaveDataset, variants: int) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     training_transform = build_training_transform()
     cards: list[str] = []
-    for index in range(min(count, len(dataset))):
+    for index in range(len(dataset)):
         started = time.perf_counter()
         filename, label = dataset.samples[index]
         with Image.open(dataset.image_path(index)) as opened:
@@ -51,7 +51,7 @@ def _write_gallery(output_dir: Path, dataset: WaveDataset, count: int, variants:
             for kind, name in images
         )
         cards.append(f'<article><h2>{html.escape(filename)}</h2><p>label: {label:.2f}</p><div class="images">{thumbs}</div></article>')
-        print(f"preview {index + 1}/{min(count, len(dataset))}: {filename} ({time.perf_counter() - started:.3f}s)")
+        print(f"preview {index + 1}/{len(dataset)}: {filename} ({time.perf_counter() - started:.3f}s)")
     document = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Training augmentation inspection</title>
 <style>body{font:16px system-ui,sans-serif;margin:0;padding:1rem;background:#f3f4f6;color:#17202a}main{max-width:1400px;margin:auto}article{background:#fff;border-radius:10px;padding:1rem;margin:0 0 1rem;box-shadow:0 1px 4px #0002}h1,h2{margin:.2rem 0 .5rem}h2{font-size:1rem;overflow-wrap:anywhere}.images{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem}figure{margin:0}img{display:block;width:100%;height:auto;border-radius:6px;cursor:zoom-in}figcaption{text-align:center;margin-top:.35rem;color:#53606b}</style><main><h1>Sea waviness training-data inspection</h1><p>Click any image to open it at full size. Augmentations are sampled independently.</p>""" + "".join(cards) + "</main>"
     (output_dir / "index.html").write_text(document, encoding="utf-8")
@@ -61,12 +61,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, default=Path("."))
     parser.add_argument("--output-dir", type=Path, default=Path("step-4-data-preview"))
-    parser.add_argument(
-        "--samples",
-        type=int,
-        default=0,
-        help="Number of training samples to include; 0 means all training samples.",
-    )
     parser.add_argument("--variants", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=8)
     args = parser.parse_args()
@@ -92,8 +86,7 @@ def main() -> None:
     if not torch.equal(val_a, val_b) or not torch.equal(test_a, test_b):
         raise AssertionError("Validation/test transforms are not deterministic")
     print("sanity checks: passed")
-    sample_count = len(module.train_dataset) if args.samples <= 0 else args.samples
-    _write_gallery(args.output_dir, module.train_dataset, sample_count, args.variants)
+    _write_gallery(args.output_dir, module.train_dataset, args.variants)
     print(f"gallery: {(args.output_dir / 'index.html').resolve()}")
     print(f"completed in {time.perf_counter() - started:.3f}s")
 
