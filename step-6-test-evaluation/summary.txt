@@ -1,0 +1,10 @@
+selected checkpoint path: /home/ubuntu/dev/deep-learning/wave-regression-model/step-5-checkpoints/wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt
+number of test samples: 6
+test MAE: 0.14462084
+test RMSE: 0.16061088
+training-label mean: 0.32857143
+mean-baseline test MAE: 0.28095238
+mean-baseline test RMSE: 0.31975755
+training-label median: 0.30000000
+median-baseline test MAE: 0.30000000
+median-baseline test RMSE: 0.34156502
