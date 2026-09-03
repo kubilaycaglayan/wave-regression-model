@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import argparse
 import random
 import re
 import sys
@@ -15,7 +16,6 @@ LABELS_PATH = Path("labels.csv")
 IMAGE_DIR = Path("step-2-final-water-data")
 OUTPUT_DIR = Path("step-3-dataset-splits")
 MAX_GROUP_GAP = 5
-RANDOM_SEED = 42
 SPLIT_NAMES = ("train", "validation", "test")
 TARGET_FRACTIONS = {"train": 0.70, "validation": 0.15, "test": 0.15}
 IMG_NUMBER_RE = re.compile(r"IMG[_-](\d+)", re.IGNORECASE)
@@ -105,10 +105,10 @@ def split_score(splits: dict[str, list[Sample]], total_bins: Counter[int], total
     return score
 
 
-def make_splits(groups: list[list[Sample]]) -> dict[str, list[Sample]]:
+def make_splits(groups: list[list[Sample]], seed: int | None = None) -> dict[str, list[Sample]]:
     total = sum(len(group) for group in groups)
     total_bins = Counter(waviness_bin(sample.waviness) for group in groups for sample in group)
-    rng = random.Random(RANDOM_SEED)
+    rng = random.Random(seed)
     best: tuple[float, dict[str, list[Sample]]] | None = None
 
     # Multiple seeded greedy passes provide useful bin balancing while retaining whole groups.
@@ -188,13 +188,21 @@ def summary_text(splits: dict[str, list[Sample]], groups: list[list[Sample]], to
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="optional seed for repeatable split generation; unset uses system randomness",
+    )
+    args = parser.parse_args()
     try:
         samples = read_labels()
         if not IMAGE_DIR.is_dir():
             raise FileNotFoundError(f"processed image directory not found: {IMAGE_DIR}")
         validate_images(samples)
         groups = group_samples(samples)
-        splits = make_splits(groups)
+        splits = make_splits(groups, seed=args.seed)
         check_splits(splits, groups, samples)
         OUTPUT_DIR.mkdir(exist_ok=True)
         for name in SPLIT_NAMES:
