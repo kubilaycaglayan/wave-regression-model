@@ -34,6 +34,49 @@ class WaveRegressionModel(pl.LightningModule):
         self.val_mae = MeanAbsoluteError()
         self.val_rmse = MeanSquaredError(squared=False)
 
+    def train(self, mode: bool = True) -> WaveRegressionModel:
+        """Keep frozen ResNet layers, especially BatchNorm, in evaluation mode."""
+        super().train(mode)
+        self.backbone.eval()
+        self.backbone.fc.train(mode)
+        return self
+
+    def frozen_backbone_mode_checks(self) -> tuple[int, int, int]:
+        """Return frozen parameter and BatchNorm counts, raising on mode drift."""
+        frozen_parameters = [
+            parameter for name, parameter in self.backbone.named_parameters() if not name.startswith("fc.")
+        ]
+        head_parameters = list(self.backbone.fc.parameters())
+        batch_norm_modules = [
+            module for name, module in self.backbone.named_modules()
+            if not name.startswith("fc") and isinstance(module, nn.modules.batchnorm._BatchNorm)
+        ]
+        if any(parameter.requires_grad for parameter in frozen_parameters):
+            raise RuntimeError("A frozen backbone parameter unexpectedly requires gradients")
+        if any(not parameter.requires_grad for parameter in head_parameters):
+            raise RuntimeError("A regression-head parameter unexpectedly does not require gradients")
+        if any(module.training for module in batch_norm_modules):
+            raise RuntimeError("A frozen backbone BatchNorm module is in train mode")
+        if not self.backbone.fc.training:
+            raise RuntimeError("The regression head is not in train mode")
+        return (
+            sum(parameter.numel() for parameter in frozen_parameters),
+            sum(parameter.numel() for parameter in head_parameters),
+            len(batch_norm_modules),
+        )
+
+    def on_train_start(self) -> None:
+        """Verify the invariant after Lightning has entered training mode."""
+        frozen_parameters, head_parameters, batch_norm_modules = self.frozen_backbone_mode_checks()
+        print(
+            "After Lightning entered training mode: "
+            f"Frozen backbone parameters: {frozen_parameters:,}; "
+            f"Trainable head parameters: {head_parameters:,}; "
+            f"Frozen BatchNorm modules: {batch_norm_modules}; "
+            "BatchNorm modules in train mode: 0; "
+            f"Regression head training mode: {self.backbone.fc.training}"
+        )
+
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         """Return one prediction in [0, 1] for each image in the batch."""
         return self.backbone(images).squeeze(-1)
@@ -58,4 +101,3 @@ class WaveRegressionModel(pl.LightningModule):
     def configure_optimizers(self) -> torch.optim.Optimizer:
         trainable_parameters = [parameter for parameter in self.parameters() if parameter.requires_grad]
         return torch.optim.AdamW(trainable_parameters, lr=self.hparams.learning_rate)
-

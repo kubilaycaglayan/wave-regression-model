@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-import argparse
+import re
 from pathlib import Path
 
 # Install the repository's torchvision compatibility definition before
@@ -18,18 +18,32 @@ from step_4_b_wave_datamodule import WaveDataModule
 from step_5_a_wave_regression_model import WaveRegressionModel
 
 
+RANDOM_SEED = 42
 LEARNING_RATE = 1e-3
 BATCH_SIZE = 8
 MAX_EPOCHS = 100
 EARLY_STOPPING_PATIENCE = 10
-CHECKPOINT_DIR = Path("step-5-checkpoints")
-RUN_VERSION = "v1"
+CHECKPOINT_DIR = Path("step-5-checkpoints-bn-frozen-seed42")
 
 
 def parameter_counts(model: torch.nn.Module) -> tuple[int, int, int]:
     total = sum(parameter.numel() for parameter in model.parameters())
     trainable = sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
     return total, trainable, total - trainable
+
+
+def best_checkpoint_epoch(path: str) -> int | None:
+    match = re.search(r"epoch=(\d+)", Path(path).name)
+    return int(match.group(1)) + 1 if match else None
+
+
+def next_run_version(directory: Path) -> str:
+    """Return the next unused vN label without overwriting prior runs."""
+    versions = []
+    if directory.exists():
+        for path in directory.iterdir():
+            versions.extend(int(value) for value in re.findall(r"(?:^|[-_])v(\d+)(?:[-_.]|$)", path.name))
+    return f"v{max(versions, default=0) + 1}"
 
 
 def make_cuda_usable_if_needed() -> None:
@@ -52,15 +66,18 @@ def write_summary(
     model: WaveRegressionModel,
     best_metrics: dict[str, float],
     seed: int | None,
+    run_version: str,
+    epochs_trained: int,
 ) -> Path:
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     best_mae = best_metrics["val_mae"]
     best_rmse = best_metrics["val_rmse"]
-    summary_path = CHECKPOINT_DIR / f"training_summary_{RUN_VERSION}.txt"
+    summary_path = CHECKPOINT_DIR / f"training_summary_{run_version}.txt"
     summary_path.write_text(
         "\n".join(
             [
                 "Sea-waviness regression baseline",
+                f"run version: {run_version}",
                 "architecture: torchvision ResNet18; backbone features -> Linear(512, 1) -> Sigmoid",
                 "pretrained weights: ResNet18_Weights.DEFAULT (ImageNet)",
                 "backbone status: frozen; regression head status: trainable",
@@ -74,7 +91,8 @@ def write_summary(
                 f"best validation MAE: {float(best_mae) if best_mae is not None else 'unavailable'}",
                 f"best validation RMSE: {float(best_rmse) if best_rmse is not None else 'unavailable'}",
                 f"best checkpoint path: {checkpoint.best_model_path}",
-                f"epochs actually trained: {trainer.current_epoch + 1}",
+                f"best checkpoint epoch: {best_checkpoint_epoch(checkpoint.best_model_path)}",
+                f"epochs actually trained: {epochs_trained}",
                 f"early stopping triggered: {early_stopping.stopped_epoch > 0}",
                 f"total parameters: {parameter_counts(model)[0]}",
                 f"trainable parameters: {parameter_counts(model)[1]}",
@@ -88,9 +106,13 @@ def write_summary(
     return summary_path
 
 
-def main(seed: int | None = None) -> None:
+def main() -> None:
     started = time.perf_counter()
-    pl.seed_everything(seed, workers=True)
+    print(f"Random seed: {RANDOM_SEED}")
+    pl.seed_everything(RANDOM_SEED, workers=True)
+    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    run_version = next_run_version(CHECKPOINT_DIR)
+    print(f"Run version: {run_version}")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using accelerator: {device}")
     make_cuda_usable_if_needed()
@@ -103,6 +125,13 @@ def main(seed: int | None = None) -> None:
         raise RuntimeError("Expected a trainable regression head and a frozen ResNet backbone")
 
     data.setup("fit")
+    model.train()
+    frozen_backbone, trainable_head, batch_norm_modules = model.frozen_backbone_mode_checks()
+    print(f"Frozen backbone parameters: {frozen_backbone:,}")
+    print(f"Trainable head parameters: {trainable_head:,}")
+    print(f"Frozen BatchNorm modules: {batch_norm_modules}")
+    print("BatchNorm modules in train mode: 0")
+    print(f"Regression head training mode: {model.backbone.fc.training}")
     batch_images, _ = next(iter(data.train_dataloader()))
     with torch.inference_mode():
         sanity_predictions = model(batch_images)
@@ -115,7 +144,7 @@ def main(seed: int | None = None) -> None:
 
     checkpoint = ModelCheckpoint(
         dirpath=CHECKPOINT_DIR,
-        filename=f"wave-regression-baseline-{RUN_VERSION}-best-val-mae-{{epoch:02d}}-{{val_mae:.4f}}",
+        filename=f"wave-regression-baseline-{run_version}-best-val-mae-{{epoch:02d}}-{{val_mae:.4f}}",
         monitor="val_mae",
         mode="min",
         save_top_k=1,
@@ -138,25 +167,29 @@ def main(seed: int | None = None) -> None:
         enable_progress_bar=True,
     )
     trainer.fit(model, datamodule=data)
+    epochs_trained = int(trainer.fit_loop.epoch_progress.current.completed)
 
     best_model = WaveRegressionModel.load_from_checkpoint(checkpoint.best_model_path)
     best_metrics = trainer.validate(best_model, datamodule=data, verbose=False)[0]
-    summary_path = write_summary(checkpoint, early_stopping, trainer, model, best_metrics)
+    summary_path = write_summary(
+        checkpoint,
+        early_stopping,
+        trainer,
+        model,
+        best_metrics,
+        RANDOM_SEED,
+        run_version,
+        epochs_trained,
+    )
     print(f"Best validation MAE: {best_metrics['val_mae']:.6f}")
     print(f"Best validation RMSE: {best_metrics['val_rmse']:.6f}")
     print(f"Best checkpoint path: {checkpoint.best_model_path}")
-    print(f"Epochs actually trained: {trainer.current_epoch + 1}")
+    print(f"Best checkpoint epoch: {best_checkpoint_epoch(checkpoint.best_model_path)}")
+    print(f"Epochs actually trained: {epochs_trained}")
     print(f"Early stopping triggered: {early_stopping.stopped_epoch > 0}")
     print(f"Training summary: {summary_path}")
     print(f"Elapsed time: {time.perf_counter() - started:.2f}s")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="optional seed for repeatable training; unset uses system randomness",
-    )
-    main(seed=parser.parse_args().seed)
+    main()
