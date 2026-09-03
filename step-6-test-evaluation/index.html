@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Step 6 test evaluation</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 1200px; margin: 0 auto; padding: 1.25rem; }
+    h1 { margin-bottom: .25rem; }
+    .intro { margin-top: 0; opacity: .75; }
+    .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+    .card { border: 1px solid #8886; border-radius: .65rem; overflow: hidden; background: #8881; }
+    .card a { display: block; background: #111; }
+    .card img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; }
+    .details { padding: .8rem 1rem 1rem; }
+    .details h2 { margin: 0 0 .55rem; font-size: 1rem; overflow-wrap: anywhere; }
+    .details p { margin: .2rem 0; font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <h1>Untouched test-set predictions</h1>
+  <p class="intro">Sorted from highest to lowest absolute error. Click an image for full size.</p>
+  <main class="gallery">
+
+      <article class="card">
+        <a href="../step-2-final-water-data/step-2_IMG_7321.jpg" target="_blank" rel="noopener">
+          <img src="../step-2-final-water-data/step-2_IMG_7321.jpg" alt="step-2_IMG_7321.jpg" loading="lazy">
+        </a>
+        <div class="details">
+          <h2>step-2_IMG_7321.jpg</h2>
+          <p>true: 0.90</p>
+          <p>predicted: 0.66</p>
+          <p>absolute error: 0.24</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <a href="../step-2-final-water-data/step-2_IMG_7322.jpg" target="_blank" rel="noopener">
+          <img src="../step-2-final-water-data/step-2_IMG_7322.jpg" alt="step-2_IMG_7322.jpg" loading="lazy">
+        </a>
+        <div class="details">
+          <h2>step-2_IMG_7322.jpg</h2>
+          <p>true: 0.70</p>
+          <p>predicted: 0.46</p>
+          <p>absolute error: 0.24</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <a href="../step-2-final-water-data/step-2_IMG_7244.jpg" target="_blank" rel="noopener">
+          <img src="../step-2-final-water-data/step-2_IMG_7244.jpg" alt="step-2_IMG_7244.jpg" loading="lazy">
+        </a>
+        <div class="details">
+          <h2>step-2_IMG_7244.jpg</h2>
+          <p>true: 0.60</p>
+          <p>predicted: 0.46</p>
+          <p>absolute error: 0.14</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <a href="../step-2-final-water-data/step-2_IMG_7239.jpg" target="_blank" rel="noopener">
+          <img src="../step-2-final-water-data/step-2_IMG_7239.jpg" alt="step-2_IMG_7239.jpg" loading="lazy">
+        </a>
+        <div class="details">
+          <h2>step-2_IMG_7239.jpg</h2>
+          <p>true: 0.50</p>
+          <p>predicted: 0.60</p>
+          <p>absolute error: 0.10</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <a href="../step-2-final-water-data/step-2_IMG_7240.jpg" target="_blank" rel="noopener">
+          <img src="../step-2-final-water-data/step-2_IMG_7240.jpg" alt="step-2_IMG_7240.jpg" loading="lazy">
+        </a>
+        <div class="details">
+          <h2>step-2_IMG_7240.jpg</h2>
+          <p>true: 0.20</p>
+          <p>predicted: 0.28</p>
+          <p>absolute error: 0.08</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <a href="../step-2-final-water-data/step-2_IMG_7238.jpg" target="_blank" rel="noopener">
+          <img src="../step-2-final-water-data/step-2_IMG_7238.jpg" alt="step-2_IMG_7238.jpg" loading="lazy">
+        </a>
+        <div class="details">
+          <h2>step-2_IMG_7238.jpg</h2>
+          <p>true: 0.50</p>
+          <p>predicted: 0.58</p>
+          <p>absolute error: 0.08</p>
+        </div>
+      </article>
+  </main>
+</body>
+</html>
