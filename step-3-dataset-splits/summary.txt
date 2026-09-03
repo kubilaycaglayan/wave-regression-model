@@ -1,0 +1,28 @@
+total labeled samples: 55
+number of groups/sessions: 9
+
+train: 42 samples (76.36%)
+  waviness min/max/mean: 0.00/0.80/0.329
+  waviness bins: 0.00-0.19=17, 0.20-0.39=8, 0.40-0.59=6, 0.60-0.79=8, 0.80-1.00=3
+  groups: 2, 3, 5
+
+validation: 7 samples (12.73%)
+  waviness min/max/mean: 0.05/0.90/0.521
+  waviness bins: 0.00-0.19=1, 0.20-0.39=2, 0.40-0.59=0, 0.60-0.79=3, 0.80-1.00=1
+  groups: 1, 6, 7, 9
+
+test: 6 samples (10.91%)
+  waviness min/max/mean: 0.20/0.90/0.567
+  waviness bins: 0.00-0.19=0, 0.20-0.39=1, 0.40-0.59=2, 0.60-0.79=2, 0.80-1.00=1
+  groups: 4, 8
+
+group membership:
+  group 1 (IMG 7148-7149): step-2_IMG_7148.jpg, step-2_IMG_7149.jpg
+  group 2 (IMG 7187-7207): step-2_IMG_7187.jpg, step-2_IMG_7188.jpg, step-2_IMG_7189.jpg, step-2_IMG_7192.jpg, step-2_IMG_7193.jpg, step-2_IMG_7194.jpg, step-2_IMG_7195.jpg, step-2_IMG_7196.jpg, step-2_IMG_7197.jpg, step-2_IMG_7199.jpg, step-2_IMG_7200.jpg, step-2_IMG_7201.jpg, step-2_IMG_7204.jpg, step-2_IMG_7205.jpg, step-2_IMG_7206.jpg, step-2_IMG_7207.jpg
+  group 3 (IMG 7215-7232): step-2_IMG_7215.jpg, step-2_IMG_7216.jpg, step-2_IMG_7217.jpg, step-2_IMG_7218.jpg, step-2_IMG_7219.jpg, step-2_IMG_7220.jpg, step-2_IMG_7221.jpg, step-2_IMG_7223.jpg, step-2_IMG_7224.jpg, step-2_IMG_7225.jpg, step-2_IMG_7229.jpg, step-2_IMG_7230.jpg, step-2_IMG_7231.jpg, step-2_IMG_7232.jpg
+  group 4 (IMG 7238-7244): step-2_IMG_7238.jpg, step-2_IMG_7239.jpg, step-2_IMG_7240.jpg, step-2_IMG_7244.jpg
+  group 5 (IMG 7250-7261): step-2_IMG_7250.jpg, step-2_IMG_7251.jpg, step-2_IMG_7252.jpg, step-2_IMG_7253.jpg, step-2_IMG_7254.jpg, step-2_IMG_7255.jpg, step-2_IMG_7256.jpg, step-2_IMG_7257.jpg, step-2_IMG_7258.jpg, step-2_IMG_7259.jpg, step-2_IMG_7260.jpg, step-2_IMG_7261.jpg
+  group 6 (IMG 7274-7274): step-2_IMG_7274.jpg
+  group 7 (IMG 7305-7311): step-2_IMG_7305.jpg, step-2_IMG_7306.jpg, step-2_IMG_7311.jpg
+  group 8 (IMG 7321-7322): step-2_IMG_7321.jpg, step-2_IMG_7322.jpg
+  group 9 (IMG 7335-7335): step-2_IMG_7335.jpg
