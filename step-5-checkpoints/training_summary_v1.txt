@@ -10,7 +10,7 @@ max epochs: 100
 early stopping: monitor=val_mae, mode=min, patience=10
 best validation MAE: 0.10676846653223038
 best validation RMSE: 0.13352146744728088
-best checkpoint path: /home/ubuntu/dev/deep-learning/wave-regression-model/step-5-checkpoints/wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt
+best checkpoint path: step-5-checkpoints/wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt
 epochs actually trained: 57
 early stopping triggered: True
 total parameters: 11177025
