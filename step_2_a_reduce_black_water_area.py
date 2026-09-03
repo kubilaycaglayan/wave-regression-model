@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import io
 import os
 import time
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ import numpy as np
 from PIL import Image
 
 from step_1_a_water_segmentation import (
+    SegmentationModel,
     extract_water_mask,
     iter_images,
     load_model,
@@ -37,6 +39,14 @@ class CropMetrics:
     lower_water_retention: float
     water_pixels: int
     shape_penalty: float
+
+
+@dataclass(frozen=True)
+class Step2PreprocessingResult:
+    image: Image.Image
+    crop: CropMetrics
+    source_black_mask: np.ndarray
+    water_mask: np.ndarray
 
 
 def summed_area(mask: np.ndarray) -> np.ndarray:
@@ -163,6 +173,31 @@ def fit_in_square(image: Image.Image, box: tuple[int, int, int, int]) -> Image.I
     return output
 
 
+def preprocess_step_1_image(
+    image: Image.Image, segmentation_model: SegmentationModel
+) -> Step2PreprocessingResult | None:
+    """Run the canonical Step 2 lower-water crop on a Step 1 image."""
+    rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    source_black_mask = np.all(rgb <= BLACK_THRESHOLD, axis=2)
+    segmentation_mask = extract_water_mask(
+        run_segmentation(image, segmentation_model), segmentation_model.water_class_ids
+    ).astype(bool)
+    water_mask = segmentation_mask & ~source_black_mask
+    crop = select_crop(water_mask, source_black_mask)
+    if crop is None:
+        return None
+    return Step2PreprocessingResult(
+        fit_in_square(image, crop.box), crop, source_black_mask, water_mask
+    )
+
+
+def encode_step_2_output(image: Image.Image) -> bytes:
+    """Encode exactly as the JPEG files used to train the model."""
+    output = io.BytesIO()
+    image.save(output, format="JPEG", quality=95, subsampling=0)
+    return output.getvalue()
+
+
 def project_mask(mask: np.ndarray, box: tuple[int, int, int, int]) -> np.ndarray:
     """Apply the same crop/fit operation to a binary mask."""
     left, top, right, bottom = box
@@ -181,7 +216,7 @@ def black_ratio(image: Image.Image) -> float:
 def save_result(image: Image.Image, path: Path) -> None:
     suffix = path.suffix.lower()
     if suffix in {".jpg", ".jpeg"}:
-        image.save(path, format="JPEG", quality=95, subsampling=0)
+        path.write_bytes(encode_step_2_output(image))
     elif suffix in {".tif", ".tiff"}:
         image.save(path, format="TIFF")
     else:
@@ -265,21 +300,20 @@ def main() -> None:
             if model is None:
                 model = load_model(args.device)
             image = load_rgb_image(source_path)
-            rgb = np.asarray(image, dtype=np.uint8)
-            source_black_mask = np.all(rgb <= BLACK_THRESHOLD, axis=2)
-            segmentation_mask = extract_water_mask(run_segmentation(image, model), model.water_class_ids).astype(bool)
-            water_mask = segmentation_mask & ~source_black_mask
-            crop = select_crop(water_mask, source_black_mask)
-            if crop is None:
+            processed_output = preprocess_step_1_image(image, model)
+            if processed_output is None:
                 skipped += 1
                 reason = "no reliable lower-water crop"
                 print(f"[{index}/{len(image_paths)}] " + diagnostic_line(
-                    logical_name, float(source_black_mask.mean()), None, None, None, None,
+                    logical_name, black_ratio(image), None, None, None, None,
                     f"skipped: {reason}",
                 ) + f" | time={time.perf_counter() - item_started:.3f}s")
                 continue
 
-            result = fit_in_square(image, crop.box)
+            result = processed_output.image
+            crop = processed_output.crop
+            source_black_mask = processed_output.source_black_mask
+            water_mask = processed_output.water_mask
             save_result(result, result_path)
             # Measure the persisted file, including square padding and encoding effects.
             persisted = load_rgb_image(result_path)

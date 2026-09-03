@@ -9,7 +9,8 @@ from typing import Iterable
 import numpy as np
 import torch
 from PIL import Image
-from pillow_heif import register_heif_opener
+
+from image_loading import SUPPORTED_EXTENSIONS, load_rgb_image
 
 _TORCHVISION_COMPAT_LIBRARY = None
 
@@ -36,8 +37,6 @@ from transformers import SegformerForSemanticSegmentation, SegformerImageProcess
 
 MODEL_NAME = "nvidia/segformer-b2-finetuned-ade-512-512"
 WATER_CLASS_NAMES = {"water", "sea", "river", "lake"}
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".heif"}
-register_heif_opener()
 
 
 @dataclass
@@ -48,7 +47,7 @@ class SegmentationModel:
     device: torch.device
 
 
-def configure_inference_device(device: str | None = None) -> torch.device:
+def configure_inference_device(device: str | None = None, *, verbose: bool = True) -> torch.device:
     selected_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     if selected_device.type != "cuda":
         return selected_device
@@ -58,13 +57,14 @@ def configure_inference_device(device: str | None = None) -> torch.device:
         if "not compatible with devices with sm" not in str(error).lower():
             raise
         torch.backends.cudnn.enabled = False
-        print(f"cuDNN disabled for {torch.cuda.get_device_name(selected_device)}; using native CUDA kernels.")
+        if verbose:
+            print(f"cuDNN disabled for {torch.cuda.get_device_name(selected_device)}; using native CUDA kernels.")
     return selected_device
 
 
-def load_model(device: str | None = None) -> SegmentationModel:
+def load_model(device: str | None = None, *, verbose: bool = True) -> SegmentationModel:
     """Load the pretrained model used by both preprocessing and previews."""
-    selected_device = configure_inference_device(device)
+    selected_device = configure_inference_device(device, verbose=verbose)
     processor = SegformerImageProcessor.from_pretrained(MODEL_NAME)
     model = SegformerForSemanticSegmentation.from_pretrained(MODEL_NAME).to(selected_device)
     model.eval()
@@ -72,14 +72,10 @@ def load_model(device: str | None = None) -> SegmentationModel:
     water_class_ids = tuple(i for i, label in id2label.items() if label in WATER_CLASS_NAMES)
     if not water_class_ids:
         raise RuntimeError(f"{MODEL_NAME} does not expose expected water classes: {WATER_CLASS_NAMES}")
-    print(f"Model: {MODEL_NAME} on {selected_device}")
-    print("Water classes: " + ", ".join(f"{id2label[i]}={i}" for i in water_class_ids))
+    if verbose:
+        print(f"Model: {MODEL_NAME} on {selected_device}")
+        print("Water classes: " + ", ".join(f"{id2label[i]}={i}" for i in water_class_ids))
     return SegmentationModel(model, processor, water_class_ids, selected_device)
-
-
-def load_rgb_image(path: Path) -> Image.Image:
-    with Image.open(path) as opened:
-        return opened.convert("RGB")
 
 
 @torch.inference_mode()
