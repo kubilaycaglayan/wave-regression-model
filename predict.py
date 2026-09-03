@@ -8,12 +8,14 @@ import math
 import sys
 import time
 from pathlib import Path
+from typing import Callable
 
 import torch
 from PIL import Image
 from transformers.utils import logging as transformers_logging
 
 from image_loading import load_rgb_image
+from step_1_a_water_segmentation import SegmentationModel
 from step_1_a_water_segmentation import load_model as load_segmentation_model
 from step_1_b_preprocess_water_inputs import (
     decode_rgb_bytes,
@@ -44,8 +46,8 @@ def parse_args() -> argparse.Namespace:
     return argparse.ArgumentParser(description=__doc__).parse_args()
 
 
-def find_input_photo() -> Path:
-    """Return the single supported photo placed in the prediction holder."""
+def find_input_photos() -> list[Path]:
+    """Return all supported photos placed in the prediction holder."""
     if not INPUT_DIR.is_dir():
         raise FileNotFoundError(f"Prediction input directory does not exist: {INPUT_DIR}")
     files = sorted(
@@ -60,15 +62,12 @@ def find_input_photo() -> Path:
         )
     if not files:
         raise FileNotFoundError(f"No image found in {INPUT_DIR}; add one HEIC, HEIF, JPEG, or PNG photo")
-    if len(files) > 1:
-        raise ValueError(
-            f"Expected one image in {INPUT_DIR}, found {len(files)}: "
-            + ", ".join(path.name for path in files)
-        )
-    return files[0]
+    return files
 
 
-def preprocess_photo(path: Path, device: torch.device) -> tuple[Image.Image, bytes]:
+def preprocess_photo(
+    path: Path, segmentation_model: SegmentationModel
+) -> tuple[Image.Image, bytes]:
     """Reproduce the persisted Step 1 -> Step 2 training pipeline in memory."""
     started = time.perf_counter()
     try:
@@ -77,10 +76,6 @@ def preprocess_photo(path: Path, device: torch.device) -> tuple[Image.Image, byt
         kind = "HEIC/HEIF" if path.suffix.lower() in {".heic", ".heif"} else "image"
         raise RuntimeError(f"Could not decode {kind} file {path}: {error}") from error
     print_timing("Decode input", started)
-
-    started = time.perf_counter()
-    segmentation_model = load_segmentation_model(str(device), verbose=False)
-    print_timing("Load segmentation model", started)
 
     started = time.perf_counter()
     step_1_image = preprocess_raw_image(raw_image, segmentation_model)
@@ -123,20 +118,22 @@ def save_preview(path: Path, encoded_model_input: bytes) -> Path:
     return preview_path
 
 
-def predict(model_input: Image.Image, device: torch.device) -> tuple[float, tuple[int, ...]]:
+def preview_path_for(path: Path) -> Path:
+    return PREVIEW_DIR / f"{path.stem}-model-input.jpg"
+
+
+def predict(
+    model_input: Image.Image,
+    device: torch.device,
+    model: WaveRegressionModel,
+    transform: Callable[[Image.Image], torch.Tensor],
+) -> tuple[float, tuple[int, ...]]:
     started = time.perf_counter()
-    transform = build_evaluation_transform()
     image_tensor = transform(model_input).float().unsqueeze(0)
     expected_shape = (1, 3, IMAGE_SIZE[1], IMAGE_SIZE[0])
     if tuple(image_tensor.shape) != expected_shape:
         raise RuntimeError(f"Inference tensor must have shape [1, 3, 224, 224], got {list(image_tensor.shape)}")
     print_timing("ToTensor and ImageNet normalization", started)
-
-    started = time.perf_counter()
-    model = WaveRegressionModel.load_from_checkpoint(CHECKPOINT_PATH, map_location=device)
-    model.to(device)
-    model.eval()
-    print_timing("Load regression checkpoint", started)
 
     started = time.perf_counter()
     with torch.inference_mode():
@@ -157,26 +154,65 @@ def main() -> None:
     try:
         total_started = time.perf_counter()
         transformers_logging.disable_progress_bar()
-        photo = find_input_photo()
+        photos = find_input_photos()
         if not CHECKPOINT_PATH.is_file():
             raise FileNotFoundError(f"Selected checkpoint is missing: {CHECKPOINT_PATH}")
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Input: {photo.relative_to(PROJECT_DIR)}")
+        pending_photos = [photo for photo in photos if not preview_path_for(photo).is_file()]
+        print(f"Images: {len(photos)} ({len(pending_photos)} pending)")
         print(f"Device: {device}", flush=True)
-        model_input, encoded_model_input = preprocess_photo(photo, device)
 
-        waviness, tensor_shape = predict(model_input, device)
-        preview_started = time.perf_counter()
-        preview_path = save_preview(photo, encoded_model_input)
-        print_timing("Save preview", preview_started)
+        if not pending_photos:
+            for index, photo in enumerate(photos, 1):
+                print(f"[{index}/{len(photos)}] {photo.name}: skipped (preview already exists)")
+            print_timing("Total", total_started)
+            return
 
-        print(f"Waviness: {waviness:.3f}")
-        print(f"Preview: {preview_path.relative_to(PROJECT_DIR)}")
+        started = time.perf_counter()
+        segmentation_model = load_segmentation_model(str(device), verbose=False)
+        print_timing("Load segmentation model", started)
+
+        started = time.perf_counter()
+        model = WaveRegressionModel.load_from_checkpoint(CHECKPOINT_PATH, map_location=device)
+        model.to(device)
+        model.eval()
+        print_timing("Load regression checkpoint", started)
+        transform = build_evaluation_transform()
+
+        processed = 0
+        skipped = 0
+        failed = 0
+        for index, photo in enumerate(photos, 1):
+            if preview_path_for(photo).is_file():
+                skipped += 1
+                print(f"[{index}/{len(photos)}] {photo.name}: skipped (preview already exists)")
+                continue
+
+            photo_started = time.perf_counter()
+            print(f"[{index}/{len(photos)}] Input: {photo.relative_to(PROJECT_DIR)}", flush=True)
+            try:
+                model_input, encoded_model_input = preprocess_photo(photo, segmentation_model)
+                waviness, tensor_shape = predict(model_input, device, model, transform)
+                preview_started = time.perf_counter()
+                preview_path = save_preview(photo, encoded_model_input)
+                print_timing("Save preview", preview_started)
+
+                expected_shape = (1, 3, IMAGE_SIZE[1], IMAGE_SIZE[0])
+                if tensor_shape != expected_shape:
+                    raise RuntimeError(f"Unexpected tensor shape after inference: {tensor_shape}")
+                print(f"Waviness: {waviness:.3f}")
+                print(f"Preview: {preview_path.relative_to(PROJECT_DIR)}")
+                print_timing("Photo total", photo_started)
+                processed += 1
+            except Exception as error:
+                failed += 1
+                print(f"Error processing {photo.name}: {error}", file=sys.stderr, flush=True)
+
+        print(f"Processed: {processed}; skipped: {skipped}; failed: {failed}")
         print_timing("Total", total_started)
-        expected_shape = (1, 3, IMAGE_SIZE[1], IMAGE_SIZE[0])
-        if tensor_shape != expected_shape:  # Defensive assertion kept next to the CLI result.
-            raise RuntimeError(f"Unexpected tensor shape after inference: {tensor_shape}")
+        if failed:
+            raise SystemExit(1)
     except Exception as error:
         print(f"Error: {error}", file=sys.stderr)
         raise SystemExit(1) from error

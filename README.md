@@ -45,4 +45,4 @@ image with the new result.
 
 ## Predict waviness
 
-Put one HEIC, HEIF, JPEG, or PNG photo in `predict-holder/`, then run `python predict.py`; its model-input preview is always saved in `step-7-inference-preview/`.
+Put HEIC, HEIF, JPEG, or PNG photos in `predict-holder/`, then run `python predict.py`; photos are predicted one by one and previews are saved in `step-7-inference-preview/`.
