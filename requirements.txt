@@ -1,5 +1,6 @@
 torch
 torchvision
+lightning
 transformers
 pillow
 pillow-heif
