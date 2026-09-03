@@ -13,7 +13,7 @@ from urllib.parse import quote
 import numpy as np
 from PIL import Image, ImageFilter
 
-from water_segmentation import extract_water_mask, iter_images, load_model, load_rgb_image, run_segmentation
+from step_1_a_water_segmentation import extract_water_mask, iter_images, load_model, load_rgb_image, run_segmentation
 
 OUTPUT_SIZE = (224, 224)
 

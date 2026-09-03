@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from water_segmentation import extract_water_mask, iter_images, load_model, load_rgb_image, run_segmentation
+from step_1_a_water_segmentation import extract_water_mask, iter_images, load_model, load_rgb_image, run_segmentation
 
 OVERLAY_COLOR = np.array([0, 190, 255], dtype=np.uint8)
 OVERLAY_ALPHA = 0.48
