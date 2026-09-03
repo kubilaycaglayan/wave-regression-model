@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import argparse
 from pathlib import Path
 
 # Install the repository's torchvision compatibility definition before
@@ -17,7 +18,6 @@ from step_4_b_wave_datamodule import WaveDataModule
 from step_5_a_wave_regression_model import WaveRegressionModel
 
 
-RANDOM_SEED = 42
 LEARNING_RATE = 1e-3
 BATCH_SIZE = 8
 MAX_EPOCHS = 100
@@ -50,6 +50,7 @@ def write_summary(
     trainer: pl.Trainer,
     model: WaveRegressionModel,
     best_metrics: dict[str, float],
+    seed: int | None,
 ) -> Path:
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     best_mae = best_metrics["val_mae"]
@@ -68,6 +69,7 @@ def write_summary(
                 f"batch size: {BATCH_SIZE}",
                 f"max epochs: {MAX_EPOCHS}",
                 f"early stopping: monitor=val_mae, mode=min, patience={EARLY_STOPPING_PATIENCE}",
+                f"random seed: {seed if seed is not None else 'system randomness'}",
                 f"best validation MAE: {float(best_mae) if best_mae is not None else 'unavailable'}",
                 f"best validation RMSE: {float(best_rmse) if best_rmse is not None else 'unavailable'}",
                 f"best checkpoint path: {checkpoint.best_model_path}",
@@ -85,9 +87,9 @@ def write_summary(
     return summary_path
 
 
-def main() -> None:
+def main(seed: int | None = None) -> None:
     started = time.perf_counter()
-    pl.seed_everything(RANDOM_SEED, workers=True)
+    pl.seed_everything(seed, workers=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using accelerator: {device}")
     make_cuda_usable_if_needed()
@@ -149,4 +151,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="optional seed for repeatable training; unset uses system randomness",
+    )
+    main(seed=parser.parse_args().seed)
