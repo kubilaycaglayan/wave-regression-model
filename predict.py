@@ -36,6 +36,10 @@ PREVIEW_DIR = PROJECT_DIR / "step-7-inference-preview"
 SUPPORTED_EXTENSIONS = {".heic", ".heif", ".jpg", ".jpeg", ".png"}
 
 
+def print_timing(label: str, started: float) -> None:
+    print(f"{label}: {time.perf_counter() - started:.3f}s", flush=True)
+
+
 def parse_args() -> argparse.Namespace:
     return argparse.ArgumentParser(description=__doc__).parse_args()
 
@@ -66,31 +70,45 @@ def find_input_photo() -> Path:
 
 def preprocess_photo(path: Path, device: torch.device) -> tuple[Image.Image, bytes]:
     """Reproduce the persisted Step 1 -> Step 2 training pipeline in memory."""
+    started = time.perf_counter()
     try:
         raw_image = load_rgb_image(path)
     except Exception as error:
         kind = "HEIC/HEIF" if path.suffix.lower() in {".heic", ".heif"} else "image"
         raise RuntimeError(f"Could not decode {kind} file {path}: {error}") from error
+    print_timing("Decode input", started)
 
+    started = time.perf_counter()
     segmentation_model = load_segmentation_model(str(device), verbose=False)
+    print_timing("Load segmentation model", started)
+
+    started = time.perf_counter()
     step_1_image = preprocess_raw_image(raw_image, segmentation_model)
     if step_1_image is None:
         raise RuntimeError("Water cannot be reliably detected during Step 1 preprocessing")
+    print_timing("Step 1 segmentation and standardization", started)
 
     # Training Step 2 read Step 1's JPEG from disk. The round trip is intentional.
+    started = time.perf_counter()
     persisted_step_1 = decode_rgb_bytes(encode_step_1_output(step_1_image))
+    print_timing("Step 1 JPEG round trip", started)
+
+    started = time.perf_counter()
     step_2_output = preprocess_step_1_image(persisted_step_1, segmentation_model)
     if step_2_output is None:
         raise RuntimeError("Water cannot be reliably detected for the lower-water Step 2 crop")
     step_2_image = step_2_output.image
+    print_timing("Step 2 lower-water preprocessing", started)
 
     # Training loaded the final Step 2 JPEG. Feed that same decoded representation.
+    started = time.perf_counter()
     encoded_model_input = encode_step_2_output(step_2_image)
     model_input = decode_rgb_bytes(encoded_model_input)
     if model_input.mode != "RGB" or model_input.size != IMAGE_SIZE:
         raise RuntimeError(
             f"Preprocessing produced {model_input.mode} {model_input.size}; expected RGB {IMAGE_SIZE}"
         )
+    print_timing("Step 2 JPEG round trip", started)
     return model_input, encoded_model_input
 
 
@@ -106,17 +124,24 @@ def save_preview(path: Path, encoded_model_input: bytes) -> Path:
 
 
 def predict(model_input: Image.Image, device: torch.device) -> tuple[float, tuple[int, ...]]:
+    started = time.perf_counter()
     transform = build_evaluation_transform()
     image_tensor = transform(model_input).float().unsqueeze(0)
     expected_shape = (1, 3, IMAGE_SIZE[1], IMAGE_SIZE[0])
     if tuple(image_tensor.shape) != expected_shape:
         raise RuntimeError(f"Inference tensor must have shape [1, 3, 224, 224], got {list(image_tensor.shape)}")
+    print_timing("ToTensor and ImageNet normalization", started)
 
+    started = time.perf_counter()
     model = WaveRegressionModel.load_from_checkpoint(CHECKPOINT_PATH, map_location=device)
     model.to(device)
     model.eval()
+    print_timing("Load regression checkpoint", started)
+
+    started = time.perf_counter()
     with torch.inference_mode():
         output = model(image_tensor.to(device))
+    print_timing("Model inference", started)
     if output.numel() != 1:
         raise RuntimeError(f"Model returned {output.numel()} predictions; expected one")
     value = float(output.item())
@@ -128,28 +153,27 @@ def predict(model_input: Image.Image, device: torch.device) -> tuple[float, tupl
 
 
 def main() -> None:
-    args = parse_args()
+    parse_args()
     try:
+        total_started = time.perf_counter()
         transformers_logging.disable_progress_bar()
         photo = find_input_photo()
         if not CHECKPOINT_PATH.is_file():
             raise FileNotFoundError(f"Selected checkpoint is missing: {CHECKPOINT_PATH}")
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        preprocessing_started = time.perf_counter()
-        model_input, encoded_model_input = preprocess_photo(photo, device)
-        preprocessing_seconds = time.perf_counter() - preprocessing_started
-
-        inference_started = time.perf_counter()
-        waviness, tensor_shape = predict(model_input, device)
-        inference_seconds = time.perf_counter() - inference_started
-        preview_path = save_preview(photo, encoded_model_input)
-
         print(f"Input: {photo.relative_to(PROJECT_DIR)}")
-        print(f"Device: {device}")
+        print(f"Device: {device}", flush=True)
+        model_input, encoded_model_input = preprocess_photo(photo, device)
+
+        waviness, tensor_shape = predict(model_input, device)
+        preview_started = time.perf_counter()
+        preview_path = save_preview(photo, encoded_model_input)
+        print_timing("Save preview", preview_started)
+
         print(f"Waviness: {waviness:.3f}")
         print(f"Preview: {preview_path.relative_to(PROJECT_DIR)}")
-        print(f"Preprocessing: {preprocessing_seconds:.2f}s; model inference: {inference_seconds:.2f}s")
+        print_timing("Total", total_started)
         expected_shape = (1, 3, IMAGE_SIZE[1], IMAGE_SIZE[0])
         if tensor_shape != expected_shape:  # Defensive assertion kept next to the CLI result.
             raise RuntimeError(f"Unexpected tensor shape after inference: {tensor_shape}")
