@@ -1,0 +1,22 @@
+Sea-waviness regression baseline
+run version: v1
+architecture: torchvision ResNet18; backbone features -> Linear(512, 1) -> Sigmoid
+pretrained weights: ResNet18_Weights.DEFAULT (ImageNet)
+backbone status: frozen; regression head status: trainable
+loss: SmoothL1Loss
+optimizer: AdamW (trainable parameters only)
+learning rate: 0.001
+batch size: 8
+max epochs: 100
+early stopping: monitor=val_mae, mode=min, patience=10
+random seed: 42
+best validation MAE: 0.15750917792320251
+best validation RMSE: 0.21461638808250427
+best checkpoint path: /home/ubuntu/dev/deep-learning/wave-regression-model/step-5-checkpoints-bn-frozen-seed42/wave-regression-baseline-v1-best-val-mae-epoch=55-val_mae=0.1575.ckpt
+best checkpoint epoch: 56
+epochs actually trained: 66
+early stopping triggered: True
+total parameters: 11177025
+trainable parameters: 513
+frozen parameters: 11176512
+test split evaluated: no
