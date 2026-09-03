@@ -23,6 +23,7 @@ BATCH_SIZE = 8
 MAX_EPOCHS = 100
 EARLY_STOPPING_PATIENCE = 10
 CHECKPOINT_DIR = Path("step-5-checkpoints")
+RUN_VERSION = "v1"
 
 
 def parameter_counts(model: torch.nn.Module) -> tuple[int, int, int]:
@@ -55,7 +56,7 @@ def write_summary(
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     best_mae = best_metrics["val_mae"]
     best_rmse = best_metrics["val_rmse"]
-    summary_path = CHECKPOINT_DIR / "training_summary.txt"
+    summary_path = CHECKPOINT_DIR / f"training_summary_{RUN_VERSION}.txt"
     summary_path.write_text(
         "\n".join(
             [
@@ -114,7 +115,7 @@ def main(seed: int | None = None) -> None:
 
     checkpoint = ModelCheckpoint(
         dirpath=CHECKPOINT_DIR,
-        filename="best-val-mae-{epoch:02d}-{val_mae:.4f}",
+        filename=f"wave-regression-baseline-{RUN_VERSION}-best-val-mae-{{epoch:02d}}-{{val_mae:.4f}}",
         monitor="val_mae",
         mode="min",
         save_top_k=1,
