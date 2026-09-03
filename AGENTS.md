@@ -17,3 +17,5 @@
 - Each step up model training processes should work on the file that was the output of the last spec. Do not work on the original file for an intermediate step. Only the first step should work on the original file and then it's output should be used for the next step.
 
 - Treat this as a pipeline so that there could be new files any time. When new files are processed the older files shouldn't be a repprocessed again if they already processed.
+
+- Follow the repository's step naming convention for new pipeline files: use names such as `step_4_a_<purpose>.py`, `step_4_b_<purpose>.py`, and so on, keeping the stage order explicit.

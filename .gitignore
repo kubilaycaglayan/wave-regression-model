@@ -9,3 +9,6 @@ step-0-raw-data/*
 __pycache__/
 __pycache__/*
 *.py[cod]
+
+# Generated step-4 inspection gallery.
+step-4-data-preview/
