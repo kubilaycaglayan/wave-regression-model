@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import io
 import os
 import time
 from pathlib import Path
@@ -13,7 +14,14 @@ from urllib.parse import quote
 import numpy as np
 from PIL import Image, ImageFilter
 
-from step_1_a_water_segmentation import extract_water_mask, iter_images, load_model, load_rgb_image, run_segmentation
+from step_1_a_water_segmentation import (
+    SegmentationModel,
+    extract_water_mask,
+    iter_images,
+    load_model,
+    load_rgb_image,
+    run_segmentation,
+)
 
 OUTPUT_SIZE = (224, 224)
 
@@ -56,6 +64,29 @@ def standardized_model_input(image: Image.Image, water_mask: np.ndarray) -> Imag
     output = Image.new("RGB", OUTPUT_SIZE, (0, 0, 0))
     output.paste(resized, ((OUTPUT_SIZE[0] - resized.width) // 2, (OUTPUT_SIZE[1] - resized.height) // 2))
     return output
+
+
+def preprocess_raw_image(
+    image: Image.Image, segmentation_model: SegmentationModel
+) -> Image.Image | None:
+    """Run the canonical Step 1 segmentation and standardization in memory."""
+    water_mask = extract_water_mask(
+        run_segmentation(image, segmentation_model), segmentation_model.water_class_ids
+    )
+    return standardized_model_input(image, water_mask)
+
+
+def encode_step_1_output(image: Image.Image) -> bytes:
+    """Encode exactly as Step 1 does before Step 2 reads the image."""
+    output = io.BytesIO()
+    image.save(output, format="JPEG", quality=95)
+    return output.getvalue()
+
+
+def decode_rgb_bytes(encoded: bytes) -> Image.Image:
+    """Decode an encoded pipeline image into a detached RGB image."""
+    with Image.open(io.BytesIO(encoded)) as opened:
+        return opened.convert("RGB")
 
 
 def write_gallery(entries: list[tuple[str, Path, Path]], output_dir: Path) -> None:
@@ -104,13 +135,12 @@ def main() -> None:
             if model is None:
                 model = load_model(args.device)
             image = load_rgb_image(source_path)
-            mask = extract_water_mask(run_segmentation(image, model), model.water_class_ids)
-            standardized = standardized_model_input(image, mask)
+            standardized = preprocess_raw_image(image, model)
             if standardized is None:
                 print(f"[{index}/{len(image_paths)}] {source_path.name}: WARNING: no reliable water region; skipped")
                 skipped.append(source_path.name)
                 continue
-            standardized.save(standardized_path, format="JPEG", quality=95)
+            standardized_path.write_bytes(encode_step_1_output(standardized))
             entries.append((source_path.name, source_path, standardized_path))
             elapsed = time.perf_counter() - image_started
             processing_seconds += elapsed

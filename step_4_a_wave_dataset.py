@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Callable
 
 import torch
-from PIL import Image
+
+from image_loading import load_rgb_image
 
 
 # Some environments have a torchvision wheel whose optional C++ operators do
@@ -115,8 +116,7 @@ class WaveDataset(torch.utils.data.Dataset[tuple[torch.Tensor, torch.Tensor]]):
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         filename, waviness = self.samples[index]
-        with Image.open(self.image_dir / filename) as opened:
-            image = opened.convert("RGB")
+        image = load_rgb_image(self.image_dir / filename)
         if image.size != IMAGE_SIZE:
             raise ValueError(f"Expected {IMAGE_SIZE} image, got {image.size}: {self.image_path(index)}")
         image_tensor = self.transform(image)

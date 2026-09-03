@@ -42,3 +42,7 @@ python step_2_a_reduce_black_water_area.py
 This reads `step-1-processed-data/`, preserves the lower-wave region, and writes aspect-preserving
 224x224 results to `step-2-final-water-data/`. Open `step-2-final-water-data/index.html` to compare the last-step
 image with the new result.
+
+## Predict waviness
+
+Put one HEIC, HEIF, JPEG, or PNG photo in `predict-holder/`, then run `python predict.py`; its model-input preview is always saved in `step-7-inference-preview/`.
