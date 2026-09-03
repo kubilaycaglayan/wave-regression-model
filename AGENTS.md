@@ -19,3 +19,8 @@
 - Treat this as a pipeline so that there could be new files any time. When new files are processed the older files shouldn't be a repprocessed again if they already processed.
 
 - Follow the repository's step naming convention for new pipeline files: use names such as `step_4_a_<purpose>.py`, `step_4_b_<purpose>.py`, and so on, keeping the stage order explicit.
+
+- Prefer dynamic values over duplicated hard-coded values. Whenever possible,
+  derive model names, versions, paths, and related output filenames from the
+  canonical input or configuration (for example, the selected checkpoint), and
+  fail with a clear error when the expected naming format cannot be parsed.
