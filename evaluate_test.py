@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import html
 import math
+import re
 import time
 from pathlib import Path
 from statistics import mean, median
@@ -23,12 +24,20 @@ CHECKPOINT_PATH = Path(
     "step-5-checkpoints/"
     "wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt"
 )
+_MODEL_NAME_MATCH = re.fullmatch(r"(.+?)-best-val-mae-epoch=\d+-val_mae=[\d.]+\.ckpt", CHECKPOINT_PATH.name)
+if _MODEL_NAME_MATCH is None:
+    raise ValueError(f"Cannot derive model name from checkpoint filename: {CHECKPOINT_PATH.name}")
+MODEL_NAME = _MODEL_NAME_MATCH.group(1)
+_MODEL_VERSION_MATCH = re.search(r"(?:^|-)v(\d+)(?:-|$)", MODEL_NAME)
+if _MODEL_VERSION_MATCH is None:
+    raise ValueError(f"Checkpoint filename does not contain a model version: {CHECKPOINT_PATH.name}")
+MODEL_VERSION = f"v{_MODEL_VERSION_MATCH.group(1)}"
 IMAGE_DIR = Path("step-2-final-water-data")
 TEST_CSV = Path("step-3-dataset-splits/test.csv")
 TRAIN_CSV = Path("step-3-dataset-splits/train.csv")
 OUTPUT_DIR = Path("step-6-test-evaluation")
 PREDICTIONS_CSV = OUTPUT_DIR / "test_predictions.csv"
-SUMMARY_PATH = OUTPUT_DIR / "summary.txt"
+SUMMARY_PATH = OUTPUT_DIR / f"summary_{MODEL_NAME}.txt"
 GALLERY_PATH = OUTPUT_DIR / "index.html"
 BATCH_SIZE = 1
 
@@ -288,6 +297,8 @@ def main() -> None:
     SUMMARY_PATH.write_text(
         "\n".join(
             [
+                f"model name: {MODEL_NAME}",
+                f"model version: {MODEL_VERSION}",
                 f"selected checkpoint path: {CHECKPOINT_PATH.resolve()}",
                 f"number of test samples: {len(test_dataset)}",
                 f"test MAE: {test_mae:.8f}",
