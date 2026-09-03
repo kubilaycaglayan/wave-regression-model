@@ -9,7 +9,7 @@ pip install -r requirements.txt
 ## Create water-mask previews
 
 ```bash
-python prepare_water_masks.py
+python step_1_a_prepare_water_masks.py
 ```
 
 The pipeline folders are `step-0-raw-data/`, `step-1-processed-data/`, and
@@ -20,7 +20,7 @@ are written to `water-mask-preview/`.
 ## Create standardized model inputs
 
 ```bash
-python preprocess_water_inputs.py
+python step_1_b_preprocess_water_inputs.py
 ```
 
 This runs water segmentation, removes non-water pixels, and creates RGB `224x224` inputs in `step-1-processed-data/`.
@@ -28,7 +28,7 @@ This runs water segmentation, removes non-water pixels, and creates RGB `224x224
 To force CPU processing:
 
 ```bash
-python preprocess_water_inputs.py --device cpu
+python step_1_b_preprocess_water_inputs.py --device cpu
 ```
 
 Existing complete outputs are skipped, so the command can safely be rerun after interruption. Open `step-1-processed-data/index.html` directly in a browser to inspect the source and standardized images side by side.
@@ -36,7 +36,7 @@ Existing complete outputs are skipped, so the command can safely be rerun after 
 ## Reduce black water area
 
 ```bash
-python reduce_black_water_area.py
+python step_2_a_reduce_black_water_area.py
 ```
 
 This reads `step-1-processed-data/`, preserves the lower-wave region, and writes aspect-preserving
