@@ -24,3 +24,5 @@
   derive model names, versions, paths, and related output filenames from the
   canonical input or configuration (for example, the selected checkpoint), and
   fail with a clear error when the expected naming format cannot be parsed.
+
+- We created a camera feeder for this project, so we expect to have incoming data such as sea photos, in time. So when we are creating the pipeline or modifying it, we should expect that there will be more data in the future and we will be doing daily updates and we will be creating new checkpoints every few days or every few weeks.
