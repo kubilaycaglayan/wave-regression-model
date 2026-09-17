@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import csv
 import argparse
+import hashlib
+import json
 import random
 import re
 import sys
+from datetime import datetime, timezone
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,11 +18,15 @@ from pathlib import Path
 LABELS_PATH = Path("labels.csv")
 IMAGE_DIR = Path("step-2-final-water-data")
 OUTPUT_DIR = Path("step-3-dataset-splits")
+SNAPSHOT_DIR = OUTPUT_DIR / "snapshots"
+BENCHMARK_DIR = OUTPUT_DIR / "benchmarks"
+BENCHMARK_TEST_PATH = BENCHMARK_DIR / "benchmark-v1-test.csv"
 MAX_GROUP_GAP = 5
 SPLIT_NAMES = ("train", "validation", "test")
 TARGET_FRACTIONS = {"train": 0.70, "validation": 0.15, "test": 0.15}
 IMG_NUMBER_RE = re.compile(r"IMG[_-](\d+)", re.IGNORECASE)
 BIN_NAMES = ("0.00-0.19", "0.20-0.39", "0.40-0.59", "0.60-0.79", "0.80-1.00")
+DEFAULT_SEED = 42
 
 
 @dataclass(frozen=True)
@@ -105,9 +112,18 @@ def split_score(splits: dict[str, list[Sample]], total_bins: Counter[int], total
     return score
 
 
-def make_splits(groups: list[list[Sample]], seed: int | None = None) -> dict[str, list[Sample]]:
-    total = sum(len(group) for group in groups)
-    total_bins = Counter(waviness_bin(sample.waviness) for group in groups for sample in group)
+def _assign_groups(
+    groups: list[list[Sample]],
+    fixed_splits: dict[str, list[Sample]],
+    seed: int,
+) -> dict[str, list[Sample]]:
+    total = sum(len(split) for split in fixed_splits.values()) + sum(len(group) for group in groups)
+    total_bins = Counter(
+        waviness_bin(sample.waviness)
+        for split in fixed_splits.values()
+        for sample in split
+    )
+    total_bins.update(waviness_bin(sample.waviness) for group in groups for sample in group)
     rng = random.Random(seed)
     best: tuple[float, dict[str, list[Sample]]] | None = None
 
@@ -116,7 +132,7 @@ def make_splits(groups: list[list[Sample]], seed: int | None = None) -> dict[str
         order = list(groups)
         rng.shuffle(order)
         order.sort(key=len, reverse=True)
-        candidate = {name: [] for name in SPLIT_NAMES}
+        candidate = {name: list(fixed_splits[name]) for name in SPLIT_NAMES}
         for group in order:
             options = []
             for name in SPLIT_NAMES:
@@ -131,6 +147,73 @@ def make_splits(groups: list[list[Sample]], seed: int | None = None) -> dict[str
 
     assert best is not None
     return {name: sorted(best[1][name], key=lambda sample: (sample.image_number, sample.filename)) for name in SPLIT_NAMES}
+
+
+def make_splits(groups: list[list[Sample]], seed: int = DEFAULT_SEED) -> dict[str, list[Sample]]:
+    """Create an initial deterministic split when no assignments exist yet."""
+    return _assign_groups(groups, {name: [] for name in SPLIT_NAMES}, seed)
+
+
+def read_split_csv(path: Path, samples_by_name: dict[str, Sample]) -> list[Sample]:
+    if not path.is_file():
+        raise FileNotFoundError(f"Existing split manifest not found: {path}")
+    samples: list[Sample] = []
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames != ["filename", "waviness"]:
+            raise ValueError(f"{path} must have header: filename,waviness")
+        for row_number, row in enumerate(reader, start=2):
+            filename = (row.get("filename") or "").strip()
+            if filename not in samples_by_name:
+                raise ValueError(f"{path}:{row_number}: filename is not present in the current labels.csv: {filename}")
+            try:
+                value = float(row["waviness"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(f"{path}:{row_number}: invalid waviness") from error
+            sample = samples_by_name[filename]
+            if value != sample.waviness:
+                raise ValueError(
+                    f"{path}:{row_number}: label changed for existing sample {filename}; "
+                    "existing assignments are immutable"
+                )
+            samples.append(sample)
+    if len({sample.filename for sample in samples}) != len(samples):
+        raise ValueError(f"Duplicate filenames found in {path}")
+    return samples
+
+
+def load_or_create_incremental_splits(samples: list[Sample], seed: int) -> tuple[dict[str, list[Sample]], bool]:
+    """Keep existing assignments fixed and assign only previously unseen groups."""
+    samples_by_name = {sample.filename: sample for sample in samples}
+    split_paths = {name: OUTPUT_DIR / f"{name}.csv" for name in SPLIT_NAMES}
+    existing = {name: path.is_file() for name, path in split_paths.items()}
+    if not any(existing.values()):
+        return make_splits(group_samples(samples), seed), False
+    if not all(existing.values()):
+        missing = ", ".join(name for name, present in existing.items() if not present)
+        raise FileNotFoundError(f"Incremental split registry is incomplete; missing: {missing}")
+
+    fixed = {name: read_split_csv(path, samples_by_name) for name, path in split_paths.items()}
+    assigned_names = [sample.filename for split in fixed.values() for sample in split]
+    if len(assigned_names) != len(set(assigned_names)):
+        raise ValueError("Existing split manifests assign a filename more than once")
+
+    groups = group_samples(samples)
+    fixed_by_name = {sample.filename: name for name, split in fixed.items() for sample in split}
+    new_groups: list[list[Sample]] = []
+    for group in groups:
+        group_splits = {fixed_by_name[sample.filename] for sample in group if sample.filename in fixed_by_name}
+        if len(group_splits) > 1:
+            raise ValueError(f"Existing manifests split one capture group across multiple splits: {group[0].image_number}")
+        if not group_splits:
+            new_groups.append(group)
+        else:
+            split_name = next(iter(group_splits))
+            fixed[split_name].extend(sample for sample in group if sample.filename not in fixed_by_name)
+
+    if new_groups:
+        return _assign_groups(new_groups, fixed, seed), True
+    return {name: sorted(split, key=lambda sample: (sample.image_number, sample.filename)) for name, split in fixed.items()}, True
 
 
 def validate_images(samples: list[Sample]) -> list[str]:
@@ -155,6 +238,61 @@ def write_csv(path: Path, samples: list[Sample]) -> None:
         writer = csv.writer(handle)
         writer.writerow(["filename", "waviness"])
         writer.writerows((sample.filename, f"{sample.waviness:.2f}") for sample in samples)
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def unique_snapshot_path() -> tuple[str, Path]:
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    snapshot_path = SNAPSHOT_DIR / timestamp
+    suffix = 1
+    while snapshot_path.exists():
+        snapshot_path = SNAPSHOT_DIR / f"{timestamp}_{suffix}"
+        suffix += 1
+    snapshot_path.mkdir()
+    return snapshot_path.name, snapshot_path
+
+
+def write_snapshot(splits: dict[str, list[Sample]], seed: int, incremental: bool, summary: str) -> Path:
+    snapshot_name, snapshot_path = unique_snapshot_path()
+    files: dict[str, dict[str, object]] = {}
+    for name in SPLIT_NAMES:
+        snapshot_csv = snapshot_path / f"{name}.csv"
+        write_csv(snapshot_csv, splits[name])
+        files[name] = {
+            "path": str(snapshot_csv.relative_to(OUTPUT_DIR)),
+            "sha256": file_sha256(snapshot_csv),
+            "count": len(splits[name]),
+        }
+
+    metadata = {
+        "schema_version": 1,
+        "snapshot": snapshot_name,
+        "created_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "seed": seed,
+        "mode": "append-existing" if incremental else "initial",
+        "labels_sha256": file_sha256(LABELS_PATH),
+        "files": files,
+    }
+    metadata_path = snapshot_path / "manifest.json"
+    metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    (snapshot_path / "summary.txt").write_text(summary, encoding="utf-8")
+    return metadata_path
+
+
+def ensure_benchmark_v1(test_samples: list[Sample]) -> None:
+    """Create the first benchmark once; never alter it on later data-ingestion runs."""
+    if BENCHMARK_TEST_PATH.exists():
+        return
+    BENCHMARK_DIR.mkdir(parents=True, exist_ok=True)
+    write_csv(BENCHMARK_TEST_PATH, test_samples)
 
 
 def check_splits(splits: dict[str, list[Sample]], groups: list[list[Sample]], samples: list[Sample]) -> None:
@@ -192,8 +330,8 @@ def main() -> int:
     parser.add_argument(
         "--seed",
         type=int,
-        default=None,
-        help="optional seed for repeatable split generation; unset uses system randomness",
+        default=DEFAULT_SEED,
+        help=f"seed for repeatable split generation (default: {DEFAULT_SEED})",
     )
     args = parser.parse_args()
     try:
@@ -201,14 +339,23 @@ def main() -> int:
         if not IMAGE_DIR.is_dir():
             raise FileNotFoundError(f"processed image directory not found: {IMAGE_DIR}")
         validate_images(samples)
+        samples_by_name = {sample.filename: sample for sample in samples}
+        existing_test = OUTPUT_DIR / "test.csv"
+        if not BENCHMARK_TEST_PATH.exists() and existing_test.exists():
+            ensure_benchmark_v1(read_split_csv(existing_test, samples_by_name))
+        splits, incremental = load_or_create_incremental_splits(samples, seed=args.seed)
         groups = group_samples(samples)
-        splits = make_splits(groups, seed=args.seed)
         check_splits(splits, groups, samples)
         OUTPUT_DIR.mkdir(exist_ok=True)
         for name in SPLIT_NAMES:
             write_csv(OUTPUT_DIR / f"{name}.csv", splits[name])
         text = summary_text(splits, groups, len(samples))
-        (OUTPUT_DIR / "summary.txt").write_text(text, encoding="utf-8")
+        snapshot_metadata = write_snapshot(splits, args.seed, incremental, text)
+        ensure_benchmark_v1(splits["test"])
+        print(f"Split seed: {args.seed}")
+        print(f"Split mode: {'append-existing' if incremental else 'initial'}")
+        print(f"Immutable snapshot: {snapshot_metadata}")
+        print(f"Benchmark v1: {BENCHMARK_TEST_PATH}")
         print("\n" + text)
         return 0
     except (ValueError, FileNotFoundError, RuntimeError) as error:
