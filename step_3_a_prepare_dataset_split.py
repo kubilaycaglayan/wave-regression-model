@@ -1,4 +1,4 @@
-"""Validate labels and create deterministic, group-aware dataset manifests."""
+"""Validate labels and create deterministic dataset split manifests."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import argparse
 import hashlib
 import json
 import random
-import re
 import sys
 from datetime import datetime, timezone
 from collections import Counter
@@ -21,10 +20,8 @@ OUTPUT_DIR = Path("step-3-dataset-splits")
 SNAPSHOT_DIR = OUTPUT_DIR / "snapshots"
 BENCHMARK_DIR = OUTPUT_DIR / "benchmarks"
 BENCHMARK_TEST_PATH = BENCHMARK_DIR / "benchmark-v1-test.csv"
-MAX_GROUP_GAP = 5
 SPLIT_NAMES = ("train", "validation", "test")
 TARGET_FRACTIONS = {"train": 0.70, "validation": 0.15, "test": 0.15}
-IMG_NUMBER_RE = re.compile(r"IMG[_-](\d+)", re.IGNORECASE)
 BIN_NAMES = ("0.00-0.19", "0.20-0.39", "0.40-0.59", "0.60-0.79", "0.80-1.00")
 DEFAULT_SEED = 42
 
@@ -33,7 +30,6 @@ DEFAULT_SEED = 42
 class Sample:
     filename: str
     waviness: float
-    image_number: int
 
 
 def waviness_bin(value: float) -> int:
@@ -76,11 +72,7 @@ def read_labels() -> list[Sample]:
                 if not 0.0 <= value <= 1.0:
                     errors.append(f"row {row_number}: waviness is outside [0.0, 1.0]: {value}")
                     continue
-                match = IMG_NUMBER_RE.search(Path(filename).stem)
-                if not match:
-                    errors.append(f"row {row_number}: no IMG number found in filename: {filename}")
-                    continue
-                samples.append(Sample(filename, value, int(match.group(1))))
+                samples.append(Sample(filename, value))
     except FileNotFoundError:
         errors.append(f"labels file not found: {LABELS_PATH}")
 
@@ -90,13 +82,8 @@ def read_labels() -> list[Sample]:
 
 
 def group_samples(samples: list[Sample]) -> list[list[Sample]]:
-    ordered = sorted(samples, key=lambda sample: (sample.image_number, sample.filename))
-    groups: list[list[Sample]] = []
-    for sample in ordered:
-        if not groups or sample.image_number - groups[-1][-1].image_number > MAX_GROUP_GAP:
-            groups.append([])
-        groups[-1].append(sample)
-    return groups
+    """Treat every independently collected image as its own split group."""
+    return [[sample] for sample in sorted(samples, key=lambda sample: sample.filename)]
 
 
 def split_score(splits: dict[str, list[Sample]], total_bins: Counter[int], total: int) -> float:
@@ -146,7 +133,7 @@ def _assign_groups(
             best = (score, {name: list(candidate[name]) for name in SPLIT_NAMES})
 
     assert best is not None
-    return {name: sorted(best[1][name], key=lambda sample: (sample.image_number, sample.filename)) for name in SPLIT_NAMES}
+    return {name: sorted(best[1][name], key=lambda sample: sample.filename) for name in SPLIT_NAMES}
 
 
 def make_splits(groups: list[list[Sample]], seed: int = DEFAULT_SEED) -> dict[str, list[Sample]]:
@@ -204,7 +191,7 @@ def load_or_create_incremental_splits(samples: list[Sample], seed: int) -> tuple
     for group in groups:
         group_splits = {fixed_by_name[sample.filename] for sample in group if sample.filename in fixed_by_name}
         if len(group_splits) > 1:
-            raise ValueError(f"Existing manifests split one capture group across multiple splits: {group[0].image_number}")
+            raise ValueError(f"Existing manifests split one image group across multiple splits: {group[0].filename}")
         if not group_splits:
             new_groups.append(group)
         else:
@@ -213,7 +200,7 @@ def load_or_create_incremental_splits(samples: list[Sample], seed: int) -> tuple
 
     if new_groups:
         return _assign_groups(new_groups, fixed, seed), True
-    return {name: sorted(split, key=lambda sample: (sample.image_number, sample.filename)) for name, split in fixed.items()}, True
+    return {name: sorted(split, key=lambda sample: sample.filename) for name, split in fixed.items()}, True
 
 
 def validate_images(samples: list[Sample]) -> list[str]:
@@ -306,7 +293,7 @@ def check_splits(splits: dict[str, list[Sample]], groups: list[list[Sample]], sa
 
 
 def summary_text(splits: dict[str, list[Sample]], groups: list[list[Sample]], total: int) -> str:
-    lines = [f"total labeled samples: {total}", f"number of groups/sessions: {len(groups)}", ""]
+    lines = [f"total labeled samples: {total}", f"number of independent groups: {len(groups)}", ""]
     group_lookup = {sample.filename: index + 1 for index, group in enumerate(groups) for sample in group}
     for name in SPLIT_NAMES:
         values = [sample.waviness for sample in splits[name]]
@@ -321,7 +308,7 @@ def summary_text(splits: dict[str, list[Sample]], groups: list[list[Sample]], to
         ]
     lines.append("group membership:")
     for index, group in enumerate(groups, start=1):
-        lines.append(f"  group {index} (IMG {group[0].image_number}-{group[-1].image_number}): " + ", ".join(sample.filename for sample in group))
+        lines.append(f"  group {index}: " + ", ".join(sample.filename for sample in group))
     return "\n".join(lines).rstrip() + "\n"
 
 
