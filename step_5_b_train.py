@@ -23,7 +23,7 @@ LEARNING_RATE = 1e-3
 BATCH_SIZE = 8
 MAX_EPOCHS = 100
 EARLY_STOPPING_PATIENCE = 10
-CHECKPOINT_DIR = Path("step-5-checkpoints-bn-frozen-seed42")
+CHECKPOINT_DIR = Path("step-5-checkpoints")
 
 
 def parameter_counts(model: torch.nn.Module) -> tuple[int, int, int]:
