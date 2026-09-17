@@ -26,3 +26,5 @@ AUDIT_RESULTS.md
 README_RUN.md
 TODO
 .env
+water-mask-preview/*
+*.jpg
