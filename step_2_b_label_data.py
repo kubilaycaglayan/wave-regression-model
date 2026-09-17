@@ -10,6 +10,7 @@ import os
 import tempfile
 import threading
 import time
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,6 +20,7 @@ from urllib.parse import unquote, urlparse
 PROJECT_DIR = Path(__file__).resolve().parent
 IMAGE_DIR = PROJECT_DIR / "step-2-final-water-data"
 LABELS_PATH = PROJECT_DIR / "labels.csv"
+DISCARDED_PATH = PROJECT_DIR / "discarded_images.csv"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 LABELS_LOCK = threading.Lock()
 
@@ -58,6 +60,7 @@ PAGE = r'''<!doctype html>
     .range-label { color:var(--muted); font-size:13px; }
     .actions { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; margin-top:20px; }
     .actions .right { display:flex; gap:8px; }
+    button.danger { color:#9b2c2c; border-color:#e5a7a7; }
     .hint { color:var(--muted); font-size:13px; margin-top:14px; }
     .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:14px; }
     .tile { background:white; border:1px solid var(--line); border-radius:9px; padding:9px; text-align:left; cursor:pointer; }
@@ -75,7 +78,7 @@ PAGE = r'''<!doctype html>
   <main>
     <section id="labeling" class="view active">
       <div class="toolbar"><label for="sort">Order <select id="sort"><option value="unlabeled">Unlabeled first</option><option value="high">Waviness: highest to lowest</option><option value="low">Waviness: lowest to highest</option><option value="filename">Filename</option></select></label><span id="position" class="status"></span></div>
-      <div class="label-card"><div class="image-wrap"><img id="main-image" alt="Processed sea image"></div><div class="image-meta"><span id="filename" class="filename"></span><span id="label-status" class="status"></span></div><div class="slider-row"><span class="range-label">0.00</span><input id="slider" type="range" min="0" max="1" step="0.05" value="0.50"><span id="value" class="value">0.50</span></div><div class="actions"><button id="previous">Previous</button><div class="right"><button id="skip">Skip</button><button id="save" class="primary">Save &amp; Next</button></div></div><div class="hint">Keyboard: 1–9 = 0.10–0.90 · 0 = 1.00 · ←/→ adjust by 0.05 · Enter save &amp; next · S skip · P previous</div></div>
+      <div class="label-card"><div class="image-wrap"><img id="main-image" alt="Processed sea image"></div><div class="image-meta"><span id="filename" class="filename"></span><span id="label-status" class="status"></span></div><div class="slider-row"><span class="range-label">0.00</span><input id="slider" type="range" min="0" max="1" step="0.05" value="0.50"><span id="value" class="value">0.50</span></div><div class="actions"><button id="previous">Previous</button><div class="right"><button id="skip">Skip</button><button id="discard" class="danger">Discard</button><button id="save" class="primary">Save &amp; Next</button></div></div><div class="hint">Keyboard: 1–9 = 0.10–0.90 · 0 = 1.00 · ←/→ adjust by 0.05 · Enter save &amp; next · S skip · D discard · P previous</div></div>
     </section>
     <section id="review" class="view"><div class="toolbar"><h2>Labeled images</h2><label for="review-sort">Order <select id="review-sort"><option value="high">Highest to lowest</option><option value="low">Lowest to highest</option></select></label></div><div id="gallery" class="gallery"></div></section>
   </main>
@@ -104,8 +107,9 @@ PAGE = r'''<!doctype html>
     function showView(view) { document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id===view)); document.querySelectorAll('.tab').forEach(el=>el.classList.toggle('active',el.dataset.view===view)); if(view==='review') renderGallery(); }
     async function reload() { const data=await fetch('/api/data').then(r=>r.json()); state.images=data.images; state.labels=data.labels; updateStats(); renderMain(); renderGallery(); }
     async function save() { const name=state.ordered[state.index]; if(!name)return; const waviness=Number($('slider').value).toFixed(2); const response=await fetch('/api/labels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:name,waviness})}); if(!response.ok){let detail='Could not save label.'; try { const body=await response.json(); if(body.error) detail=body.error; } catch (_) {} alert(detail);return;} const nextUnlabeled=state.images.find(n=>state.labels[n]===undefined && n!==name); await reload(); if(nextUnlabeled && state.sort==='unlabeled') state.index=state.ordered.indexOf(nextUnlabeled); else state.index=Math.min(state.index+1,state.ordered.length-1); renderMain(); }
-    $('slider').oninput=()=> $('value').textContent=scoreText($('slider').value); $('sort').onchange=()=>{state.sort=$('sort').value;state.index=0;renderMain();}; $('review-sort').onchange=renderGallery; $('save').onclick=save; $('skip').onclick=()=>{state.index=Math.min(state.index+1,state.ordered.length-1);renderMain();}; $('previous').onclick=()=>{state.index=Math.max(state.index-1,0);renderMain();}; document.querySelectorAll('.tab').forEach(el=>el.onclick=()=>showView(el.dataset.view));
-    document.addEventListener('keydown', e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return; if(!document.getElementById('labeling').classList.contains('active'))return; if(/^[0-9]$/.test(e.key)){e.preventDefault();$('slider').value=e.key==='0'?1:Number(e.key)/10;$('value').textContent=scoreText($('slider').value);} else if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();$('slider').value=Math.max(0,Math.min(1,Number($('slider').value)+(e.key==='ArrowRight'?0.05:-0.05)));$('value').textContent=scoreText($('slider').value);} else if(e.key==='Enter')save(); else if(e.key.toLowerCase()==='s'){$('skip').click();} else if(e.key.toLowerCase()==='p'){$('previous').click();}});
+    async function discard() { const name=state.ordered[state.index]; if(!name)return; if(!confirm(`Discard ${name}? It will be excluded from labeling, training, and evaluation.`))return; const reason=prompt('Optional discard reason:', ''); const response=await fetch('/api/discard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:name,reason:reason||''})}); if(!response.ok){let detail='Could not discard image.'; try { const body=await response.json(); if(body.error) detail=body.error; } catch (_) {} alert(detail);return;} await reload(); state.index=Math.min(state.index,state.ordered.length-1); renderMain(); }
+    $('slider').oninput=()=> $('value').textContent=scoreText($('slider').value); $('sort').onchange=()=>{state.sort=$('sort').value;state.index=0;renderMain();}; $('review-sort').onchange=renderGallery; $('save').onclick=save; $('discard').onclick=discard; $('skip').onclick=()=>{state.index=Math.min(state.index+1,state.ordered.length-1);renderMain();}; $('previous').onclick=()=>{state.index=Math.max(state.index-1,0);renderMain();}; document.querySelectorAll('.tab').forEach(el=>el.onclick=()=>showView(el.dataset.view));
+    document.addEventListener('keydown', e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return; if(!document.getElementById('labeling').classList.contains('active'))return; if(/^[0-9]$/.test(e.key)){e.preventDefault();$('slider').value=e.key==='0'?1:Number(e.key)/10;$('value').textContent=scoreText($('slider').value);} else if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();$('slider').value=Math.max(0,Math.min(1,Number($('slider').value)+(e.key==='ArrowRight'?0.05:-0.05)));$('value').textContent=scoreText($('slider').value);} else if(e.key==='Enter')save(); else if(e.key.toLowerCase()==='s'){$('skip').click();} else if(e.key.toLowerCase()==='d'){$('discard').click();} else if(e.key.toLowerCase()==='p'){$('previous').click();}});
     reload().catch(()=>alert('Could not load labeling data.'));
   </script>
 </body>
@@ -114,12 +118,14 @@ PAGE = r'''<!doctype html>
 
 def image_names() -> list[str]:
     """Return only actual final pipeline outputs, excluding comparison files."""
+    discarded = read_discarded()
     return sorted(
         path.name for path in IMAGE_DIR.iterdir()
         if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
         and path.name.startswith("step-2_")
         and "original" not in path.stem.lower()
         and "overlay" not in path.stem.lower()
+        and path.name not in discarded
     ) if IMAGE_DIR.exists() else []
 
 
@@ -139,6 +145,42 @@ def read_labels() -> dict[str, float]:
     return result
 
 
+def read_discarded() -> set[str]:
+    if not DISCARDED_PATH.exists():
+        return set()
+    result: set[str] = set()
+    with DISCARDED_PATH.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            name = (row.get("filename") or "").strip()
+            if name:
+                result.add(name)
+    return result
+
+
+def write_discarded(filename: str, reason: str) -> None:
+    with LABELS_LOCK:
+        rows: dict[str, tuple[str, str]] = {}
+        if DISCARDED_PATH.exists():
+            with DISCARDED_PATH.open(newline="", encoding="utf-8") as handle:
+                for row in csv.DictReader(handle):
+                    name = (row.get("filename") or "").strip()
+                    if name:
+                        rows[name] = (row.get("reason") or "", row.get("discarded_at_utc") or "")
+        rows[filename] = (reason, datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+        fd, temporary = tempfile.mkstemp(prefix="discarded.", suffix=".csv", dir=DISCARDED_PATH.parent)
+        try:
+            with os.fdopen(fd, "w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["filename", "reason", "discarded_at_utc"])
+                for name in sorted(rows):
+                    writer.writerow([name, *rows[name]])
+                handle.flush(); os.fsync(handle.fileno())
+            os.replace(temporary, DISCARDED_PATH)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+
 def write_label(filename: str, waviness: float) -> None:
     with LABELS_LOCK:
         labels = read_labels()
@@ -153,6 +195,26 @@ def write_label(filename: str, waviness: float) -> None:
                     writer.writerow([name, f"{labels[name]:.2f}"])
                 handle.flush()
                 os.fsync(handle.fileno())
+            os.replace(temporary, LABELS_PATH)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+
+def remove_label(filename: str) -> None:
+    with LABELS_LOCK:
+        labels = read_labels()
+        if filename not in labels:
+            return
+        labels.pop(filename)
+        fd, temporary = tempfile.mkstemp(prefix="labels.", suffix=".csv", dir=LABELS_PATH.parent)
+        try:
+            with os.fdopen(fd, "w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["filename", "waviness"])
+                for name in sorted(labels):
+                    writer.writerow([name, f"{labels[name]:.2f}"])
+                handle.flush(); os.fsync(handle.fileno())
             os.replace(temporary, LABELS_PATH)
         finally:
             if os.path.exists(temporary):
@@ -188,10 +250,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
-        if urlparse(self.path).path != "/api/labels": self.send_error(HTTPStatus.NOT_FOUND); return
+        endpoint = urlparse(self.path).path
+        if endpoint not in {"/api/labels", "/api/discard"}: self.send_error(HTTPStatus.NOT_FOUND); return
         try:
             payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
-            filename = str(payload["filename"]); value = float(payload["waviness"])
+            filename = str(payload["filename"])
+            if endpoint == "/api/discard":
+                if filename not in image_names():
+                    raise ValueError
+                remove_label(filename)
+                write_discarded(filename, str(payload.get("reason", "")).strip())
+                self.send_json({"ok": True}); return
+            value = float(payload["waviness"])
             # Validate by integer step count with a tolerance; binary floating-point
             # representation makes values such as 0.35 / 0.05 slightly imprecise.
             step_count = round(value * 20)

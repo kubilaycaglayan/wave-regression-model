@@ -86,12 +86,23 @@ class WaveDataset(torch.utils.data.Dataset[tuple[torch.Tensor, torch.Tensor]]):
         if not self.split_csv.is_file():
             raise FileNotFoundError(f"Split manifest not found: {self.split_csv}")
         samples: list[tuple[str, float]] = []
+        discarded_path = self.image_dir.parent / "discarded_images.csv"
+        discarded: set[str] = set()
+        if discarded_path.is_file():
+            with discarded_path.open(newline="", encoding="utf-8") as discarded_handle:
+                discarded = {
+                    (row.get("filename") or "").strip()
+                    for row in csv.DictReader(discarded_handle)
+                    if (row.get("filename") or "").strip()
+                }
         with self.split_csv.open(newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle)
             if reader.fieldnames != ["filename", "waviness"]:
                 raise ValueError(f"{self.split_csv} must have header: filename,waviness")
             for row_number, row in enumerate(reader, start=2):
                 filename = (row.get("filename") or "").strip()
+                if filename in discarded:
+                    continue
                 try:
                     waviness = float(row["waviness"])
                 except (KeyError, TypeError, ValueError) as error:

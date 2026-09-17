@@ -15,6 +15,7 @@ from pathlib import Path
 
 
 LABELS_PATH = Path("labels.csv")
+DISCARDED_PATH = Path("discarded_images.csv")
 IMAGE_DIR = Path("step-2-final-water-data")
 OUTPUT_DIR = Path("step-3-dataset-splits")
 SNAPSHOT_DIR = OUTPUT_DIR / "snapshots"
@@ -30,6 +31,17 @@ DEFAULT_SEED = 42
 class Sample:
     filename: str
     waviness: float
+
+
+def read_discarded() -> set[str]:
+    if not DISCARDED_PATH.exists():
+        return set()
+    with DISCARDED_PATH.open(newline="", encoding="utf-8") as handle:
+        return {
+            (row.get("filename") or "").strip()
+            for row in csv.DictReader(handle)
+            if (row.get("filename") or "").strip()
+        }
 
 
 def waviness_bin(value: float) -> int:
@@ -48,6 +60,7 @@ def read_labels() -> list[Sample]:
     errors: list[str] = []
     samples: list[Sample] = []
     seen: set[str] = set()
+    discarded = read_discarded()
 
     try:
         with LABELS_PATH.open(newline="", encoding="utf-8-sig") as handle:
@@ -59,6 +72,8 @@ def read_labels() -> list[Sample]:
                 raw_value = (row.get("waviness") or "").strip()
                 if not filename:
                     errors.append(f"row {row_number}: filename is empty")
+                    continue
+                if filename in discarded:
                     continue
                 if filename in seen:
                     errors.append(f"row {row_number}: duplicate filename: {filename}")
@@ -141,7 +156,7 @@ def make_splits(groups: list[list[Sample]], seed: int = DEFAULT_SEED) -> dict[st
     return _assign_groups(groups, {name: [] for name in SPLIT_NAMES}, seed)
 
 
-def read_split_csv(path: Path, samples_by_name: dict[str, Sample]) -> list[Sample]:
+def read_split_csv(path: Path, samples_by_name: dict[str, Sample], discarded: set[str] | None = None) -> list[Sample]:
     if not path.is_file():
         raise FileNotFoundError(f"Existing split manifest not found: {path}")
     samples: list[Sample] = []
@@ -151,6 +166,8 @@ def read_split_csv(path: Path, samples_by_name: dict[str, Sample]) -> list[Sampl
             raise ValueError(f"{path} must have header: filename,waviness")
         for row_number, row in enumerate(reader, start=2):
             filename = (row.get("filename") or "").strip()
+            if filename in (discarded or set()):
+                continue
             if filename not in samples_by_name:
                 raise ValueError(f"{path}:{row_number}: filename is not present in the current labels.csv: {filename}")
             try:
@@ -169,7 +186,9 @@ def read_split_csv(path: Path, samples_by_name: dict[str, Sample]) -> list[Sampl
     return samples
 
 
-def load_or_create_incremental_splits(samples: list[Sample], seed: int) -> tuple[dict[str, list[Sample]], bool]:
+def load_or_create_incremental_splits(
+    samples: list[Sample], seed: int, discarded: set[str] | None = None
+) -> tuple[dict[str, list[Sample]], bool]:
     """Keep existing assignments fixed and assign only previously unseen groups."""
     samples_by_name = {sample.filename: sample for sample in samples}
     split_paths = {name: OUTPUT_DIR / f"{name}.csv" for name in SPLIT_NAMES}
@@ -180,7 +199,7 @@ def load_or_create_incremental_splits(samples: list[Sample], seed: int) -> tuple
         missing = ", ".join(name for name, present in existing.items() if not present)
         raise FileNotFoundError(f"Incremental split registry is incomplete; missing: {missing}")
 
-    fixed = {name: read_split_csv(path, samples_by_name) for name, path in split_paths.items()}
+    fixed = {name: read_split_csv(path, samples_by_name, discarded) for name, path in split_paths.items()}
     assigned_names = [sample.filename for split in fixed.values() for sample in split]
     if len(assigned_names) != len(set(assigned_names)):
         raise ValueError("Existing split manifests assign a filename more than once")
@@ -204,17 +223,21 @@ def load_or_create_incremental_splits(samples: list[Sample], seed: int) -> tuple
 
 
 def validate_images(samples: list[Sample]) -> list[str]:
+    discarded = read_discarded()
     processed = {
         path.name
         for path in IMAGE_DIR.iterdir()
         if path.is_file()
         and path.name.startswith("step-2_")
         and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+        and path.name not in discarded
     }
     labeled = {sample.filename for sample in samples}
     missing = sorted(labeled - processed)
     unlabeled = sorted(processed - labeled)
     print(f"Processed images without labels ({len(unlabeled)}): {', '.join(unlabeled) or 'none'}")
+    if discarded:
+        print(f"Discarded images excluded from splits ({len(discarded)}): {', '.join(sorted(discarded))}")
     if missing:
         raise FileNotFoundError("Labeled images missing from " + str(IMAGE_DIR) + ":\n" + "\n".join(f"- {name}" for name in missing))
     return sorted(labeled)
@@ -328,9 +351,10 @@ def main() -> int:
         validate_images(samples)
         samples_by_name = {sample.filename: sample for sample in samples}
         existing_test = OUTPUT_DIR / "test.csv"
+        discarded = read_discarded()
         if not BENCHMARK_TEST_PATH.exists() and existing_test.exists():
-            ensure_benchmark_v1(read_split_csv(existing_test, samples_by_name))
-        splits, incremental = load_or_create_incremental_splits(samples, seed=args.seed)
+            ensure_benchmark_v1(read_split_csv(existing_test, samples_by_name, discarded))
+        splits, incremental = load_or_create_incremental_splits(samples, seed=args.seed, discarded=discarded)
         groups = group_samples(samples)
         check_splits(splits, groups, samples)
         OUTPUT_DIR.mkdir(exist_ok=True)

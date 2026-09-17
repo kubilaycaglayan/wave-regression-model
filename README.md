@@ -69,3 +69,12 @@ image with the new result.
 ## Predict waviness
 
 Put HEIC, HEIF, JPEG, or PNG photos in `predict-holder/`, then run `python predict.py`; photos are predicted one by one and previews are saved in `step-7-inference-preview/`.
+
+## Discard unrelated or disrupted images
+
+Run the labeling app with `python step_2_b_label_data.py`. The labeling screen
+has a **Discard** button (and the `D` keyboard shortcut). A discard is recorded
+in `discarded_images.csv` with an optional reason and timestamp. Discarded
+images are removed from the labeling queue and excluded from dataset splits,
+training, validation, and test evaluation. If an image had a label already,
+that label is removed when the image is discarded.

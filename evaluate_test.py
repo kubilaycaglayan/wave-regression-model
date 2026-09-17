@@ -37,6 +37,7 @@ MODEL_VERSION = f"v{_MODEL_VERSION_MATCH.group(1)}"
 IMAGE_DIR = Path("step-2-final-water-data")
 TEST_CSV = Path("step-3-dataset-splits/benchmarks/benchmark-v1-test.csv")
 TRAIN_CSV = Path("step-3-dataset-splits/train.csv")
+DISCARDED_PATH = Path("discarded_images.csv")
 OUTPUT_DIR = Path("step-6-test-evaluation")
 PREDICTIONS_CSV = OUTPUT_DIR / "test_predictions.csv"
 SUMMARY_PATH = OUTPUT_DIR / f"summary_{MODEL_NAME}.txt"
@@ -50,12 +51,22 @@ def read_training_labels(path: Path) -> tuple[list[str], list[float]]:
 
     filenames: list[str] = []
     labels: list[float] = []
+    discarded: set[str] = set()
+    if DISCARDED_PATH.is_file():
+        with DISCARDED_PATH.open(newline="", encoding="utf-8") as discarded_handle:
+            discarded = {
+                (row.get("filename") or "").strip()
+                for row in csv.DictReader(discarded_handle)
+                if (row.get("filename") or "").strip()
+            }
     with path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         if reader.fieldnames != ["filename", "waviness"]:
             raise ValueError(f"{path} must have header: filename,waviness")
         for row_number, row in enumerate(reader, start=2):
             filename = (row.get("filename") or "").strip()
+            if filename in discarded:
+                continue
             try:
                 label = float(row["waviness"])
             except (KeyError, TypeError, ValueError) as error:
