@@ -29,6 +29,8 @@ BLACK_THRESHOLD = 12
 LOWER_WATER_FRACTION = 0.35
 MINIMUM_LOWER_RETENTION = 0.95
 BLACK_RATIO_BUCKET = 0.005
+CONSOLE_RED = "\033[31m"
+CONSOLE_RESET = "\033[0m"
 
 
 @dataclass(frozen=True)
@@ -303,7 +305,7 @@ def main() -> None:
             processed_output = preprocess_step_1_image(image, model)
             if processed_output is None:
                 skipped += 1
-                reason = "no reliable lower-water crop"
+                reason = f"{CONSOLE_RED}no reliable lower-water crop{CONSOLE_RESET}"
                 print(f"[{index}/{len(image_paths)}] " + diagnostic_line(
                     logical_name, black_ratio(image), None, None, None, None,
                     f"skipped: {reason}",
