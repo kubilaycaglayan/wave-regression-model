@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+import argparse
+import hashlib
 import html
 import math
 import re
@@ -33,25 +35,13 @@ if _MODEL_VERSION_MATCH is None:
     raise ValueError(f"Checkpoint filename does not contain a model version: {CHECKPOINT_PATH.name}")
 MODEL_VERSION = f"v{_MODEL_VERSION_MATCH.group(1)}"
 IMAGE_DIR = Path("step-2-final-water-data")
-TEST_CSV = Path("step-3-dataset-splits/test.csv")
+TEST_CSV = Path("step-3-dataset-splits/benchmarks/benchmark-v1-test.csv")
 TRAIN_CSV = Path("step-3-dataset-splits/train.csv")
 OUTPUT_DIR = Path("step-6-test-evaluation")
 PREDICTIONS_CSV = OUTPUT_DIR / "test_predictions.csv"
 SUMMARY_PATH = OUTPUT_DIR / f"summary_{MODEL_NAME}.txt"
 GALLERY_PATH = OUTPUT_DIR / "index.html"
 BATCH_SIZE = 1
-
-# The untouched test split recorded by Step 3. An explicit list catches accidental
-# split edits, additions, removals, duplication, or reordering before evaluation.
-EXPECTED_TEST_FILENAMES = (
-    "step-2_IMG_7238.jpg",
-    "step-2_IMG_7239.jpg",
-    "step-2_IMG_7240.jpg",
-    "step-2_IMG_7244.jpg",
-    "step-2_IMG_7321.jpg",
-    "step-2_IMG_7322.jpg",
-)
-
 
 def read_training_labels(path: Path) -> tuple[list[str], list[float]]:
     """Read filenames and labels needed for train-only constant baselines."""
@@ -202,6 +192,23 @@ def print_results(rows: list[dict[str, float | str]]) -> None:
 
 
 def main() -> None:
+    global TEST_CSV, OUTPUT_DIR, PREDICTIONS_CSV, SUMMARY_PATH, GALLERY_PATH
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--test-manifest",
+        type=Path,
+        default=TEST_CSV,
+        help="test CSV to evaluate (default: immutable benchmark-v1)",
+    )
+    args = parser.parse_args()
+    TEST_CSV = args.test_manifest
+    if TEST_CSV != Path("step-3-dataset-splits/benchmarks/benchmark-v1-test.csv"):
+        evaluation_name = TEST_CSV.stem
+        OUTPUT_DIR = Path("step-6-test-evaluation") / evaluation_name
+        PREDICTIONS_CSV = OUTPUT_DIR / "test_predictions.csv"
+        SUMMARY_PATH = OUTPUT_DIR / f"summary_{MODEL_NAME}.txt"
+        GALLERY_PATH = OUTPUT_DIR / "index.html"
+
     started = time.perf_counter()
     completed_outputs = (PREDICTIONS_CSV, SUMMARY_PATH, GALLERY_PATH)
     existing_outputs = [path for path in completed_outputs if path.exists()]
@@ -225,11 +232,6 @@ def main() -> None:
     train_filenames, train_labels = read_training_labels(TRAIN_CSV)
     test_dataset = WaveDataset(TEST_CSV, IMAGE_DIR, build_evaluation_transform())
     test_filenames = tuple(filename for filename, _ in test_dataset.samples)
-    if test_filenames != EXPECTED_TEST_FILENAMES:
-        raise RuntimeError(
-            "The test manifest does not exactly match the expected untouched 6-sample split. "
-            f"Expected {EXPECTED_TEST_FILENAMES}, got {test_filenames}"
-        )
     if len(test_filenames) != len(set(test_filenames)):
         raise RuntimeError("Duplicate filenames found in the test manifest")
     overlap = set(train_filenames).intersection(test_filenames)
@@ -300,6 +302,8 @@ def main() -> None:
                 f"model name: {MODEL_NAME}",
                 f"model version: {MODEL_VERSION}",
                 f"selected checkpoint path: {CHECKPOINT_PATH.resolve()}",
+                f"test manifest path: {TEST_CSV.resolve()}",
+                f"test manifest sha256: {hashlib.sha256(TEST_CSV.read_bytes()).hexdigest()}",
                 f"number of test samples: {len(test_dataset)}",
                 f"test MAE: {test_mae:.8f}",
                 f"test RMSE: {test_rmse:.8f}",

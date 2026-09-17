@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import time
 import re
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Install the repository's torchvision compatibility definition before
@@ -24,6 +26,7 @@ BATCH_SIZE = 8
 MAX_EPOCHS = 100
 EARLY_STOPPING_PATIENCE = 10
 CHECKPOINT_DIR = Path("step-5-checkpoints")
+SPLIT_SNAPSHOT_DIR = Path("step-3-dataset-splits/snapshots")
 
 
 def parameter_counts(model: torch.nn.Module) -> tuple[int, int, int]:
@@ -44,6 +47,15 @@ def next_run_version(directory: Path) -> str:
         for path in directory.iterdir():
             versions.extend(int(value) for value in re.findall(r"(?:^|[-_])v(\d+)(?:[-_.]|$)", path.name))
     return f"v{max(versions, default=0) + 1}"
+
+
+def latest_split_snapshot() -> Path:
+    snapshots = sorted(path for path in SPLIT_SNAPSHOT_DIR.iterdir() if path.is_dir()) if SPLIT_SNAPSHOT_DIR.is_dir() else []
+    if not snapshots:
+        raise FileNotFoundError(
+            f"No split snapshots found in {SPLIT_SNAPSHOT_DIR}; run step_3_a_prepare_dataset_split.py first"
+        )
+    return snapshots[-1]
 
 
 def make_cuda_usable_if_needed() -> None:
@@ -68,6 +80,7 @@ def write_summary(
     seed: int | None,
     run_version: str,
     epochs_trained: int,
+    split_snapshot: Path,
 ) -> Path:
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     best_mae = best_metrics["val_mae"]
@@ -88,6 +101,7 @@ def write_summary(
                 f"max epochs: {MAX_EPOCHS}",
                 f"early stopping: monitor=val_mae, mode=min, patience={EARLY_STOPPING_PATIENCE}",
                 f"random seed: {seed if seed is not None else 'system randomness'}",
+                f"split snapshot: {split_snapshot}",
                 f"best validation MAE: {float(best_mae) if best_mae is not None else 'unavailable'}",
                 f"best validation RMSE: {float(best_rmse) if best_rmse is not None else 'unavailable'}",
                 f"best checkpoint path: {checkpoint.best_model_path}",
@@ -103,6 +117,30 @@ def write_summary(
         + "\n",
         encoding="utf-8",
     )
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    manifest_path = CHECKPOINT_DIR / f"training_manifest_{timestamp}.json"
+    while manifest_path.exists():
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        manifest_path = CHECKPOINT_DIR / f"training_manifest_{timestamp}.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "created_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "run_version": run_version,
+                "random_seed": seed,
+                "split_snapshot": str(split_snapshot),
+                "best_checkpoint_path": str(checkpoint.best_model_path),
+                "best_validation_mae": float(best_mae) if best_mae is not None else None,
+                "best_validation_rmse": float(best_rmse) if best_rmse is not None else None,
+                "epochs_trained": epochs_trained,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"Training manifest: {manifest_path}")
     return summary_path
 
 
@@ -113,6 +151,8 @@ def main() -> None:
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     run_version = next_run_version(CHECKPOINT_DIR)
     print(f"Run version: {run_version}")
+    split_snapshot = latest_split_snapshot()
+    print(f"Split snapshot: {split_snapshot}")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using accelerator: {device}")
     make_cuda_usable_if_needed()
@@ -180,6 +220,7 @@ def main() -> None:
         RANDOM_SEED,
         run_version,
         epochs_trained,
+        split_snapshot,
     )
     print(f"Best validation MAE: {best_metrics['val_mae']:.6f}")
     print(f"Best validation RMSE: {best_metrics['val_rmse']:.6f}")
