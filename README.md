@@ -68,7 +68,7 @@ image with the new result.
 
 ## Predict waviness
 
-Put HEIC, HEIF, JPEG, or PNG photos in `predict-holder/`, then run `python predict.py`; photos are predicted one by one and previews are saved in `step-7-inference-preview/`.
+Put HEIC, HEIF, JPEG, or PNG photos in `predict-holder/`, then run `python step_7_a_predict.py`; photos are predicted one by one and previews are saved in `step-7-inference-preview/`.
 
 Configure the validation-selected checkpoint in `.env`:
 
