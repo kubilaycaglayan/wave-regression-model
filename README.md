@@ -70,6 +70,12 @@ image with the new result.
 
 Put HEIC, HEIF, JPEG, or PNG photos in `predict-holder/`, then run `python predict.py`; photos are predicted one by one and previews are saved in `step-7-inference-preview/`.
 
+Configure the validation-selected checkpoint in `.env`:
+
+```dotenv
+CHECKPOINT_PATH=step-5-checkpoints/wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt
+```
+
 ## Discard unrelated or disrupted images
 
 Run the labeling app with `python step_2_b_label_data.py`. The labeling screen

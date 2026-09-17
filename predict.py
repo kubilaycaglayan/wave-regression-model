@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -29,11 +30,31 @@ from step_5_a_wave_regression_model import WaveRegressionModel
 
 PROJECT_DIR = Path(__file__).resolve().parent
 INPUT_DIR = PROJECT_DIR / "predict-holder"
-# Validation-selected original baseline; keep this choice independent of Step 6 outputs.
-CHECKPOINT_PATH = PROJECT_DIR / (
-    "step-5-checkpoints/"
-    "wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt"
-)
+
+
+def checkpoint_path_from_env() -> Path:
+    """Read the prediction checkpoint path from the environment or repository .env."""
+    configured_path = os.getenv("CHECKPOINT_PATH")
+    if configured_path is None:
+        dotenv_path = PROJECT_DIR / ".env"
+        if dotenv_path.is_file():
+            for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                key, separator, value = line.partition("=")
+                if separator and key.strip() == "CHECKPOINT_PATH":
+                    configured_path = value.strip().strip("\"'")
+                    break
+
+    if not configured_path:
+        raise RuntimeError("CHECKPOINT_PATH is not configured; add it to .env or the environment")
+
+    path = Path(configured_path).expanduser()
+    return path if path.is_absolute() else PROJECT_DIR / path
+
+
+CHECKPOINT_PATH = checkpoint_path_from_env()
 PREVIEW_DIR = PROJECT_DIR / "step-7-inference-preview"
 SUPPORTED_EXTENSIONS = {".heic", ".heif", ".jpg", ".jpeg", ".png"}
 
