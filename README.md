@@ -12,6 +12,18 @@ pip install -r requirements.txt
 python step_1_a_prepare_water_masks.py
 ```
 
+Step 1 always includes `step-0-raw-data/`. Add more raw-image directories in
+`.env` by repeating the singular `DATA_PATH` entry:
+
+```dotenv
+DATA_PATH=/path/to/camera/archive
+DATA_PATH=/path/to/another/archive
+```
+
+Directories are searched recursively, including nested folders. Each
+`DATA_PATH` value may also contain multiple paths separated by the platform
+path separator.
+
 The pipeline folders are `step-0-raw-data/`, `step-1-processed-data/`, and
 `step-2-final-water-data/`. Step outputs use namespaced filenames such as
 `step-1_<original-name>` and `step-2_<original-name>`. Preview files and gallery

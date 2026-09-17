@@ -6,6 +6,7 @@ predict-holder/*
 # Input images and previews that may reveal the user's location or surroundings.
 **/*_original.*
 **/*_overlay.*
+**/.source-manifest.json
 
 # Local Python bytecode.
 __pycache__/

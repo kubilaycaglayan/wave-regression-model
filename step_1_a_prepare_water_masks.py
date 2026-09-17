@@ -10,6 +10,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from data_sources import SourceOutputNames, configured_source_directories
+
 from step_1_a_water_segmentation import extract_water_mask, iter_images, load_model, load_rgb_image, run_segmentation
 
 OVERLAY_COLOR = np.array([0, 190, 255], dtype=np.uint8)
@@ -23,8 +25,8 @@ def make_overlay(image: Image.Image, water_mask: np.ndarray) -> Image.Image:
     return Image.fromarray(output, mode="RGB")
 
 
-def save_preview(image: Image.Image, water_mask: np.ndarray, source_path: Path, output_dir: Path) -> tuple[Path, Path]:
-    stem = source_path.stem
+def save_preview(image: Image.Image, water_mask: np.ndarray, source_path: Path, output_dir: Path, names: SourceOutputNames | None = None) -> tuple[Path, Path]:
+    stem = names.stem_for(source_path) if names else source_path.stem
     original_path = output_dir / f"{stem}_original.jpg"
     overlay_path = output_dir / f"{stem}_overlay.jpg"
     image.save(original_path, quality=92)
@@ -33,9 +35,9 @@ def save_preview(image: Image.Image, water_mask: np.ndarray, source_path: Path, 
     return original_path, overlay_path
 
 
-def preview_paths(source_path: Path, output_dir: Path) -> tuple[Path, Path, Path]:
+def preview_paths(source_path: Path, output_dir: Path, names: SourceOutputNames | None = None) -> tuple[Path, Path, Path]:
     """Return the three files that make a preview complete."""
-    stem = source_path.stem
+    stem = names.stem_for(source_path) if names else source_path.stem
     return (
         output_dir / f"{stem}_original.jpg",
         output_dir / f"{stem}_mask.png",
@@ -58,22 +60,26 @@ def write_gallery(entries: list[tuple[str, Path, Path]], output_dir: Path) -> No
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input-dir", type=Path, default=Path("step-0-raw-data"))
+    parser.add_argument("--input-dir", type=Path, action="append", help="Additional input directory; repeatable")
     parser.add_argument("--output-dir", type=Path, default=Path("water-mask-preview"))
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    image_paths = iter_images(args.input_dir)
+    source_dirs = configured_source_directories()
+    if args.input_dir:
+        source_dirs.extend(args.input_dir)
+    image_paths = iter_images(source_dirs)
     if not image_paths:
-        raise SystemExit(f"No supported images found in {args.input_dir}")
+        raise SystemExit(f"No supported images found in: {', '.join(str(path) for path in source_dirs)}")
     model = None
+    names = SourceOutputNames(image_paths, args.output_dir, ("_original.jpg", "_mask.png", "_overlay.jpg"))
     entries = []
     already_present = 0
     processing_seconds = 0.0
     for index, source_path in enumerate(image_paths, 1):
         image_started = time.perf_counter()
         try:
-            original_path, mask_path, overlay_path = preview_paths(source_path, args.output_dir)
+            original_path, mask_path, overlay_path = preview_paths(source_path, args.output_dir, names)
             if original_path.exists() and mask_path.exists() and overlay_path.exists():
                 print(f"[{index}/{len(image_paths)}] {source_path.name}: skipped (preview already exists)")
                 entries.append((source_path.name, original_path, overlay_path))
@@ -83,7 +89,7 @@ def main() -> None:
                 model = load_model(args.device)
             image = load_rgb_image(source_path)
             mask = extract_water_mask(run_segmentation(image, model), model.water_class_ids)
-            original, overlay = save_preview(image, mask, source_path, args.output_dir)
+            original, overlay = save_preview(image, mask, source_path, args.output_dir, names)
             elapsed = time.perf_counter() - image_started
             processing_seconds += elapsed
             print(f"[{index}/{len(image_paths)}] {source_path.name}: water={mask.mean() * 100:.1f}% ({elapsed:.3f}s)")
@@ -93,6 +99,7 @@ def main() -> None:
             processing_seconds += elapsed
             print(f"[{index}/{len(image_paths)}] {source_path.name}: ERROR: {error} ({elapsed:.3f}s)")
     write_gallery(entries, args.output_dir)
+    names.save()
     print(f"Generated: {len(entries) - already_present}")
     print(f"Already present: {already_present}")
     print(f"Processing time: {processing_seconds:.3f}s")

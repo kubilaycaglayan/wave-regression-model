@@ -14,6 +14,8 @@ from urllib.parse import quote
 import numpy as np
 from PIL import Image, ImageFilter
 
+from data_sources import SourceOutputNames, configured_source_directories
+
 from step_1_a_water_segmentation import (
     SegmentationModel,
     extract_water_mask,
@@ -104,29 +106,34 @@ def write_gallery(entries: list[tuple[str, Path, Path]], output_dir: Path) -> No
     (output_dir / "index.html").write_text(text, encoding="utf-8")
 
 
-def processed_paths(source_path: Path, output_dir: Path) -> Path:
+def processed_paths(source_path: Path, output_dir: Path, names: SourceOutputNames | None = None) -> Path:
     """Return the standardized output path; source images stay in the input step."""
-    return output_dir / f"step-1_{source_path.stem}.jpg"
+    stem = names.stem_for(source_path) if names else source_path.stem
+    return output_dir / f"step-1_{stem}.jpg"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input-dir", type=Path, default=Path("step-0-raw-data"))
+    parser.add_argument("--input-dir", type=Path, action="append", help="Additional input directory; repeatable")
     parser.add_argument("--output-dir", type=Path, default=Path("step-1-processed-data"))
     parser.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    image_paths = iter_images(args.input_dir)
+    source_dirs = configured_source_directories()
+    if args.input_dir:
+        source_dirs.extend(args.input_dir)
+    image_paths = iter_images(source_dirs)
     if not image_paths:
-        raise SystemExit(f"No supported images found in {args.input_dir}")
+        raise SystemExit(f"No supported images found in: {', '.join(str(path) for path in source_dirs)}")
     model = None
+    names = SourceOutputNames(image_paths, args.output_dir, (".jpg",))
     entries, skipped = [], []
     already_present = 0
     processing_seconds = 0.0
     for index, source_path in enumerate(image_paths, 1):
         image_started = time.perf_counter()
         try:
-            standardized_path = processed_paths(source_path, args.output_dir)
+            standardized_path = processed_paths(source_path, args.output_dir, names)
             if standardized_path.exists():
                 print(f"[{index}/{len(image_paths)}] {source_path.name}: skipped (standardized input already exists)")
                 entries.append((source_path.name, source_path, standardized_path))
@@ -151,6 +158,7 @@ def main() -> None:
             print(f"[{index}/{len(image_paths)}] {source_path.name}: WARNING: {error}; skipped ({elapsed:.3f}s)")
             skipped.append(source_path.name)
     write_gallery(entries, args.output_dir)
+    names.save()
     print(f"Processed: {len(entries) - already_present}")
     print(f"Already present: {already_present}")
     print(f"Skipped: {len(skipped)}")

@@ -10,7 +10,8 @@ import numpy as np
 import torch
 from PIL import Image
 
-from image_loading import SUPPORTED_EXTENSIONS, load_rgb_image
+from image_loading import load_rgb_image
+from data_sources import iter_images
 
 _TORCHVISION_COMPAT_LIBRARY = None
 
@@ -102,10 +103,3 @@ def extract_water_mask(class_map: torch.Tensor, water_class_ids: Iterable[int]) 
     for class_id in water_class_ids:
         mask |= class_map == class_id
     return mask.numpy().astype(np.uint8)
-
-
-def iter_images(input_dir: Path) -> list[Path]:
-    return sorted(
-        (p for p in input_dir.iterdir() if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS),
-        key=lambda p: p.name.lower(),
-    )
