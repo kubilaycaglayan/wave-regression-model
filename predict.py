@@ -34,7 +34,7 @@ INPUT_DIR = PROJECT_DIR / "predict-holder"
 
 def checkpoint_path_from_env() -> Path:
     """Read the prediction checkpoint path from the environment or repository .env."""
-    configured_path = os.getenv("CHECKPOINT_PATH")
+    configured_path = os.getenv("PREDICT_CHECKPOINT_PATH")
     if configured_path is None:
         dotenv_path = PROJECT_DIR / ".env"
         if dotenv_path.is_file():
@@ -43,18 +43,18 @@ def checkpoint_path_from_env() -> Path:
                 if not line or line.startswith("#"):
                     continue
                 key, separator, value = line.partition("=")
-                if separator and key.strip() == "CHECKPOINT_PATH":
+                if separator and key.strip() == "PREDICT_CHECKPOINT_PATH":
                     configured_path = value.strip().strip("\"'")
                     break
 
     if not configured_path:
-        raise RuntimeError("CHECKPOINT_PATH is not configured; add it to .env or the environment")
+        raise RuntimeError("PREDICT_CHECKPOINT_PATH is not configured; add it to .env or the environment")
 
     path = Path(configured_path).expanduser()
     return path if path.is_absolute() else PROJECT_DIR / path
 
 
-CHECKPOINT_PATH = checkpoint_path_from_env()
+PREDICT_CHECKPOINT_PATH = checkpoint_path_from_env()
 PREVIEW_DIR = PROJECT_DIR / "step-7-inference-preview"
 SUPPORTED_EXTENSIONS = {".heic", ".heif", ".jpg", ".jpeg", ".png"}
 
@@ -176,8 +176,8 @@ def main() -> None:
         total_started = time.perf_counter()
         transformers_logging.disable_progress_bar()
         photos = find_input_photos()
-        if not CHECKPOINT_PATH.is_file():
-            raise FileNotFoundError(f"Selected checkpoint is missing: {CHECKPOINT_PATH}")
+        if not PREDICT_CHECKPOINT_PATH.is_file():
+            raise FileNotFoundError(f"Selected checkpoint is missing: {PREDICT_CHECKPOINT_PATH}")
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         pending_photos = [photo for photo in photos if not preview_path_for(photo).is_file()]
@@ -195,7 +195,7 @@ def main() -> None:
         print_timing("Load segmentation model", started)
 
         started = time.perf_counter()
-        model = WaveRegressionModel.load_from_checkpoint(CHECKPOINT_PATH, map_location=device)
+        model = WaveRegressionModel.load_from_checkpoint(PREDICT_CHECKPOINT_PATH, map_location=device)
         model.to(device)
         model.eval()
         print_timing("Load regression checkpoint", started)

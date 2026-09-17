@@ -73,7 +73,13 @@ Put HEIC, HEIF, JPEG, or PNG photos in `predict-holder/`, then run `python predi
 Configure the validation-selected checkpoint in `.env`:
 
 ```dotenv
-CHECKPOINT_PATH=step-5-checkpoints/wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt
+PREDICT_CHECKPOINT_PATH=step-5-checkpoints/wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt
+```
+
+Configure the checkpoint used by test evaluation separately:
+
+```dotenv
+EVALUATION_CHECKPOINT_PATH=step-5-checkpoints/wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt
 ```
 
 ## Discard unrelated or disrupted images
