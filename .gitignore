@@ -16,3 +16,4 @@ __pycache__/*
 step-4-data-preview/
 step-7-inference-preview/
 *.log
+.ckpt
