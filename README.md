@@ -29,6 +29,17 @@ The pipeline folders are `step-0-raw-data/`, `step-1-processed-data/`, and
 `step-1_<original-name>` and `step-2_<original-name>`. Preview files and gallery
 are written to `water-mask-preview/`.
 
+To rerun segmentation with changed settings while retaining the existing
+result for comparison, use:
+
+```bash
+python step_1_a_prepare_water_masks.py --skip-cache --keep-old
+```
+
+The gallery then shows the original image plus the previous and current
+processor overlays and masks side by side. Previous files use an `_old`
+suffix, and an existing comparison baseline is not overwritten on later runs.
+
 ## Create standardized model inputs
 
 ```bash
