@@ -63,6 +63,11 @@ def main() -> None:
     parser.add_argument("--input-dir", type=Path, action="append", help="Additional input directory; repeatable")
     parser.add_argument("--output-dir", type=Path, default=Path("water-mask-preview"))
     parser.add_argument("--device", default=None)
+    parser.add_argument(
+        "--skip-cache",
+        action="store_true",
+        help="Regenerate previews even when all preview files already exist",
+    )
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     source_dirs = configured_source_directories()
@@ -80,7 +85,7 @@ def main() -> None:
         image_started = time.perf_counter()
         try:
             original_path, mask_path, overlay_path = preview_paths(source_path, args.output_dir, names)
-            if original_path.exists() and mask_path.exists() and overlay_path.exists():
+            if not args.skip_cache and original_path.exists() and mask_path.exists() and overlay_path.exists():
                 print(f"[{index}/{len(image_paths)}] {source_path.name}: skipped (preview already exists)")
                 entries.append((source_path.name, original_path, overlay_path))
                 already_present += 1
