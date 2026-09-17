@@ -17,3 +17,11 @@ step-4-data-preview/
 step-7-inference-preview/
 *.log
 .ckpt
+
+step-1-processed-data/index.html
+step-3-dataset-splits/snapshots/*
+step-3-dataset-splits/benchmarks/*
+AUDIT_RESULTS.md
+README_RUN.md
+TODO
+.env
