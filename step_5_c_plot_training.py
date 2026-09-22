@@ -132,9 +132,10 @@ def plot_training_history(
     output_dir: Path,
     performance_monitor: str,
     early_stopping_monitor: str,
+    labeled_sample_count: int,
     config: PlotConfig = DEFAULT_PLOT_CONFIG,
-) -> dict[str, Path]:
-    """Save loss and monitor-selected performance plots from captured history."""
+) -> Path:
+    """Save one combined loss/performance figure from captured history."""
     if performance_monitor != early_stopping_monitor:
         raise RuntimeError(
             "Checkpoint and early-stopping monitor differ; refusing to plot an ambiguous performance metric: "
@@ -157,6 +158,8 @@ def plot_training_history(
         raise ValueError("PlotConfig.auto_zoom_margin_fraction cannot be negative")
     if config.auto_zoom_minimum_span <= 0.0:
         raise ValueError("PlotConfig.auto_zoom_minimum_span must be positive")
+    if labeled_sample_count <= 0:
+        raise ValueError("labeled_sample_count must be positive")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -167,19 +170,23 @@ def plot_training_history(
     except ImportError as error:
         raise RuntimeError("Plot generation requires matplotlib; install dependencies from requirements.txt") from error
 
-    def save_plot(
-        filename: str,
-        title: str,
-        ylabel: str,
-        train_key: str,
-        validation_key: str,
-    ) -> Path:
-        path = output_dir / filename
-        figure, axes = plt.subplots(1, 2, figsize=config.figure_size_inches, constrained_layout=True, squeeze=False)
-        axes = axes[0]
-        try:
-            train_values = [row[train_key] for row in history.rows]
-            validation_values = [row[validation_key] for row in history.rows]
+    train_loss_values = [row[LOSS_METRICS[0]] for row in history.rows]
+    validation_loss_values = [row[LOSS_METRICS[1]] for row in history.rows]
+    train_performance_values = [row[training_metric] for row in history.rows]
+    validation_performance_values = [row[validation_metric] for row in history.rows]
+    performance_name = performance_monitor.removeprefix("val_").upper()
+
+    figure, axes = plt.subplots(2, 2, figsize=(14.0, 10.0), constrained_layout=False)
+    try:
+        figure.subplots_adjust(left=0.07, right=0.98, bottom=0.12, top=0.90, wspace=0.25, hspace=0.32)
+
+        def render_panel(
+            axis: object,
+            train_values: list[float],
+            validation_values: list[float],
+            ylabel: str,
+            panel_title: str,
+        ) -> None:
             all_values = [*train_values, *validation_values]
             observed_min = min(all_values)
             observed_max = max(all_values)
@@ -190,42 +197,49 @@ def plot_training_history(
             zoom_max = min(config.y_axis_max, observed_max + zoom_margin)
             if zoom_min >= zoom_max:
                 zoom_min, zoom_max = config.y_axis_min, config.y_axis_max
+            is_zoom_panel = "Automatic zoom" in panel_title and config.auto_zoom_enabled
+            y_min = zoom_min if is_zoom_panel else config.y_axis_min
+            y_max = zoom_max if is_zoom_panel else config.y_axis_max
 
-            for axis, y_min, y_max, panel_title in (
-                (axes[0], config.y_axis_min, config.y_axis_max, "Configured scale"),
-                (axes[1], (zoom_min if config.auto_zoom_enabled else config.y_axis_min),
-                 (zoom_max if config.auto_zoom_enabled else config.y_axis_max), "Automatic zoom"),
-            ):
-                axis.plot(epochs, train_values, marker="o", label=f"Training {ylabel}")
-                axis.plot(epochs, validation_values, marker="o", label=f"Validation {ylabel}")
-                axis.set_title(panel_title)
-                axis.set_xlabel("Epoch")
-                axis.set_ylabel(ylabel)
-                axis.set_xlim(left=1)
-                axis.set_ylim(y_min, y_max)
-                axis.xaxis.set_major_locator(MaxNLocator(nbins=config.max_epoch_ticks, integer=True))
-                if config.y_axis_as_percentage:
-                    axis.yaxis.set_major_formatter(PercentFormatter(xmax=1.0))
-                axis.grid(True, alpha=0.3)
-                axis.legend()
-            figure.suptitle(f"{title} ({run_version})")
-            figure.savefig(path, dpi=config.dpi, format="png")
-        finally:
-            plt.close(figure)
-        return path
+            axis.plot(epochs, train_values, marker="o", label=f"Training {ylabel}")
+            axis.plot(epochs, validation_values, marker="o", label=f"Validation {ylabel}")
+            axis.set_title(panel_title)
+            axis.set_xlabel("Epoch")
+            axis.set_ylabel(ylabel)
+            axis.set_xlim(left=1)
+            axis.set_ylim(y_min, y_max)
+            axis.xaxis.set_major_locator(MaxNLocator(nbins=config.max_epoch_ticks, integer=True))
+            if config.y_axis_as_percentage:
+                axis.yaxis.set_major_formatter(PercentFormatter(xmax=1.0))
+            axis.grid(True, alpha=0.3)
+            axis.legend()
 
-    return {
-        "loss": save_plot(
-            f"training_loss_{run_version}.png",
-            "Training and validation loss by epoch",
-            "SmoothL1 loss",
-            *LOSS_METRICS,
-        ),
-        "performance": save_plot(
-            f"training_{performance_monitor}_{run_version}.png",
-            f"Training and validation {performance_monitor.removeprefix('val_').upper()} by epoch",
-            f"{performance_monitor.removeprefix('val_').upper()} (lower is better)",
-            training_metric,
-            validation_metric,
-        ),
-    }
+        render_panel(axes[0, 0], train_loss_values, validation_loss_values, "SmoothL1 loss", "Loss · Configured scale")
+        render_panel(axes[0, 1], train_loss_values, validation_loss_values, "SmoothL1 loss", "Loss · Automatic zoom")
+        render_panel(
+            axes[1, 0],
+            train_performance_values,
+            validation_performance_values,
+            f"{performance_name} (lower is better)",
+            f"{performance_name} · Configured scale",
+        )
+        render_panel(
+            axes[1, 1],
+            train_performance_values,
+            validation_performance_values,
+            f"{performance_name} (lower is better)",
+            f"{performance_name} · Automatic zoom",
+        )
+        figure.suptitle(f"Training metrics ({run_version})", fontsize=16)
+        figure.text(
+            0.5,
+            0.04,
+            f"Labeled samples used for training and validation: {labeled_sample_count:,}",
+            ha="center",
+            va="bottom",
+        )
+        path = output_dir / f"training_metrics_{run_version}.png"
+        figure.savefig(path, dpi=config.dpi, format="png")
+    finally:
+        plt.close(figure)
+    return path

@@ -89,8 +89,9 @@ def write_summary(
     epochs_trained: int,
     split_snapshot: Path,
     history_path: Path,
-    plot_paths: dict[str, Path],
+    plot_path: Path,
     performance_metric: str,
+    labeled_sample_count: int,
 ) -> Path:
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     best_mae = best_metrics["val_mae"]
@@ -120,8 +121,8 @@ def write_summary(
                 f"early stopping triggered: {early_stopping.stopped_epoch > 0}",
                 f"performance plot metric: {performance_metric}",
                 f"training history path: {history_path}",
-                f"loss plot path: {plot_paths['loss']}",
-                f"performance plot path: {plot_paths['performance']}",
+                f"combined plot path: {plot_path}",
+                f"labeled samples used for training and validation: {labeled_sample_count:,}",
                 f"total parameters: {parameter_counts(model)[0]}",
                 f"trainable parameters: {parameter_counts(model)[1]}",
                 f"frozen parameters: {parameter_counts(model)[2]}",
@@ -149,8 +150,9 @@ def write_summary(
                 "best_validation_rmse": float(best_rmse) if best_rmse is not None else None,
                 "epochs_trained": epochs_trained,
                 "training_history_path": str(history_path),
-                "plot_paths": {name: str(path) for name, path in plot_paths.items()},
+                "plot_path": str(plot_path),
                 "performance_metric": performance_metric,
+                "labeled_samples_used": labeled_sample_count,
             },
             indent=2,
         )
@@ -182,6 +184,10 @@ def main() -> None:
         raise RuntimeError("Expected a trainable regression head and a frozen ResNet backbone")
 
     data.setup("fit")
+    if data.train_dataset is None or data.val_dataset is None:
+        raise RuntimeError("Training and validation datasets were not initialized")
+    labeled_sample_count = len(data.train_dataset) + len(data.val_dataset)
+    print(f"Labeled samples used for training and validation: {labeled_sample_count:,}")
     model.train()
     frozen_backbone, trainable_head, batch_norm_modules = model.frozen_backbone_mode_checks()
     print(f"Frozen backbone parameters: {frozen_backbone:,}")
@@ -236,12 +242,13 @@ def main() -> None:
     trainer.fit(model, datamodule=data)
     epochs_trained = int(trainer.fit_loop.epoch_progress.current.completed)
     history_path = write_training_history(history, run_version, CHECKPOINT_DIR)
-    plot_paths = plot_training_history(
+    plot_path = plot_training_history(
         history,
         run_version,
         CHECKPOINT_DIR,
         performance_monitor,
         early_stopping.monitor,
+        labeled_sample_count,
     )
     performance_metric = f"{performance_monitor.removeprefix('val_').upper()} (lower is better)"
 
@@ -258,8 +265,9 @@ def main() -> None:
         epochs_trained,
         split_snapshot,
         history_path,
-        plot_paths,
+        plot_path,
         performance_metric,
+        labeled_sample_count,
     )
     print(f"Best validation MAE: {best_metrics['val_mae']:.6f}")
     print(f"Best validation RMSE: {best_metrics['val_rmse']:.6f}")
@@ -269,8 +277,7 @@ def main() -> None:
     print(f"Early stopping triggered: {early_stopping.stopped_epoch > 0}")
     print(f"Training summary: {summary_path}")
     print(f"Training history: {history_path}")
-    print(f"Training loss plot: {plot_paths['loss']}")
-    print(f"Training performance plot: {plot_paths['performance']}")
+    print(f"Training metrics plot: {plot_path}")
     print(f"Elapsed time: {time.perf_counter() - started:.2f}s")
 
 
