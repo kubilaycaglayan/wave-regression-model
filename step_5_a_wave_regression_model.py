@@ -31,6 +31,7 @@ class WaveRegressionModel(pl.LightningModule):
             nn.Sigmoid(),
         )
         self.loss_fn = nn.SmoothL1Loss()
+        self.train_mae = MeanAbsoluteError()
         self.val_mae = MeanAbsoluteError()
         self.val_rmse = MeanSquaredError(squared=False)
 
@@ -85,7 +86,9 @@ class WaveRegressionModel(pl.LightningModule):
         images, targets = batch
         predictions = self(images)
         loss = self.loss_fn(predictions, targets)
+        self.train_mae.update(predictions, targets)
         self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=images.size(0))
+        self.log("train_mae", self.train_mae, on_step=False, on_epoch=True, prog_bar=False, batch_size=images.size(0))
         return loss
 
     def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:

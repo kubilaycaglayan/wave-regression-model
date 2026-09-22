@@ -18,6 +18,13 @@ from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 
 from step_4_b_wave_datamodule import WaveDataModule
 from step_5_a_wave_regression_model import WaveRegressionModel
+from step_5_p_plot_training import (
+    LOSS_METRICS,
+    TrainingHistoryCallback,
+    performance_metrics_from_monitor,
+    plot_training_history,
+    write_training_history,
+)
 
 
 RANDOM_SEED = 42
@@ -81,6 +88,9 @@ def write_summary(
     run_version: str,
     epochs_trained: int,
     split_snapshot: Path,
+    history_path: Path,
+    plot_paths: dict[str, Path],
+    performance_metric: str,
 ) -> Path:
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     best_mae = best_metrics["val_mae"]
@@ -108,6 +118,10 @@ def write_summary(
                 f"best checkpoint epoch: {best_checkpoint_epoch(checkpoint.best_model_path)}",
                 f"epochs actually trained: {epochs_trained}",
                 f"early stopping triggered: {early_stopping.stopped_epoch > 0}",
+                f"performance plot metric: {performance_metric}",
+                f"training history path: {history_path}",
+                f"loss plot path: {plot_paths['loss']}",
+                f"performance plot path: {plot_paths['performance']}",
                 f"total parameters: {parameter_counts(model)[0]}",
                 f"trainable parameters: {parameter_counts(model)[1]}",
                 f"frozen parameters: {parameter_counts(model)[2]}",
@@ -125,7 +139,7 @@ def write_summary(
     manifest_path.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "created_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "run_version": run_version,
                 "random_seed": seed,
@@ -134,6 +148,9 @@ def write_summary(
                 "best_validation_mae": float(best_mae) if best_mae is not None else None,
                 "best_validation_rmse": float(best_rmse) if best_rmse is not None else None,
                 "epochs_trained": epochs_trained,
+                "training_history_path": str(history_path),
+                "plot_paths": {name: str(path) for name, path in plot_paths.items()},
+                "performance_metric": performance_metric,
             },
             indent=2,
         )
@@ -196,11 +213,21 @@ def main() -> None:
         patience=EARLY_STOPPING_PATIENCE,
         verbose=True,
     )
+    performance_monitor = checkpoint.monitor
+    if performance_monitor != early_stopping.monitor:
+        raise RuntimeError(
+            "Checkpoint and early-stopping monitor differ: "
+            f"checkpoint={performance_monitor!r}, early_stopping={early_stopping.monitor!r}"
+        )
+    performance_train_metric, performance_validation_metric = performance_metrics_from_monitor(performance_monitor)
+    history = TrainingHistoryCallback(
+        required_metrics=(*LOSS_METRICS, performance_train_metric, performance_validation_metric)
+    )
     trainer = pl.Trainer(
         accelerator="auto",
         devices=1,
         max_epochs=MAX_EPOCHS,
-        callbacks=[checkpoint, early_stopping],
+        callbacks=[checkpoint, early_stopping, history],
         deterministic=True,
         log_every_n_steps=1,
         logger=False,
@@ -208,6 +235,15 @@ def main() -> None:
     )
     trainer.fit(model, datamodule=data)
     epochs_trained = int(trainer.fit_loop.epoch_progress.current.completed)
+    history_path = write_training_history(history, run_version, CHECKPOINT_DIR)
+    plot_paths = plot_training_history(
+        history,
+        run_version,
+        CHECKPOINT_DIR,
+        performance_monitor,
+        early_stopping.monitor,
+    )
+    performance_metric = f"{performance_monitor.removeprefix('val_').upper()} (lower is better)"
 
     best_model = WaveRegressionModel.load_from_checkpoint(checkpoint.best_model_path)
     best_metrics = trainer.validate(best_model, datamodule=data, verbose=False)[0]
@@ -221,6 +257,9 @@ def main() -> None:
         run_version,
         epochs_trained,
         split_snapshot,
+        history_path,
+        plot_paths,
+        performance_metric,
     )
     print(f"Best validation MAE: {best_metrics['val_mae']:.6f}")
     print(f"Best validation RMSE: {best_metrics['val_rmse']:.6f}")
@@ -229,6 +268,9 @@ def main() -> None:
     print(f"Epochs actually trained: {epochs_trained}")
     print(f"Early stopping triggered: {early_stopping.stopped_epoch > 0}")
     print(f"Training summary: {summary_path}")
+    print(f"Training history: {history_path}")
+    print(f"Training loss plot: {plot_paths['loss']}")
+    print(f"Training performance plot: {plot_paths['performance']}")
     print(f"Elapsed time: {time.perf_counter() - started:.2f}s")
 
 
