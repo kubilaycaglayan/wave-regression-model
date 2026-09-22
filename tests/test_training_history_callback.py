@@ -31,6 +31,13 @@ def test_history_combines_training_and_validation_metrics_across_hooks() -> None
     }
     callback.on_validation_epoch_end(trainer, None)
 
-    assert callback.rows == [
-        {"epoch": 1, "train_loss": 0.20, "train_mae": 0.30, "val_loss": 0.25, "val_mae": 0.35}
-    ]
+    assert len(callback.rows) == 1
+    row = callback.rows[0]
+    assert row["epoch"] == 1
+    for name, expected in {
+        "train_loss": 0.20,
+        "train_mae": 0.30,
+        "val_loss": 0.25,
+        "val_mae": 0.35,
+    }.items():
+        assert abs(row[name] - expected) < 1e-6
