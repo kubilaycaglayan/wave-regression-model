@@ -41,3 +41,4 @@ step-3-dataset-splits/*.csv
 *.ckpt
 step-5-checkpoints/training_manifest_*.json
 step-5-checkpoints/training_summary_*.txt
+step-5-checkpoints/*
