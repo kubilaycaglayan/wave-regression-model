@@ -20,16 +20,16 @@ def test_history_combines_training_and_validation_metrics_across_hooks() -> None
     trainer = SimpleNamespace(current_epoch=0, sanity_checking=False, callback_metrics={})
 
     trainer.callback_metrics = {
-        "train_loss": torch.tensor(0.20),
-        "train_mae": torch.tensor(0.30),
-    }
-    callback.on_train_epoch_end(trainer, None)
-
-    trainer.callback_metrics = {
         "val_loss": torch.tensor(0.25),
         "val_mae": torch.tensor(0.35),
     }
     callback.on_validation_epoch_end(trainer, None)
+
+    trainer.callback_metrics = {
+        "train_loss": torch.tensor(0.20),
+        "train_mae": torch.tensor(0.30),
+    }
+    callback.on_train_epoch_end(trainer, None)
 
     assert len(callback.rows) == 1
     row = callback.rows[0]

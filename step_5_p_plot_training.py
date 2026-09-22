@@ -85,26 +85,30 @@ class TrainingHistoryCallback(Callback):
     def on_train_epoch_end(self, trainer: pl.Trainer, module: pl.LightningModule) -> None:
         if trainer.sanity_checking:
             return
-        self._training_row = {
-            "epoch": trainer.current_epoch + 1,
-            **self._read_metrics(trainer.callback_metrics, self.training_metrics, trainer.current_epoch + 1),
-        }
-
-    def on_validation_epoch_end(self, trainer: pl.Trainer, module: pl.LightningModule) -> None:
-        if trainer.sanity_checking:
-            return
-        if not hasattr(self, "_training_row"):
+        if not hasattr(self, "_validation_row"):
             raise RuntimeError(
-                f"Training history has no training metrics before validation epoch {trainer.current_epoch + 1}"
+                f"Training history has no validation metrics before training epoch {trainer.current_epoch + 1}"
             )
         row = {
-            **self._training_row,
-            **self._read_metrics(trainer.callback_metrics, self.validation_metrics, trainer.current_epoch + 1),
+            **self._validation_row,
+            **self._read_metrics(trainer.callback_metrics, self.training_metrics, trainer.current_epoch + 1),
         }
         if row["epoch"] != trainer.current_epoch + 1:
             raise RuntimeError("Training and validation history epochs do not match")
         self.rows.append(row)
-        del self._training_row
+        del self._validation_row
+
+    def on_validation_epoch_end(self, trainer: pl.Trainer, module: pl.LightningModule) -> None:
+        if trainer.sanity_checking:
+            return
+        self._validation_row = {
+            "epoch": trainer.current_epoch + 1,
+            **self._read_metrics(
+                trainer.callback_metrics,
+                self.validation_metrics,
+                trainer.current_epoch + 1,
+            ),
+        }
 
 
 def write_training_history(history: TrainingHistoryCallback, run_version: str, output_dir: Path) -> Path:
