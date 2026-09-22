@@ -10,7 +10,7 @@ import torch
 # is imported by the plotting module.
 import step_4_a_wave_dataset  # noqa: F401
 
-from step_5_p_plot_training import TrainingHistoryCallback
+from step_5_c_plot_training import TrainingHistoryCallback
 
 
 def test_history_combines_training_and_validation_metrics_across_hooks() -> None:

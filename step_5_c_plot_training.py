@@ -20,12 +20,15 @@ LOSS_METRICS = ("train_loss", "val_loss")
 class PlotConfig:
     """User-adjustable defaults for the generated training plots."""
 
-    figure_size_inches: tuple[float, float] = (9.0, 5.5)
+    figure_size_inches: tuple[float, float] = (14.0, 5.5)
     dpi: int = 150
     y_axis_min: float = 0.0
     y_axis_max: float = 1.0
     max_epoch_ticks: int = 12
     y_axis_as_percentage: bool = False
+    auto_zoom_enabled: bool = True
+    auto_zoom_margin_fraction: float = 0.15
+    auto_zoom_minimum_span: float = 0.05
 
 
 DEFAULT_PLOT_CONFIG = PlotConfig()
@@ -150,6 +153,10 @@ def plot_training_history(
         raise ValueError("PlotConfig.y_axis_min must be smaller than y_axis_max")
     if config.max_epoch_ticks < 1:
         raise ValueError("PlotConfig.max_epoch_ticks must be at least 1")
+    if config.auto_zoom_margin_fraction < 0.0:
+        raise ValueError("PlotConfig.auto_zoom_margin_fraction cannot be negative")
+    if config.auto_zoom_minimum_span <= 0.0:
+        raise ValueError("PlotConfig.auto_zoom_minimum_span must be positive")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -168,25 +175,40 @@ def plot_training_history(
         validation_key: str,
     ) -> Path:
         path = output_dir / filename
-        figure, axis = plt.subplots(figsize=config.figure_size_inches, constrained_layout=True)
+        figure, axes = plt.subplots(1, 2, figsize=config.figure_size_inches, constrained_layout=True, squeeze=False)
+        axes = axes[0]
         try:
-            axis.plot(epochs, [row[train_key] for row in history.rows], marker="o", label=f"Training {ylabel}")
-            axis.plot(
-                epochs,
-                [row[validation_key] for row in history.rows],
-                marker="o",
-                label=f"Validation {ylabel}",
-            )
-            axis.set_title(f"{title} ({run_version})")
-            axis.set_xlabel("Epoch")
-            axis.set_ylabel(ylabel)
-            axis.set_xlim(left=1)
-            axis.set_ylim(config.y_axis_min, config.y_axis_max)
-            axis.xaxis.set_major_locator(MaxNLocator(nbins=config.max_epoch_ticks, integer=True))
-            if config.y_axis_as_percentage:
-                axis.yaxis.set_major_formatter(PercentFormatter(xmax=1.0))
-            axis.grid(True, alpha=0.3)
-            axis.legend()
+            train_values = [row[train_key] for row in history.rows]
+            validation_values = [row[validation_key] for row in history.rows]
+            all_values = [*train_values, *validation_values]
+            observed_min = min(all_values)
+            observed_max = max(all_values)
+            observed_span = observed_max - observed_min
+            zoom_span = max(observed_span, config.auto_zoom_minimum_span)
+            zoom_margin = zoom_span * config.auto_zoom_margin_fraction
+            zoom_min = max(config.y_axis_min, observed_min - zoom_margin)
+            zoom_max = min(config.y_axis_max, observed_max + zoom_margin)
+            if zoom_min >= zoom_max:
+                zoom_min, zoom_max = config.y_axis_min, config.y_axis_max
+
+            for axis, y_min, y_max, panel_title in (
+                (axes[0], config.y_axis_min, config.y_axis_max, "Configured scale"),
+                (axes[1], (zoom_min if config.auto_zoom_enabled else config.y_axis_min),
+                 (zoom_max if config.auto_zoom_enabled else config.y_axis_max), "Automatic zoom"),
+            ):
+                axis.plot(epochs, train_values, marker="o", label=f"Training {ylabel}")
+                axis.plot(epochs, validation_values, marker="o", label=f"Validation {ylabel}")
+                axis.set_title(panel_title)
+                axis.set_xlabel("Epoch")
+                axis.set_ylabel(ylabel)
+                axis.set_xlim(left=1)
+                axis.set_ylim(y_min, y_max)
+                axis.xaxis.set_major_locator(MaxNLocator(nbins=config.max_epoch_ticks, integer=True))
+                if config.y_axis_as_percentage:
+                    axis.yaxis.set_major_formatter(PercentFormatter(xmax=1.0))
+                axis.grid(True, alpha=0.3)
+                axis.legend()
+            figure.suptitle(f"{title} ({run_version})")
             figure.savefig(path, dpi=config.dpi, format="png")
         finally:
             plt.close(figure)

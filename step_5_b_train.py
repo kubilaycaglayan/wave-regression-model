@@ -18,7 +18,7 @@ from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 
 from step_4_b_wave_datamodule import WaveDataModule
 from step_5_a_wave_regression_model import WaveRegressionModel
-from step_5_p_plot_training import (
+from step_5_c_plot_training import (
     LOSS_METRICS,
     TrainingHistoryCallback,
     performance_metrics_from_monitor,
