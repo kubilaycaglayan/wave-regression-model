@@ -1,5 +1,7 @@
 # Wave regression preprocessing
 
+See [README_RUN.md](README_RUN.md) for the full step-by-step run and retraining guide.
+
 ## Setup
 
 ```bash

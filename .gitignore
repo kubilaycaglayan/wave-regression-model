@@ -25,7 +25,6 @@ water-mask-preview/index.html
 step-3-dataset-splits/snapshots/*
 step-3-dataset-splits/benchmarks/*
 AUDIT_RESULTS.md
-README_RUN.md
 TODO
 .env
 water-mask-preview/*
