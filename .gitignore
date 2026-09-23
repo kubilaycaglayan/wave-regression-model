@@ -29,6 +29,7 @@ TODO
 .env
 water-mask-preview/*
 *.jpg
+!readme_files/*.jpg
 discarded_images.csv
 labels.csv
 

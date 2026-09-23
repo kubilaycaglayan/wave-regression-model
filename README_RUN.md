@@ -73,7 +73,7 @@ Inspect the original, mask, and overlay images. The generated `original` and `ov
 
 ## 3. Create standardized Step 1 inputs
 
-[insert image here readme_files/step-preprocessed-sea-example.jpg]
+![Step 1 standardized water-only input](readme_files/step-1-preprocessed-sea-example.jpg)
 
 Run:
 
@@ -109,7 +109,7 @@ The script skips images whose `step-1_<name>.jpg` output already exists.
 
 ## 4. Create the lower-water Step 2 images
 
-[insert image here readme_files/step-2-pick-lower-water-area.jpg]
+![Step 2 lower-water crop](readme_files/step-2-pick-lower-water-area.jpg)
 
 Run:
 
