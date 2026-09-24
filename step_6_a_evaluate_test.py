@@ -6,6 +6,7 @@ import csv
 import argparse
 import hashlib
 import html
+import json
 import math
 import os
 import re
@@ -22,35 +23,76 @@ from step_5_a_wave_regression_model import WaveRegressionModel
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
+CHECKPOINT_DIR = PROJECT_DIR / "step-5-checkpoints"
+BENCHMARK_TEST_MANIFEST = Path("step-3-dataset-splits/benchmarks/benchmark-v1-test.csv")
 
 
-def checkpoint_path_from_env() -> Path:
-    """Read the evaluation checkpoint path from the environment or repository .env."""
+def _dotenv_value(key: str) -> str | None:
+    dotenv_path = PROJECT_DIR / ".env"
+    if not dotenv_path.is_file():
+        return None
+    for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        candidate, separator, value = line.partition("=")
+        if separator and candidate.strip() == key:
+            return value.strip().strip("\"'")
+    return None
+
+
+def _resolve_project_path(value: str, base_dir: Path = PROJECT_DIR) -> Path:
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else base_dir / path
+
+
+def sha256_for(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _checkpoint_from_manifest(manifest_path: Path) -> Path:
+    try:
+        metadata = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"Cannot read training manifest {manifest_path}: {error}") from error
+    checkpoint_reference = metadata.get("best_checkpoint_path")
+    if not isinstance(checkpoint_reference, str) or not checkpoint_reference.strip():
+        raise RuntimeError(f"Training manifest has no best_checkpoint_path: {manifest_path}")
+    checkpoint_path = _resolve_project_path(checkpoint_reference)
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(
+            f"Training manifest {manifest_path} references missing checkpoint: {checkpoint_path}"
+        )
+    return checkpoint_path
+
+
+def checkpoint_from_latest_manifest(
+    checkpoint_dir: Path = CHECKPOINT_DIR,
+) -> tuple[Path, Path]:
+    manifests = sorted(checkpoint_dir.glob("training_manifest_*.json"))
+    if not manifests:
+        raise FileNotFoundError(f"No training manifests found in {checkpoint_dir}")
+    manifest_path = manifests[-1]
+    return _checkpoint_from_manifest(manifest_path), manifest_path
+
+
+def checkpoint_path_from_env() -> tuple[Path, Path | None]:
+    """Select an explicit checkpoint or the newest training manifest checkpoint."""
     configured_path = os.getenv("EVALUATION_CHECKPOINT_PATH")
     if configured_path is None:
-        dotenv_path = PROJECT_DIR / ".env"
-        if dotenv_path.is_file():
-            for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
-                line = raw_line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                key, separator, value = line.partition("=")
-                if separator and key.strip() == "EVALUATION_CHECKPOINT_PATH":
-                    configured_path = value.strip().strip("\"'")
-                    break
+        configured_path = _dotenv_value("EVALUATION_CHECKPOINT_PATH")
 
-    if not configured_path:
-        raise RuntimeError(
-            "EVALUATION_CHECKPOINT_PATH is not configured; add it to .env or the environment"
-        )
-
-    path = Path(configured_path).expanduser()
-    return path if path.is_absolute() else PROJECT_DIR / path
+    if configured_path:
+        return _resolve_project_path(configured_path), None
+    return checkpoint_from_latest_manifest()
 
 
-# This checkpoint was selected before opening the test set: validation MAE ~= 0.1068.
-# Do not replace it based on any result produced by this script.
-CHECKPOINT_PATH = checkpoint_path_from_env()
+CHECKPOINT_PATH, CHECKPOINT_MANIFEST_PATH = checkpoint_path_from_env()
+CHECKPOINT_SHA256 = sha256_for(CHECKPOINT_PATH) if CHECKPOINT_PATH.is_file() else None
 _MODEL_NAME_MATCH = re.fullmatch(r"(.+?)-best-val-mae-epoch=\d+-val_mae=[\d.]+\.ckpt", CHECKPOINT_PATH.name)
 if _MODEL_NAME_MATCH is None:
     raise ValueError(f"Cannot derive model name from checkpoint filename: {CHECKPOINT_PATH.name}")
@@ -60,13 +102,27 @@ if _MODEL_VERSION_MATCH is None:
     raise ValueError(f"Checkpoint filename does not contain a model version: {CHECKPOINT_PATH.name}")
 MODEL_VERSION = f"v{_MODEL_VERSION_MATCH.group(1)}"
 IMAGE_DIR = Path("step-2-final-water-data")
-TEST_CSV = Path("step-3-dataset-splits/benchmarks/benchmark-v1-test.csv")
+TEST_CSV = BENCHMARK_TEST_MANIFEST
 TRAIN_CSV = Path("step-3-dataset-splits/train.csv")
 DISCARDED_PATH = Path("discarded_images.csv")
-OUTPUT_DIR = Path("step-6-test-evaluation")
+
+
+def evaluation_output_dir(checkpoint_path: Path, test_manifest: Path) -> Path:
+    """Return a collision-resistant directory for one checkpoint/manifest pair."""
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(f"Selected checkpoint not found: {checkpoint_path}")
+    if not test_manifest.is_file():
+        raise FileNotFoundError(f"Test manifest not found: {test_manifest}")
+    checkpoint_id = f"{checkpoint_path.stem}--sha256-{sha256_for(checkpoint_path)[:12]}"
+    manifest_id = f"{test_manifest.stem}--sha256-{sha256_for(test_manifest)[:12]}"
+    return Path("step-6-test-evaluation") / checkpoint_id / manifest_id
+
+
+OUTPUT_DIR = evaluation_output_dir(CHECKPOINT_PATH, TEST_CSV)
 PREDICTIONS_CSV = OUTPUT_DIR / "test_predictions.csv"
-SUMMARY_PATH = OUTPUT_DIR / f"summary_{MODEL_NAME}.txt"
+SUMMARY_PATH = OUTPUT_DIR / "summary.txt"
 GALLERY_PATH = OUTPUT_DIR / "index.html"
+METADATA_PATH = OUTPUT_DIR / "evaluation_metadata.json"
 BATCH_SIZE = 1
 
 def read_training_labels(path: Path) -> tuple[list[str], list[float]]:
@@ -228,7 +284,7 @@ def print_results(rows: list[dict[str, float | str]]) -> None:
 
 
 def main() -> None:
-    global TEST_CSV, OUTPUT_DIR, PREDICTIONS_CSV, SUMMARY_PATH, GALLERY_PATH
+    global TEST_CSV, OUTPUT_DIR, PREDICTIONS_CSV, SUMMARY_PATH, GALLERY_PATH, METADATA_PATH
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--test-manifest",
@@ -238,15 +294,14 @@ def main() -> None:
     )
     args = parser.parse_args()
     TEST_CSV = args.test_manifest
-    if TEST_CSV != Path("step-3-dataset-splits/benchmarks/benchmark-v1-test.csv"):
-        evaluation_name = TEST_CSV.stem
-        OUTPUT_DIR = Path("step-6-test-evaluation") / evaluation_name
-        PREDICTIONS_CSV = OUTPUT_DIR / "test_predictions.csv"
-        SUMMARY_PATH = OUTPUT_DIR / f"summary_{MODEL_NAME}.txt"
-        GALLERY_PATH = OUTPUT_DIR / "index.html"
+    OUTPUT_DIR = evaluation_output_dir(CHECKPOINT_PATH, TEST_CSV)
+    PREDICTIONS_CSV = OUTPUT_DIR / "test_predictions.csv"
+    SUMMARY_PATH = OUTPUT_DIR / "summary.txt"
+    GALLERY_PATH = OUTPUT_DIR / "index.html"
+    METADATA_PATH = OUTPUT_DIR / "evaluation_metadata.json"
 
     started = time.perf_counter()
-    completed_outputs = (PREDICTIONS_CSV, SUMMARY_PATH, GALLERY_PATH)
+    completed_outputs = (PREDICTIONS_CSV, SUMMARY_PATH, GALLERY_PATH, METADATA_PATH)
     existing_outputs = [path for path in completed_outputs if path.exists()]
     if len(existing_outputs) == len(completed_outputs):
         print("Step 6 outputs already exist; skipping repeat test inference.")
@@ -338,6 +393,8 @@ def main() -> None:
                 f"model name: {MODEL_NAME}",
                 f"model version: {MODEL_VERSION}",
                 f"selected checkpoint path: {CHECKPOINT_PATH.resolve()}",
+                f"selected checkpoint sha256: {CHECKPOINT_SHA256 or sha256_for(CHECKPOINT_PATH)}",
+                f"training manifest path: {CHECKPOINT_MANIFEST_PATH or 'explicit configuration'}",
                 f"test manifest path: {TEST_CSV.resolve()}",
                 f"test manifest sha256: {hashlib.sha256(TEST_CSV.read_bytes()).hexdigest()}",
                 f"number of test samples: {len(test_dataset)}",
@@ -350,6 +407,28 @@ def main() -> None:
                 f"median-baseline test MAE: {median_mae:.8f}",
                 f"median-baseline test RMSE: {median_rmse:.8f}",
             ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    METADATA_PATH.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "checkpoint_path": str(CHECKPOINT_PATH.resolve()),
+                "checkpoint_sha256": CHECKPOINT_SHA256 or sha256_for(CHECKPOINT_PATH),
+                "training_manifest_path": (
+                    str(CHECKPOINT_MANIFEST_PATH.resolve())
+                    if CHECKPOINT_MANIFEST_PATH is not None
+                    else None
+                ),
+                "test_manifest_path": str(TEST_CSV.resolve()),
+                "test_manifest_sha256": hashlib.sha256(TEST_CSV.read_bytes()).hexdigest(),
+                "model_name": MODEL_NAME,
+                "model_version": MODEL_VERSION,
+                "created_at_epoch_seconds": time.time(),
+            },
+            indent=2,
         )
         + "\n",
         encoding="utf-8",
@@ -368,6 +447,7 @@ def main() -> None:
     print(f"Predictions CSV: {PREDICTIONS_CSV}")
     print(f"Summary: {SUMMARY_PATH}")
     print(f"Inspection gallery: {GALLERY_PATH}")
+    print(f"Evaluation metadata: {METADATA_PATH}")
     print(f"Total elapsed time: {time.perf_counter() - started:.2f}s")
 
 
