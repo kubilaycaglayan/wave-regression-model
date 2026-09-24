@@ -146,6 +146,40 @@ def preview_path_for(path: Path) -> Path:
     return PREVIEW_DIR / f"{path.stem}-model-input.jpg"
 
 
+def load_preview(path: Path) -> Image.Image:
+    """Load an existing preview as a detached, validated model input."""
+    try:
+        with Image.open(path) as preview:
+            mode = preview.mode
+            size = preview.size
+            if mode != "RGB" or size != IMAGE_SIZE:
+                raise RuntimeError(
+                    f"Invalid inference preview {path}: got {mode} {size}; "
+                    f"expected detached RGB {IMAGE_SIZE} input"
+                )
+            preview.load()
+            return preview.copy()
+    except RuntimeError:
+        raise
+    except Exception as error:
+        raise RuntimeError(f"Could not load inference preview {path}: {error}") from error
+
+
+def prepare_model_input(
+    photo: Path,
+    preview_inputs: Mapping[Path, Image.Image],
+    segmentation_model: SegmentationModel | None,
+) -> tuple[Image.Image, bytes | None, bool]:
+    """Return the cached input or generate it, plus whether it was reused."""
+    cached_input = preview_inputs.get(photo)
+    if cached_input is not None:
+        return cached_input, None, True
+    if segmentation_model is None:
+        raise RuntimeError(f"No segmentation model is available to preprocess {photo}")
+    model_input, encoded_model_input = preprocess_photo(photo, segmentation_model)
+    return model_input, encoded_model_input, False
+
+
 def prediction_log_path_for(path: Path) -> Path:
     """Return the append-only prediction history path for an input photo."""
     return PREDICTIONS_DIR / f"{path.stem}.txt"
@@ -285,6 +319,14 @@ def main() -> None:
         print_timing("Fingerprint checkpoint", checkpoint_started)
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        preview_inputs: dict[Path, Image.Image] = {}
+        for photo in photos:
+            preview_path = preview_path_for(photo)
+            if preview_path.is_file():
+                preview_started = time.perf_counter()
+                preview_inputs[photo] = load_preview(preview_path)
+                print_timing(f"Load preview {photo.name}", preview_started)
+
         pending_photos = [
             photo
             for photo in photos
@@ -303,9 +345,11 @@ def main() -> None:
             print_timing("Total", total_started)
             return
 
-        started = time.perf_counter()
-        segmentation_model = load_segmentation_model(str(device), verbose=False)
-        print_timing("Load segmentation model", started)
+        segmentation_model: SegmentationModel | None = None
+        if any(photo not in preview_inputs for photo in pending_photos):
+            started = time.perf_counter()
+            segmentation_model = load_segmentation_model(str(device), verbose=False)
+            print_timing("Load segmentation model", started)
 
         started = time.perf_counter()
         model = WaveRegressionModel.load_from_checkpoint(checkpoint_path, map_location=device)
@@ -329,11 +373,18 @@ def main() -> None:
             photo_started = time.perf_counter()
             print(f"[{index}/{len(photos)}] Input: {photo.relative_to(PROJECT_DIR)}", flush=True)
             try:
-                model_input, encoded_model_input = preprocess_photo(photo, segmentation_model)
+                preview_path = preview_path_for(photo)
+                model_input, encoded_model_input, reused_preview = prepare_model_input(
+                    photo, preview_inputs, segmentation_model
+                )
+                if reused_preview:
+                    print(f"Model input: reused {preview_path.relative_to(PROJECT_DIR)}")
+                else:
+                    assert encoded_model_input is not None
+                    preview_started = time.perf_counter()
+                    preview_path = save_preview(photo, encoded_model_input)
+                    print_timing("Save preview", preview_started)
                 waviness, tensor_shape = predict(model_input, device, model, transform)
-                preview_started = time.perf_counter()
-                preview_path = save_preview(photo, encoded_model_input)
-                print_timing("Save preview", preview_started)
 
                 expected_shape = (1, 3, IMAGE_SIZE[1], IMAGE_SIZE[0])
                 if tensor_shape != expected_shape:

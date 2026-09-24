@@ -24,6 +24,8 @@ python step_7_a_predict.py
 
 Notes: steps skip existing outputs, so reruns are safe. Use `--device cpu` on the step 1/2 scripts to force CPU.
 
+Step 7 reuses valid cached inference previews when switching checkpoints.
+
 ---
 
 The repository’s retraining flow is:
@@ -281,7 +283,7 @@ step-7-inference-preview/
 predict-holder/predictions/
 ```
 
-The prediction directory contains one append-only `.txt` history per input photo. Each record includes the waviness prediction, selected checkpoint path, checkpoint SHA-256, timestamp, device, and elapsed processing time. A photo is skipped only when both its preview and a record for the same checkpoint are present; using a different checkpoint predicts the photo again and appends a new record.
+The prediction directory contains one append-only `.txt` history per input photo. Each record includes the waviness prediction, selected checkpoint path, checkpoint SHA-256, timestamp, device, and elapsed processing time. A valid `step-7-inference-preview/<photo-stem>-model-input.jpg` is the checkpoint-independent cached model input, so changing checkpoints reuses the preview and reruns only regression inference. A photo is skipped only when both its valid preview and a record for the same checkpoint are present. Missing previews trigger Steps 1 and 2; malformed previews fail clearly rather than being silently replaced. Delete a preview to force regeneration.
 
 ## Important notes
 

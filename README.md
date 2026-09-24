@@ -84,7 +84,7 @@ Configure the checkpoint used by test evaluation separately:
 EVALUATION_CHECKPOINT_PATH=step-5-checkpoints/wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt
 ```
 
-Step 7 skips a photo only when its preview and a matching prediction record for the selected checkpoint both exist. Selecting a different checkpoint creates another record in the same photo history. If the preview is missing, the photo is processed again even when its prediction record exists.
+Step 7 treats `step-7-inference-preview/<photo-stem>-model-input.jpg` as the checkpoint-independent, canonical preprocessed model input. Existing previews must be detached RGB `224x224` JPEG inputs; malformed previews fail clearly and are not replaced automatically. A valid preview is reused when selecting a different checkpoint, so only regression inference runs again. A photo is skipped only when its valid preview and a matching prediction record for the selected checkpoint both exist. If the preview is missing, Steps 1 and 2 run again even when a prediction record exists; delete a preview to force regeneration.
 
 ## Discard unrelated or disrupted images
 
