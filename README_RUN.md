@@ -285,6 +285,14 @@ predict-holder/predictions/
 
 The prediction directory contains one append-only `.txt` history per input photo. Each record includes the waviness prediction, selected checkpoint path, checkpoint SHA-256, timestamp, device, and elapsed processing time. A valid `step-7-inference-preview/<photo-stem>-model-input.jpg` is the checkpoint-independent cached model input, so changing checkpoints reuses the preview and reruns only regression inference. A photo is skipped only when both its valid preview and a record for the same checkpoint are present. Missing previews trigger Steps 1 and 2; malformed previews fail clearly rather than being silently replaced. Delete a preview to force regeneration.
 
+## 10. Run the Step 8 baseline experiment
+
+```bash
+python step_8_a_constant_prediction_baselines.py
+```
+
+Step 8 compares training-mean and training-median baselines with the matching neural-network checkpoint. Its append-only JSON and Markdown reports are kept in `step-8-baseline experiment/`; test data is not evaluated.
+
 ## Important notes
 
 - `step_1_a_prepare_water_masks.py` is an inspection step; `step_1_b_preprocess_water_inputs.py` is the actual Step 1 training-data preparation.

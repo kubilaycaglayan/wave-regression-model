@@ -56,3 +56,29 @@ def test_select_checkpoint_chooses_lowest_matching_validation_mae(tmp_path: Path
     selected = experiment.select_checkpoint(snapshot, checkpoint_dir, tmp_path)
     assert selected is not None
     assert selected.path.name == "second.ckpt"
+
+
+def test_reports_append_and_preserve_history(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "model.ckpt"
+    checkpoint.write_bytes(b"checkpoint")
+    result = {
+        "schema_version": 2,
+        "status": "complete",
+        "split_snapshot": {"name": "snapshot-a", "counts": {"train": 2, "validation": 1, "test": 1}, "train_sha256": "a", "validation_sha256": "b", "test_sha256": "c"},
+        "predictors": {
+            "training_mean": {"prediction": 0.2, "validation_mae": 0.3, "relative_mae_reduction_percent": 10.0},
+            "training_median": {"prediction": 0.4, "validation_mae": 0.5, "relative_mae_reduction_percent": 20.0},
+            "neural_network": {"prediction": None, "validation_mae": 0.27, "relative_mae_reduction_percent": None},
+        },
+        "checkpoint": {"path": str(checkpoint), "manifest": "manifest.json", "run_version": "v1"},
+        "test_evaluated": False,
+    }
+    json_path = tmp_path / "history.json"
+    markdown_path = tmp_path / "history.md"
+    experiment.write_reports(result, json_path, markdown_path)
+    experiment.write_reports(result, json_path, markdown_path)
+    history = json.loads(json_path.read_text(encoding="utf-8"))
+    assert [run["version"] for run in history["runs"]] == [1, 2]
+    assert history["runs"][0]["run_id"] != history["runs"][1]["run_id"]
+    assert history["runs"][0]["checkpoint"]["sha256"] == experiment.sha256(checkpoint)
+    assert markdown_path.read_text(encoding="utf-8").count("## Version ") == 2

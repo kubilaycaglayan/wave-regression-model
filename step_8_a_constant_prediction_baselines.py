@@ -26,10 +26,12 @@ SPLIT_ROOT = Path("step-3-dataset-splits")
 SNAPSHOT_ROOT = SPLIT_ROOT / "snapshots"
 CHECKPOINT_ROOT = Path("step-5-checkpoints")
 IMAGE_DIR = Path("step-2-final-water-data")
-JSON_OUTPUT = Path("baseline_experiment.json")
-MARKDOWN_OUTPUT = Path("baseline_experiment.md")
+REPORT_DIRECTORY = Path("step-8-baseline experiment")
+JSON_OUTPUT = REPORT_DIRECTORY / "baseline_experiment.json"
+MARKDOWN_OUTPUT = REPORT_DIRECTORY / "baseline_experiment.md"
 EXPECTED_COUNTS = {"train": 68, "validation": 14, "test": 14}
 BATCH_SIZE = 8
+REPORT_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -199,7 +201,7 @@ def _base_result(snapshot: Snapshot, train_dataset: WaveDataset, validation_data
     mean_mae = mean_absolute_error(validation_labels, [train_mean] * len(validation_labels))
     median_mae = mean_absolute_error(validation_labels, [train_median] * len(validation_labels))
     return {
-        "schema_version": 1,
+        "schema_version": REPORT_SCHEMA_VERSION,
         "status": "complete",
         "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "split_snapshot": {
@@ -230,41 +232,134 @@ def _base_result(snapshot: Snapshot, train_dataset: WaveDataset, validation_data
     }
 
 
+def _timestamp_run_id() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def _canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _checkpoint_record(result: dict[str, Any]) -> dict[str, Any] | None:
+    checkpoint = result.get("checkpoint")
+    if not isinstance(checkpoint, dict):
+        return None
+    record = dict(checkpoint)
+    path = record.get("path")
+    if isinstance(path, str):
+        checkpoint_path = Path(path)
+        if checkpoint_path.is_file():
+            record["sha256"] = sha256(checkpoint_path)
+    return record
+
+
+def comparison_key(result: dict[str, Any]) -> str:
+    snapshot = result.get("split_snapshot", {})
+    checkpoint = result.get("checkpoint") or {}
+    identity = {
+        "experiment": "baseline_experiment",
+        "split": {name: snapshot.get(name) for name in ("name", "train_sha256", "validation_sha256", "test_sha256")},
+        "checkpoint": {name: checkpoint.get(name) for name in ("path", "run_version", "manifest", "sha256")},
+    }
+    return _canonical_sha256(identity)
+
+
+def _new_run(result: dict[str, Any], version: int, run_id: str | None = None) -> dict[str, Any]:
+    run = json.loads(json.dumps(result))
+    run["schema_version"] = REPORT_SCHEMA_VERSION
+    run["version"] = version
+    run["run_id"] = run_id or _timestamp_run_id()
+    run["checkpoint"] = _checkpoint_record(run)
+    run["comparison_key"] = comparison_key(run)
+    run.setdefault("test_evaluated", False)
+    predictors = run.get("predictors", {})
+    run.setdefault("validation_maes", {
+        name: predictor.get("validation_mae") for name, predictor in predictors.items() if isinstance(predictor, dict)
+    })
+    run.setdefault("predictions", {
+        name: predictors[name].get("prediction") for name in ("training_mean", "training_median") if isinstance(predictors.get(name), dict)
+    })
+    run.setdefault("neural_network_improvement_percentages", {
+        name: predictors[name].get("relative_mae_reduction_percent") for name in ("training_mean", "training_median") if isinstance(predictors.get(name), dict)
+    })
+    return run
+
+
+def _migrate_v1(value: dict[str, Any]) -> dict[str, Any]:
+    migrated = _new_run(value, 1)
+    return {"schema_version": REPORT_SCHEMA_VERSION, "latest_run_id": migrated["run_id"], "runs": [migrated]}
+
+
+def load_report_history(json_path: Path) -> dict[str, Any]:
+    if not json_path.exists():
+        return {"schema_version": REPORT_SCHEMA_VERSION, "latest_run_id": None, "runs": []}
+    try:
+        value = load_json(json_path)
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Could not read baseline report {json_path}: {error}") from error
+    if value.get("schema_version") == 1:
+        return _migrate_v1(value)
+    if value.get("schema_version") != REPORT_SCHEMA_VERSION or not isinstance(value.get("runs"), list):
+        raise ValueError(f"Malformed or incompatible baseline report in {json_path}")
+    for expected_version, run in enumerate(value["runs"], start=1):
+        if not isinstance(run, dict) or run.get("version") != expected_version or not isinstance(run.get("run_id"), str):
+            raise ValueError(f"Malformed or non-sequential run in baseline report {json_path}")
+    if len({run["run_id"] for run in value["runs"]}) != len(value["runs"]):
+        raise ValueError(f"Duplicate run_id in baseline report {json_path}")
+    if value["runs"] and value.get("latest_run_id") != value["runs"][-1]["run_id"]:
+        raise ValueError(f"Invalid latest_run_id in baseline report {json_path}")
+    return value
+
+
+def _format_metric(value: Any) -> str:
+    return "n/a" if value is None else f"{value:.8f}"
+
+
+def render_markdown(history: dict[str, Any]) -> str:
+    lines = ["# Experiment A: Constant-Prediction Baselines", "", "JSON is the machine-readable source of truth. Newest runs appear first.", ""]
+    for run in reversed(history["runs"]):
+        snapshot = run["split_snapshot"]
+        lines.extend([
+            f"## Version {run['version']} — Run `{run['run_id']}`", "",
+            f"Status: **{run['status']}**", f"Comparison key: `{run['comparison_key']}`",
+            f"Split snapshot: `{snapshot['name']}` ({snapshot['counts']['train']} train, {snapshot['counts']['validation']} validation, {snapshot['counts']['test']} test)", "",
+            "All reported MAEs use the same validation images.", "",
+            "| Predictor | Constant/value | Validation MAE | Relative MAE reduction |", "|---|---:|---:|---:|",
+        ])
+        for name, label in (("training_mean", "Training mean"), ("training_median", "Training median"), ("neural_network", "Neural network")):
+            predictor = run.get("predictors", {}).get(name)
+            if not isinstance(predictor, dict):
+                lines.append(f"| {label} | unavailable | unavailable | unavailable |")
+                continue
+            reduction = predictor.get("relative_mae_reduction_percent")
+            reduction_text = "n/a" if reduction is None else f"{reduction:.2f}%"
+            lines.append(f"| {label} | {_format_metric(predictor.get('prediction'))} | {_format_metric(predictor.get('validation_mae'))} | {reduction_text} |")
+        improvements = run.get("neural_network_improvement_percentages", {})
+        if improvements:
+            lines.extend(["", "Neural-network improvement percentages: " + "; ".join(f"{name} {('n/a' if value is None else f'{value:.2f}%')}" for name, value in improvements.items())])
+        checkpoint = run.get("checkpoint")
+        if isinstance(checkpoint, dict):
+            lines.extend(["", f"Matching checkpoint: `{checkpoint.get('path', 'n/a')}`", f"Checkpoint manifest: `{checkpoint.get('manifest', 'n/a')}`", f"Checkpoint SHA-256: `{checkpoint.get('sha256', 'unavailable')}`"])
+        lines.extend(["", f"Test evaluated: **{'yes' if run.get('test_evaluated') else 'no'}**", f"Device: `{run.get('device', 'unavailable')}`; inference: `{_format_metric(run.get('inference_seconds'))}` s; elapsed: `{_format_metric(run.get('elapsed_seconds'))}` s", ""])
+    return "\n".join(lines)
+
+
 def write_reports(result: dict[str, Any], json_path: Path = JSON_OUTPUT, markdown_path: Path = MARKDOWN_OUTPUT) -> None:
-    json_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    snapshot = result["split_snapshot"]
-    predictors = result["predictors"]
-    lines = [
-        "# Experiment A: Constant-Prediction Baselines",
-        "",
-        f"Status: **{result['status']}**",
-        "",
-        f"Split snapshot: `{snapshot['name']}` ({snapshot['counts']['train']} train, "
-        f"{snapshot['counts']['validation']} validation, {snapshot['counts']['test']} test)",
-        "",
-        "All reported MAEs use the same validation images. The test split was not evaluated.",
-        "",
-        "| Predictor | Constant/value | Validation MAE | Relative MAE reduction |",
-        "|---|---:|---:|---:|",
-    ]
-    for name, label in (("training_mean", "Training mean"), ("training_median", "Training median"), ("neural_network", "Neural network")):
-        predictor = predictors[name]
-        if predictor is None:
-            lines.append(f"| {label} | unavailable | unavailable | unavailable |")
-            continue
-        reduction = predictor["relative_mae_reduction_percent"]
-        reduction_text = "n/a" if reduction is None else f"{reduction:.2f}%"
-        prediction = "n/a" if predictor["prediction"] is None else f"{predictor['prediction']:.8f}"
-        mae = "n/a" if predictor["validation_mae"] is None else f"{predictor['validation_mae']:.8f}"
-        lines.append(
-            f"| {label} | {prediction} | {mae} | {reduction_text} |"
-        )
-    if result.get("checkpoint"):
-        checkpoint = result["checkpoint"]
-        lines.extend(["", f"Matching checkpoint: `{checkpoint['path']}`", f"Checkpoint manifest: `{checkpoint['manifest']}`"])
-    elif result["status"] != "complete":
-        lines.extend(["", "No checkpoint trained on this exact split was found; the comparison cannot yet be completed."])
-    markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    markdown_path.parent.mkdir(parents=True, exist_ok=True)
+    history = load_report_history(json_path)
+    next_version = max((run["version"] for run in history["runs"]), default=0) + 1
+    run = _new_run(result, next_version)
+    existing_ids = {item["run_id"] for item in history["runs"]}
+    collision_number = 2
+    while run["run_id"] in existing_ids:
+        run["run_id"] = f"{_timestamp_run_id()}-{collision_number}"
+        collision_number += 1
+    history["runs"].append(run)
+    history["latest_run_id"] = run["run_id"]
+    json_path.write_text(json.dumps(history, indent=2) + "\n", encoding="utf-8")
+    markdown_path.write_text(render_markdown(history), encoding="utf-8")
 
 
 def run(project_dir: Path = PROJECT_DIR) -> dict[str, Any]:

@@ -42,3 +42,6 @@ step-3-dataset-splits/*.csv
 step-5-checkpoints/training_manifest_*.json
 step-5-checkpoints/training_summary_*.txt
 step-5-checkpoints/*
+
+# Locally generated Experiment A report history.
+step-8-baseline experiment/
