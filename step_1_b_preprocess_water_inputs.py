@@ -7,6 +7,7 @@ import argparse
 import html
 import io
 import os
+import tempfile
 import time
 from pathlib import Path
 from urllib.parse import quote
@@ -126,7 +127,12 @@ def main() -> None:
     if not image_paths:
         raise SystemExit(f"No supported images found in: {', '.join(str(path) for path in source_dirs)}")
     model = None
-    names = SourceOutputNames(image_paths, args.output_dir, (".jpg",))
+    names = SourceOutputNames(
+        image_paths,
+        args.output_dir,
+        (".jpg",),
+        output_paths_for_stem=lambda stem: (args.output_dir / f"step-1_{stem}.jpg",),
+    )
     entries, skipped = [], []
     already_present = 0
     processing_seconds = 0.0
@@ -134,6 +140,7 @@ def main() -> None:
         image_started = time.perf_counter()
         try:
             standardized_path = processed_paths(source_path, args.output_dir, names)
+            names.save()
             if standardized_path.exists():
                 print(f"[{index}/{len(image_paths)}] {source_path.name}: skipped (standardized input already exists)")
                 entries.append((source_path.name, source_path, standardized_path))
@@ -147,7 +154,23 @@ def main() -> None:
                 print(f"[{index}/{len(image_paths)}] {source_path.name}: WARNING: no reliable water region; skipped")
                 skipped.append(source_path.name)
                 continue
-            standardized_path.write_bytes(encode_step_1_output(standardized))
+            temporary_path: Path | None = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    dir=standardized_path.parent,
+                    prefix=f".{standardized_path.name}.",
+                    suffix=".tmp",
+                    delete=False,
+                ) as temporary:
+                    temporary_path = Path(temporary.name)
+                    temporary.write(encode_step_1_output(standardized))
+                    temporary.flush()
+                    os.fsync(temporary.fileno())
+                os.replace(temporary_path, standardized_path)
+                temporary_path = None
+            finally:
+                if temporary_path is not None:
+                    temporary_path.unlink(missing_ok=True)
             entries.append((source_path.name, source_path, standardized_path))
             elapsed = time.perf_counter() - image_started
             processing_seconds += elapsed

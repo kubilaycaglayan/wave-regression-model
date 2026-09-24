@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -29,10 +31,28 @@ def make_overlay(image: Image.Image, water_mask: np.ndarray) -> Image.Image:
 def save_preview(image: Image.Image, water_mask: np.ndarray, source_path: Path, output_dir: Path, names: SourceOutputNames | None = None) -> tuple[Path, Path]:
     stem = names.stem_for(source_path) if names else source_path.stem
     original_path = output_dir / f"{stem}_original.jpg"
+    mask_path = output_dir / f"{stem}_mask.png"
     overlay_path = output_dir / f"{stem}_overlay.jpg"
-    image.save(original_path, quality=92)
-    Image.fromarray(water_mask * 255, mode="L").save(output_dir / f"{stem}_mask.png")
-    make_overlay(image, water_mask).save(overlay_path, quality=92)
+    def save_atomically(target: Path, save_image) -> None:
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=target.parent,
+                prefix=f".{target.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+            save_image(temporary_path)
+            os.replace(temporary_path, target)
+            temporary_path = None
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+
+    save_atomically(original_path, lambda path: image.save(path, format="JPEG", quality=92))
+    save_atomically(mask_path, lambda path: Image.fromarray(water_mask * 255, mode="L").save(path, format="PNG"))
+    save_atomically(overlay_path, lambda path: make_overlay(image, water_mask).save(path, format="JPEG", quality=92))
     return original_path, overlay_path
 
 
@@ -121,7 +141,16 @@ def main() -> None:
     if not image_paths:
         raise SystemExit(f"No supported images found in: {', '.join(str(path) for path in source_dirs)}")
     model = None
-    names = SourceOutputNames(image_paths, args.output_dir, ("_original.jpg", "_mask.png", "_overlay.jpg"))
+    names = SourceOutputNames(
+        image_paths,
+        args.output_dir,
+        ("_original.jpg", "_mask.png", "_overlay.jpg"),
+        output_paths_for_stem=lambda stem: (
+            args.output_dir / f"{stem}_original.jpg",
+            args.output_dir / f"{stem}_mask.png",
+            args.output_dir / f"{stem}_overlay.jpg",
+        ),
+    )
     entries = []
     already_present = 0
     processing_seconds = 0.0
@@ -129,6 +158,7 @@ def main() -> None:
         image_started = time.perf_counter()
         try:
             original_path, mask_path, overlay_path = preview_paths(source_path, args.output_dir, names)
+            names.save()
             old_original_path, old_mask_path, old_overlay_path = old_preview_paths(source_path, args.output_dir, names)
             current_paths = (original_path, mask_path, overlay_path)
             old_paths = (old_original_path, old_mask_path, old_overlay_path)
