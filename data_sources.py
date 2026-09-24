@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Callable
 
 from image_loading import SUPPORTED_EXTENSIONS
 
@@ -81,9 +83,16 @@ def iter_images(input_dirs: Path | Iterable[Path]) -> list[Path]:
 class SourceOutputNames:
     """Stable source-to-stem mapping for outputs in one pipeline directory."""
 
-    def __init__(self, source_paths: Iterable[Path], output_dir: Path, required_suffixes: Iterable[str]):
+    def __init__(
+        self,
+        source_paths: Iterable[Path],
+        output_dir: Path,
+        required_suffixes: Iterable[str],
+        output_paths_for_stem: Callable[[str], Iterable[Path]] | None = None,
+    ):
         self.output_dir = output_dir
         self.required_suffixes = tuple(required_suffixes)
+        self.output_paths_for_stem = output_paths_for_stem
         self.manifest_path = output_dir / ".source-manifest.json"
         self.mapping: dict[str, str] = {}
         if self.manifest_path.exists():
@@ -95,15 +104,37 @@ class SourceOutputNames:
                 pass
         self.source_paths = sorted(source_paths, key=lambda path: str(path).lower())
         self.used = set(self.mapping.values())
+        self.source_stem_counts: dict[str, int] = {}
+        for path in self.source_paths:
+            self.source_stem_counts[path.stem] = self.source_stem_counts.get(path.stem, 0) + 1
+
+    def _output_paths(self, stem: str) -> tuple[Path, ...]:
+        if self.output_paths_for_stem is not None:
+            return tuple(self.output_paths_for_stem(stem))
+        return tuple(self.output_dir / f"{stem}{suffix}" for suffix in self.required_suffixes)
+
+    def _complete_output_exists(self, stem: str) -> bool:
+        paths = self._output_paths(stem)
+        return bool(paths) and all(path.exists() for path in paths)
 
     def stem_for(self, source_path: Path) -> str:
         source_key = str(source_path.resolve())
         if source_key in self.mapping:
             return self.mapping[source_key]
         candidate = source_path.stem
-        if candidate in self.used or any(
-            (self.output_dir / f"{candidate}{suffix}").exists() for suffix in self.required_suffixes
+        # A complete, unambiguous output set may have been created before the
+        # manifest was flushed (for example if a long run was interrupted).
+        # Adopt it instead of creating a new hashed name and reprocessing it.
+        if (
+            candidate not in self.used
+            and self.source_stem_counts.get(candidate, 0) == 1
+            and self._complete_output_exists(candidate)
         ):
+            self.mapping[source_key] = candidate
+            self.used.add(candidate)
+            return candidate
+
+        if candidate in self.used or any(path.exists() for path in self._output_paths(candidate)):
             digest = hashlib.sha256(source_key.encode("utf-8")).hexdigest()[:10]
             candidate = f"{candidate}_{digest}"
             while candidate in self.used:
@@ -115,4 +146,23 @@ class SourceOutputNames:
 
     def save(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.manifest_path.write_text(json.dumps(self.mapping, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        payload = json.dumps(self.mapping, indent=2, sort_keys=True) + "\n"
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.output_dir,
+                prefix=f".{self.manifest_path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                temporary.write(payload)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.replace(temporary_path, self.manifest_path)
+            temporary_path = None
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
