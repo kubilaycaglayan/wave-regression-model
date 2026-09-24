@@ -36,6 +36,7 @@ labels.csv
 # Locally generated pipeline outputs.
 step-2-final-water-data/index.html
 step-3-dataset-splits/*.csv
+step-6-test-evaluation/*
 
 # Locally generated training artifacts.
 *.ckpt
