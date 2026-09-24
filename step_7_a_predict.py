@@ -19,6 +19,7 @@ from transformers.utils import logging as transformers_logging
 
 from image_loading import load_rgb_image
 from step_1_a_water_segmentation import SegmentationModel
+from step_1_a_water_segmentation import configure_inference_device
 from step_1_a_water_segmentation import load_model as load_segmentation_model
 from step_1_b_preprocess_water_inputs import (
     decode_rgb_bytes,
@@ -318,7 +319,7 @@ def main() -> None:
         checkpoint_sha256 = sha256_for(checkpoint_path)
         print_timing("Fingerprint checkpoint", checkpoint_started)
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = configure_inference_device(verbose=True)
         preview_inputs: dict[Path, Image.Image] = {}
         for photo in photos:
             preview_path = preview_path_for(photo)
@@ -384,7 +385,19 @@ def main() -> None:
                     preview_started = time.perf_counter()
                     preview_path = save_preview(photo, encoded_model_input)
                     print_timing("Save preview", preview_started)
-                waviness, tensor_shape = predict(model_input, device, model, transform)
+                try:
+                    waviness, tensor_shape = predict(model_input, device, model, transform)
+                except RuntimeError as error:
+                    retryable_cuda_error = any(
+                        message in str(error).lower()
+                        for message in ("engine to execute", "cudnn", "cuda out of memory")
+                    )
+                    if device.type != "cuda" or not retryable_cuda_error:
+                        raise
+                    print("CUDA regression inference unavailable; retrying this photo on CPU.", flush=True)
+                    device = torch.device("cpu")
+                    model.to(device)
+                    waviness, tensor_shape = predict(model_input, device, model, transform)
 
                 expected_shape = (1, 3, IMAGE_SIZE[1], IMAGE_SIZE[0])
                 if tensor_shape != expected_shape:
