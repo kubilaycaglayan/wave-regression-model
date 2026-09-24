@@ -251,9 +251,7 @@ New checkpoints will be created in:
 step-5-checkpoints/
 ```
 
-The command prints the exact best checkpoint path. Record that path.
-
-For this repository, the next run after `v1` and `v2` should normally create a `v3` checkpoint.
+The command prints the exact best checkpoint path. Use that path for later evaluation or prediction.
 
 ## Step 6: Evaluate the test set
 
@@ -278,7 +276,8 @@ Evaluations from different checkpoints are preserved in separate directories.
 Configure the prediction checkpoint in `.env` (or the environment) using:
 
 ```text
-PREDICT_CHECKPOINT_PATH=step-5-checkpoints/wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt
+# Use the exact best-checkpoint path printed by train.py.
+PREDICT_CHECKPOINT_PATH=step-5-checkpoints/<best-checkpoint>.ckpt
 ```
 
 After training, update `PREDICT_CHECKPOINT_PATH` to the new checkpoint path printed by `train.py`.
@@ -318,4 +317,3 @@ Step 8 compares training-mean and training-median baselines with the matching ne
 - Do not train directly from raw photos. Training uses the Step 2 outputs.
 - Do not delete or reshuffle existing split manifests; the repository intentionally preserves previous assignments.
 - `step_6_a_evaluate_test.py` always uses the immutable `benchmark-v1` test manifest by default and automatically selects the newest training manifest's best checkpoint. Set `EVALUATION_CHECKPOINT_PATH` to pin a historical checkpoint. Results are stored in checkpoint- and SHA-256-specific directories under `step-6-test-evaluation/`, so evaluations from different checkpoints are preserved.
-- The current repository contains two existing training runs, `v1` and `v2`; a new training run should create the next version without overwriting them.

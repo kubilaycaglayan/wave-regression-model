@@ -75,20 +75,23 @@ Put HEIC, HEIF, JPEG, or PNG photos in `predict-holder/`, then run `python step_
 Configure the validation-selected checkpoint in `.env`:
 
 ```dotenv
-PREDICT_CHECKPOINT_PATH=step-5-checkpoints/wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt
+# Use the exact best-checkpoint path printed by train.py.
+PREDICT_CHECKPOINT_PATH=step-5-checkpoints/<best-checkpoint>.ckpt
 ```
 
 Test evaluation automatically selects the newest training manifest's best checkpoint. To pin a
 specific checkpoint for a reproducible historical evaluation, configure it separately:
 
 ```dotenv
-EVALUATION_CHECKPOINT_PATH=step-5-checkpoints/wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt
+# Optional: use the exact checkpoint path to evaluate a specific run.
+EVALUATION_CHECKPOINT_PATH=step-5-checkpoints/<checkpoint>.ckpt
 ```
 
 Each evaluation is saved under `step-6-test-evaluation/` using the checkpoint filename and a
 checkpoint SHA-256 prefix. The directory contains predictions, a summary, an inspection gallery,
 and metadata including the exact checkpoint and test-manifest fingerprints. Existing complete
 evaluations are skipped; a different checkpoint gets a separate result directory.
+Older root-level files in this directory may be legacy evaluation outputs.
 
 Step 7 treats `step-7-inference-preview/<photo-stem>-model-input.jpg` as the checkpoint-independent, canonical preprocessed model input. Existing previews must be detached RGB `224x224` JPEG inputs; malformed previews fail clearly and are not replaced automatically. A valid preview is reused when selecting a different checkpoint, so only regression inference runs again. A photo is skipped only when its valid preview and a matching prediction record for the selected checkpoint both exist. If the preview is missing, Steps 1 and 2 run again even when a prediction record exists; delete a preview to force regeneration.
 
