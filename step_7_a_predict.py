@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Mapping
 
 import torch
 from PIL import Image
@@ -54,9 +56,10 @@ def checkpoint_path_from_env() -> Path:
     return path if path.is_absolute() else PROJECT_DIR / path
 
 
-PREDICT_CHECKPOINT_PATH = checkpoint_path_from_env()
 PREVIEW_DIR = PROJECT_DIR / "step-7-inference-preview"
+PREDICTIONS_DIR = INPUT_DIR / "predictions"
 SUPPORTED_EXTENSIONS = {".heic", ".heif", ".jpg", ".jpeg", ".png"}
+PREDICTION_RECORD_MARKER = "--- prediction record ---"
 
 
 def print_timing(label: str, started: float) -> None:
@@ -143,6 +146,104 @@ def preview_path_for(path: Path) -> Path:
     return PREVIEW_DIR / f"{path.stem}-model-input.jpg"
 
 
+def prediction_log_path_for(path: Path) -> Path:
+    """Return the append-only prediction history path for an input photo."""
+    return PREDICTIONS_DIR / f"{path.stem}.txt"
+
+
+def sha256_for(path: Path) -> str:
+    """Return a file's SHA-256 digest without loading the whole file into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def read_prediction_records(path: Path) -> list[dict[str, str]]:
+    """Read completed human-readable prediction records from a log file."""
+    if not path.is_file():
+        return []
+
+    records: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line == PREDICTION_RECORD_MARKER:
+            if current is not None:
+                records.append(current)
+            current = {}
+            continue
+        if current is None:
+            raise ValueError(f"Prediction log must start with {PREDICTION_RECORD_MARKER}: {path}:{line_number}")
+        key, separator, value = line.partition(":")
+        if not separator or not key.strip():
+            raise ValueError(f"Malformed prediction log line: {path}:{line_number}")
+        current[key.strip()] = value.strip()
+    if current is not None:
+        records.append(current)
+    return records
+
+
+def has_matching_prediction(
+    photo: Path,
+    checkpoint_path: Path,
+    checkpoint_sha256: str,
+) -> bool:
+    """Return whether this photo has a completed result for this checkpoint."""
+    input_path = str(photo.resolve())
+    selected_checkpoint = str(checkpoint_path.resolve())
+    for record in read_prediction_records(prediction_log_path_for(photo)):
+        if (
+            record.get("input_path") == input_path
+            and record.get("checkpoint_path") == selected_checkpoint
+            and record.get("checkpoint_sha256") == checkpoint_sha256
+            and record.get("prediction")
+        ):
+            return True
+    return False
+
+
+def should_skip_photo(
+    photo: Path,
+    checkpoint_path: Path,
+    checkpoint_sha256: str,
+) -> bool:
+    """Skip only after both the matching result and its preview are present."""
+    return preview_path_for(photo).is_file() and has_matching_prediction(
+        photo, checkpoint_path, checkpoint_sha256
+    )
+
+
+def append_prediction_record(
+    photo: Path,
+    checkpoint_path: Path,
+    checkpoint_sha256: str,
+    prediction: float,
+    device: torch.device,
+    timings: Mapping[str, float],
+) -> Path:
+    """Append one completed prediction record and return its log path."""
+    log_path = prediction_log_path_for(photo)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    fields = [
+        PREDICTION_RECORD_MARKER,
+        f"input_path: {photo.resolve()}",
+        f"prediction: {prediction:.8f}",
+        f"checkpoint_path: {checkpoint_path.resolve()}",
+        f"checkpoint_sha256: {checkpoint_sha256}",
+        f"timestamp_utc: {datetime.now(timezone.utc).isoformat()}",
+        f"device: {device}",
+    ]
+    for label, seconds in timings.items():
+        fields.append(f"{label}_seconds: {seconds:.3f}")
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(fields) + "\n\n")
+    return log_path
+
+
 def predict(
     model_input: Image.Image,
     device: torch.device,
@@ -176,17 +277,29 @@ def main() -> None:
         total_started = time.perf_counter()
         transformers_logging.disable_progress_bar()
         photos = find_input_photos()
-        if not PREDICT_CHECKPOINT_PATH.is_file():
-            raise FileNotFoundError(f"Selected checkpoint is missing: {PREDICT_CHECKPOINT_PATH}")
+        checkpoint_path = checkpoint_path_from_env()
+        if not checkpoint_path.is_file():
+            raise FileNotFoundError(f"Selected checkpoint is missing: {checkpoint_path}")
+        checkpoint_started = time.perf_counter()
+        checkpoint_sha256 = sha256_for(checkpoint_path)
+        print_timing("Fingerprint checkpoint", checkpoint_started)
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        pending_photos = [photo for photo in photos if not preview_path_for(photo).is_file()]
+        pending_photos = [
+            photo
+            for photo in photos
+            if not should_skip_photo(photo, checkpoint_path, checkpoint_sha256)
+        ]
         print(f"Images: {len(photos)} ({len(pending_photos)} pending)")
         print(f"Device: {device}", flush=True)
+        print(f"Checkpoint: {checkpoint_path.resolve()}", flush=True)
 
         if not pending_photos:
             for index, photo in enumerate(photos, 1):
-                print(f"[{index}/{len(photos)}] {photo.name}: skipped (preview already exists)")
+                print(
+                    f"[{index}/{len(photos)}] {photo.name}: "
+                    "skipped (matching prediction and preview already exist)"
+                )
             print_timing("Total", total_started)
             return
 
@@ -195,7 +308,7 @@ def main() -> None:
         print_timing("Load segmentation model", started)
 
         started = time.perf_counter()
-        model = WaveRegressionModel.load_from_checkpoint(PREDICT_CHECKPOINT_PATH, map_location=device)
+        model = WaveRegressionModel.load_from_checkpoint(checkpoint_path, map_location=device)
         model.to(device)
         model.eval()
         print_timing("Load regression checkpoint", started)
@@ -205,9 +318,12 @@ def main() -> None:
         skipped = 0
         failed = 0
         for index, photo in enumerate(photos, 1):
-            if preview_path_for(photo).is_file():
+            if should_skip_photo(photo, checkpoint_path, checkpoint_sha256):
                 skipped += 1
-                print(f"[{index}/{len(photos)}] {photo.name}: skipped (preview already exists)")
+                print(
+                    f"[{index}/{len(photos)}] {photo.name}: "
+                    "skipped (matching prediction and preview already exist)"
+                )
                 continue
 
             photo_started = time.perf_counter()
@@ -222,8 +338,18 @@ def main() -> None:
                 expected_shape = (1, 3, IMAGE_SIZE[1], IMAGE_SIZE[0])
                 if tensor_shape != expected_shape:
                     raise RuntimeError(f"Unexpected tensor shape after inference: {tensor_shape}")
+                elapsed = time.perf_counter() - photo_started
+                log_path = append_prediction_record(
+                    photo,
+                    checkpoint_path,
+                    checkpoint_sha256,
+                    waviness,
+                    device,
+                    {"photo_elapsed": elapsed},
+                )
                 print(f"Waviness: {waviness:.3f}")
                 print(f"Preview: {preview_path.relative_to(PROJECT_DIR)}")
+                print(f"Prediction log: {log_path.relative_to(PROJECT_DIR)}")
                 print_timing("Photo total", photo_started)
                 processed += 1
             except Exception as error:

@@ -70,7 +70,7 @@ image with the new result.
 
 ## Predict waviness
 
-Put HEIC, HEIF, JPEG, or PNG photos in `predict-holder/`, then run `python step_7_a_predict.py`; photos are predicted one by one and previews are saved in `step-7-inference-preview/`.
+Put HEIC, HEIF, JPEG, or PNG photos in `predict-holder/`, then run `python step_7_a_predict.py`; photos are predicted one by one and previews are saved in `step-7-inference-preview/`. Each photo also gets an append-only prediction history at `predict-holder/predictions/<photo-stem>.txt`, including the prediction and checkpoint fingerprint.
 
 Configure the validation-selected checkpoint in `.env`:
 
@@ -83,6 +83,8 @@ Configure the checkpoint used by test evaluation separately:
 ```dotenv
 EVALUATION_CHECKPOINT_PATH=step-5-checkpoints/wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt
 ```
+
+Step 7 skips a photo only when its preview and a matching prediction record for the selected checkpoint both exist. Selecting a different checkpoint creates another record in the same photo history. If the preview is missing, the photo is processed again even when its prediction record exists.
 
 ## Discard unrelated or disrupted images
 

@@ -19,6 +19,7 @@ Predict one or more new photos:
 # put HEIC/JPG/PNG in predict-holder/, then:
 python step_7_a_predict.py
 # previews -> step-7-inference-preview/
+# prediction histories -> predict-holder/predictions/
 ```
 
 Notes: steps skip existing outputs, so reruns are safe. Use `--device cpu` on the step 1/2 scripts to force CPU.
@@ -253,13 +254,13 @@ For this repository, the next run after `v1` and `v2` should normally create a `
 
 ## 9. Use the new checkpoint for predictions
 
-`step_7_a_predict.py` currently has the `v1` checkpoint hard-coded:
+Configure the prediction checkpoint in `.env` (or the environment) using:
 
 ```text
-step-5-checkpoints/wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt
+PREDICT_CHECKPOINT_PATH=step-5-checkpoints/wave-regression-baseline-v1-best-val-mae-epoch=45-val_mae=0.1068.ckpt
 ```
 
-After training, update the `CHECKPOINT_PATH` in `step_7_a_predict.py` to the new checkpoint path printed by `train.py`.
+After training, update `PREDICT_CHECKPOINT_PATH` to the new checkpoint path printed by `train.py`.
 
 Then put new inference photos in:
 
@@ -277,7 +278,10 @@ Predictions and processed previews are written to:
 
 ```text
 step-7-inference-preview/
+predict-holder/predictions/
 ```
+
+The prediction directory contains one append-only `.txt` history per input photo. Each record includes the waviness prediction, selected checkpoint path, checkpoint SHA-256, timestamp, device, and elapsed processing time. A photo is skipped only when both its preview and a record for the same checkpoint are present; using a different checkpoint predicts the photo again and appends a new record.
 
 ## Important notes
 
