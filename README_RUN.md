@@ -1,14 +1,11 @@
 # Run guide
 
-Sea waviness regression (0 = calm, 1 = rough) from sea photos.
-
 ```bash
 pip install -r requirements.txt
 python step_1_b_preprocess_water_inputs.py
 python step_2_a_reduce_black_water_area.py
 python step_2_b_label_data.py        # labeling UI at http://localhost:8055, saves labels.csv
-python step_3_a_prepare_dataset_split.py --seed 42
-python step_4_c_inspect_training_data.py
+python step_3_a_prepare_dataset_split.py
 python train.py                       # or: python step_5_b_train.py
 python step_6_a_evaluate_test.py
 ```
@@ -38,7 +35,7 @@ Run all commands from:
 cd /path/to/wave-regression-model
 ```
 
-## 1. Add the new photos
+## Step 0: Add the new photos
 
 Copy new JPEG, PNG, HEIC, HEIF, TIFF, BMP, or WebP photos into:
 
@@ -58,7 +55,9 @@ The split script requires filenames containing an `IMG_<number>` pattern.
 
 Do not replace an existing photo with the same filename unless you also remove its generated pipeline outputs. Existing output filenames cause later steps to skip that image.
 
-## 2. Optional: create water-mask previews
+## Step 1: Prepare the water inputs
+
+### Optional: create water-mask previews
 
 This is for inspecting whether the pretrained segmentation model correctly detects the sea:
 
@@ -74,7 +73,7 @@ water-mask-preview/index.html
 
 Inspect the original, mask, and overlay images. The generated `original` and `overlay` files are previews and should not be committed.
 
-## 3. Create standardized Step 1 inputs
+### Create standardized Step 1 inputs
 
 ![Step 1 standardized water-only input](readme_files/step-1-preprocessed-sea-example.jpg)
 
@@ -110,7 +109,9 @@ step-1-processed-data/index.html
 
 The script skips images whose `step-1_<name>.jpg` output already exists.
 
-## 4. Create the lower-water Step 2 images
+## Step 2: Create and label the lower-water images
+
+### Create the lower-water Step 2 images
 
 ![Step 2 lower-water crop](readme_files/step-2-pick-lower-water-area.jpg)
 
@@ -142,7 +143,7 @@ step-2-final-water-data/index.html
 
 The script skips images whose `step-2_<name>.jpg` output already exists.
 
-## 5. Label the new Step 2 images
+### Label the new Step 2 images
 
 Start the labeling web app:
 
@@ -173,7 +174,7 @@ labels.csv
 
 The existing labels are preserved. You do not need to manually edit the CSV.
 
-## 6. Rebuild the dataset splits
+## Step 3: Rebuild the dataset splits
 
 Run:
 
@@ -210,7 +211,7 @@ A timestamped immutable snapshot is also created under:
 step-3-dataset-splits/snapshots/
 ```
 
-## 7. Optional: inspect the training data
+## Step 4: Inspect the training data
 
 Run:
 
@@ -226,7 +227,7 @@ step-4-data-preview/index.html
 
 This checks tensor shapes, labels, deterministic validation/test transforms, and displays training augmentations.
 
-## 8. Train a new model
+## Step 5: Train a new model
 
 Run:
 
@@ -254,7 +255,25 @@ The command prints the exact best checkpoint path. Record that path.
 
 For this repository, the next run after `v1` and `v2` should normally create a `v3` checkpoint.
 
-## 9. Use the new checkpoint for predictions
+## Step 6: Evaluate the test set
+
+Run:
+
+```bash
+python step_6_a_evaluate_test.py
+```
+
+The evaluation uses the immutable `benchmark-v1` test manifest by default and automatically selects the newest training manifest's best checkpoint. To evaluate a specific checkpoint, set `EVALUATION_CHECKPOINT_PATH` to its path.
+
+Results are written to a checkpoint- and SHA-256-specific directory under:
+
+```text
+step-6-test-evaluation/
+```
+
+Evaluations from different checkpoints are preserved in separate directories.
+
+## Step 7: Use the new checkpoint for predictions
 
 Configure the prediction checkpoint in `.env` (or the environment) using:
 
@@ -285,7 +304,7 @@ predict-holder/predictions/
 
 The prediction directory contains one append-only `.txt` history per input photo. Each record includes the waviness prediction, selected checkpoint path, checkpoint SHA-256, timestamp, device, and elapsed processing time. A valid `step-7-inference-preview/<photo-stem>-model-input.jpg` is the checkpoint-independent cached model input, so changing checkpoints reuses the preview and reruns only regression inference. A photo is skipped only when both its valid preview and a record for the same checkpoint are present. Missing previews trigger Steps 1 and 2; malformed previews fail clearly rather than being silently replaced. Delete a preview to force regeneration.
 
-## 10. Run the Step 8 baseline experiment
+## Step 8: Run the baseline experiment
 
 ```bash
 python step_8_a_constant_prediction_baselines.py
@@ -298,5 +317,5 @@ Step 8 compares training-mean and training-median baselines with the matching ne
 - `step_1_a_prepare_water_masks.py` is an inspection step; `step_1_b_preprocess_water_inputs.py` is the actual Step 1 training-data preparation.
 - Do not train directly from raw photos. Training uses the Step 2 outputs.
 - Do not delete or reshuffle existing split manifests; the repository intentionally preserves previous assignments.
-- `step_6_a_evaluate_test.py` is configured for the original immutable `benchmark-v1` test evaluation and the original `v1` checkpoint. It is not automatically configured to evaluate the newly trained checkpoint.
+- `step_6_a_evaluate_test.py` always uses the immutable `benchmark-v1` test manifest by default and automatically selects the newest training manifest's best checkpoint. Set `EVALUATION_CHECKPOINT_PATH` to pin a historical checkpoint. Results are stored in checkpoint- and SHA-256-specific directories under `step-6-test-evaluation/`, so evaluations from different checkpoints are preserved.
 - The current repository contains two existing training runs, `v1` and `v2`; a new training run should create the next version without overwriting them.
