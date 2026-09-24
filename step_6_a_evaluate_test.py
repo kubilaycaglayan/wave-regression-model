@@ -215,9 +215,10 @@ def write_predictions(rows: list[dict[str, float | str]]) -> None:
 
 def write_gallery(rows: list[dict[str, float | str]]) -> None:
     cards = []
+    image_root = Path(os.path.relpath(IMAGE_DIR, OUTPUT_DIR)).as_posix()
     for row in rows:
         filename = str(row["filename"])
-        image_url = "../step-2-final-water-data/" + quote(filename)
+        image_url = f"{image_root}/{quote(filename)}"
         cards.append(
             f"""
       <article class="card">
