@@ -59,3 +59,46 @@ def test_aggregate_requires_three_seeds() -> None:
     }
     with pytest.raises(RuntimeError, match="Expected 3 completed seeds"):
         experiment.aggregate_results([result])
+
+
+def test_new_version_and_matching_incomplete_version_resume(tmp_path: Path) -> None:
+    snapshot = experiment.snapshot_metadata(experiment.DEFAULT_SNAPSHOT_DIR)
+    planned = [("resnet18", 42)]
+    first, first_manifest = experiment.prepare_experiment_version(tmp_path, snapshot, planned)
+    assert first.name.startswith("v1-")
+    assert first_manifest["status"] == "running"
+
+    resumed, resumed_manifest = experiment.prepare_experiment_version(tmp_path, snapshot, planned)
+    assert resumed == first
+    assert resumed_manifest["config_fingerprint"] == first_manifest["config_fingerprint"]
+    assert len(experiment.version_directories(tmp_path)) == 1
+
+
+def test_changed_configuration_creates_new_version(tmp_path: Path) -> None:
+    snapshot = experiment.snapshot_metadata(experiment.DEFAULT_SNAPSHOT_DIR)
+    experiment.prepare_experiment_version(tmp_path, snapshot, [("resnet18", 42)])
+    second, _ = experiment.prepare_experiment_version(tmp_path, snapshot, [("resnet34", 42)])
+    assert second.name.startswith("v2-")
+    assert len(experiment.version_directories(tmp_path)) == 2
+
+
+def test_completed_version_is_immutable(tmp_path: Path) -> None:
+    snapshot = experiment.snapshot_metadata(experiment.DEFAULT_SNAPSHOT_DIR)
+    version, manifest = experiment.prepare_experiment_version(tmp_path, snapshot, [("resnet18", 42)])
+    manifest["status"] = "complete"
+    experiment.json_dump(version / "experiment_manifest.json", manifest)
+    with pytest.raises(RuntimeError, match="complete and immutable"):
+        experiment.prepare_experiment_version(tmp_path, snapshot, [("resnet18", 42)], requested_version=version.name)
+
+
+def test_index_updates_one_record_per_version(tmp_path: Path) -> None:
+    snapshot = experiment.snapshot_metadata(experiment.DEFAULT_SNAPSHOT_DIR)
+    version, manifest = experiment.prepare_experiment_version(tmp_path, snapshot, [("resnet18", 42)])
+    experiment.update_experiment_index(tmp_path, manifest)
+    manifest["status"] = "complete"
+    manifest["completed_runs"] = ["resnet18-seed-42"]
+    experiment.update_experiment_index(tmp_path, manifest)
+    index = json.loads((tmp_path / "experiment_index.json").read_text(encoding="utf-8"))
+    assert len(index["versions"]) == 1
+    assert index["versions"][0]["status"] == "complete"
+    assert index["versions"][0]["completed_runs"] == ["resnet18-seed-42"]

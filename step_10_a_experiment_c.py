@@ -12,11 +12,9 @@ import csv
 import hashlib
 import json
 import math
-import os
 import re
 import shutil
 import time
-from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -59,6 +57,8 @@ LEARNING_RATE = 1e-3
 BATCH_SIZE = 8
 MAX_EPOCHS = 100
 EARLY_STOPPING_PATIENCE = 10
+VERSION_DIRECTORY_PATTERN = re.compile(r"^v(?P<number>\d+)-(?P<stamp>[^/]+)$")
+INDEX_SCHEMA_VERSION = 1
 
 
 def sha256_for(path: Path) -> str:
@@ -76,6 +76,166 @@ def utc_now() -> str:
 def json_dump(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def canonical_json_hash(value: Any) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def version_directories(output_root: Path) -> list[Path]:
+    if not output_root.is_dir():
+        return []
+    return sorted(
+        (path for path in output_root.iterdir() if path.is_dir() and VERSION_DIRECTORY_PATTERN.fullmatch(path.name)),
+        key=lambda path: int(VERSION_DIRECTORY_PATTERN.fullmatch(path.name).group("number")),
+    )
+
+
+def next_version_number(output_root: Path) -> int:
+    return max(
+        (int(VERSION_DIRECTORY_PATTERN.fullmatch(path.name).group("number")) for path in version_directories(output_root)),
+        default=0,
+    ) + 1
+
+
+def experiment_configuration(snapshot: dict[str, Any], planned: list[tuple[str, int]]) -> dict[str, Any]:
+    return {
+        "experiment": "C_frozen_pretrained_backbone_comparison",
+        "planned_runs": [{"backbone": canonical_backbone_name(backbone), "seed": seed} for backbone, seed in planned],
+        "training": {
+            "pretrained_weights": "torchvision DEFAULT ImageNet weights",
+            "backbone_frozen": True,
+            "batchnorm_eval": True,
+            "regression_head": "Linear(feature_dim, 1) -> Sigmoid",
+            "loss": "SmoothL1Loss",
+            "optimizer": "AdamW",
+            "learning_rate": LEARNING_RATE,
+            "batch_size": BATCH_SIZE,
+            "max_epochs": MAX_EPOCHS,
+            "early_stopping": {"monitor": "val_mae", "mode": "min", "patience": EARLY_STOPPING_PATIENCE},
+            "image_size": list(IMAGE_SIZE),
+            "imagenet_mean": list(IMAGENET_MEAN),
+            "imagenet_std": list(IMAGENET_STD),
+            "augmentations": "RandomHorizontalFlip(p=0.5) + ColorJitter(brightness=0.25, contrast=0.25, saturation=0.20, hue=0.02)",
+        },
+        "split_snapshot": snapshot,
+        "source_sha256": sha256_for(Path(__file__).resolve()),
+        "test_evaluated": False,
+    }
+
+
+def experiment_version_name(output_root: Path) -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"v{next_version_number(output_root)}-{timestamp}"
+
+
+def resolve_version_directory(output_root: Path, requested: str) -> Path:
+    candidates = [path for path in version_directories(output_root) if path.name == requested or path.name.startswith(requested + "-")]
+    if not candidates:
+        raise FileNotFoundError(f"Experiment version not found under {output_root}: {requested}")
+    if len(candidates) > 1:
+        raise ValueError(f"Experiment version prefix is ambiguous: {requested}; matches {[path.name for path in candidates]}")
+    return candidates[0]
+
+
+def prepare_experiment_version(
+    output_root: Path,
+    snapshot: dict[str, Any],
+    planned: list[tuple[str, int]],
+    requested_version: str | None = None,
+    force_new: bool = False,
+) -> tuple[Path, dict[str, Any]]:
+    """Create a new immutable version or safely select an incomplete one to resume."""
+    output_root.mkdir(parents=True, exist_ok=True)
+    if requested_version and force_new:
+        raise ValueError("--force cannot be combined with --version; select a new version without overwriting history")
+    configuration = experiment_configuration(snapshot, planned)
+    fingerprint = canonical_json_hash(configuration)
+    selected: Path | None = None
+    if requested_version:
+        selected = resolve_version_directory(output_root, requested_version)
+    elif not force_new:
+        for candidate in reversed(version_directories(output_root)):
+            manifest_path = candidate / "experiment_manifest.json"
+            if not manifest_path.is_file():
+                continue
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("config_fingerprint") == fingerprint and manifest.get("status") != "complete":
+                selected = candidate
+                break
+    if selected is None:
+        if not requested_version and not force_new:
+            # Existing unversioned outputs are ambiguous and must be migrated
+            # explicitly instead of being silently overwritten.
+            legacy_outputs = [output_root / name for name in ("runs", "plots", "aggregate_metrics.json", "backbone_comparison.csv", "backbone_comparison.md")]
+            if any(path.exists() for path in legacy_outputs) and not version_directories(output_root):
+                raise RuntimeError(
+                    f"Unversioned Experiment C outputs exist in {output_root}; migrate them into a version directory before starting a new run"
+                )
+        selected = output_root / experiment_version_name(output_root)
+        selected.mkdir(parents=True, exist_ok=False)
+        manifest = {
+            "schema_version": 1,
+            "version_id": selected.name,
+            "version_number": int(VERSION_DIRECTORY_PATTERN.fullmatch(selected.name).group("number")),
+            "created_at_utc": utc_now(),
+            "status": "running",
+            "config_fingerprint": fingerprint,
+            "configuration": configuration,
+            "completed_runs": [],
+            "artifacts": {},
+        }
+    else:
+        manifest_path = selected / "experiment_manifest.json"
+        if not manifest_path.is_file():
+            raise RuntimeError(f"Selected version has no manifest: {selected}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("config_fingerprint") != fingerprint:
+            raise ValueError(
+                f"Configuration does not match experiment version {selected.name}; use a new version for changed settings"
+            )
+        if manifest.get("status") == "complete":
+            raise RuntimeError(f"Experiment version is complete and immutable: {selected}")
+        manifest["status"] = "running"
+    json_dump(selected / "experiment_manifest.json", manifest)
+    return selected, manifest
+
+
+def update_experiment_index(output_root: Path, manifest: dict[str, Any]) -> None:
+    """Update the one-record-per-version index without duplicating versions."""
+    index_path = output_root / "experiment_index.json"
+    if index_path.is_file():
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    else:
+        index = {"schema_version": INDEX_SCHEMA_VERSION, "versions": []}
+    versions = [item for item in index.get("versions", []) if item.get("version_id") != manifest.get("version_id")]
+    versions.append(
+        {
+            "version_id": manifest.get("version_id"),
+            "version_number": manifest.get("version_number"),
+            "created_at_utc": manifest.get("created_at_utc"),
+            "completed_at_utc": manifest.get("completed_at_utc"),
+            "status": manifest.get("status"),
+            "snapshot": manifest.get("configuration", {}).get("split_snapshot", {}).get("name"),
+            "config_fingerprint": manifest.get("config_fingerprint"),
+            "completed_runs": manifest.get("completed_runs", []),
+            "report": manifest.get("artifacts", {}).get("markdown"),
+        }
+    )
+    versions.sort(key=lambda item: int(item.get("version_number", 0)))
+    index = {"schema_version": INDEX_SCHEMA_VERSION, "versions": versions}
+    json_dump(index_path, index)
+    lines = [
+        "# Experiment C Version Index",
+        "",
+        "| Version | Status | Snapshot | Configuration | Completed runs | Report |",
+        "|---|---|---|---|---:|---|",
+    ]
+    for item in versions:
+        report = f"`{item['report']}`" if item.get("report") else ""
+        lines.append(f"| `{item['version_id']}` | {item['status']} | `{item.get('snapshot', '')}` | `{item.get('config_fingerprint', '')[:12]}` | {len(item.get('completed_runs', []))} | {report} |")
+    (output_root / "experiment_index.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def read_rows(path: Path) -> list[dict[str, str]]:
@@ -337,16 +497,55 @@ def run_id(backbone: str, seed: int) -> str:
     return f"{canonical_backbone_name(backbone)}-seed-{seed}"
 
 
-def run_one(backbone: str, seed: int, snapshot_dir: Path, output_root: Path, image_dir: Path, force: bool = False) -> dict[str, Any]:
+def rebase_checkpoint_reference(result: dict[str, Any], version_root: Path) -> dict[str, Any]:
+    """Repair paths when a legacy unversioned result has been moved into a version."""
+    checkpoint = result.get("checkpoint", {})
+    path_value = checkpoint.get("path")
+    if not isinstance(path_value, str):
+        return result
+    current = Path(path_value)
+    if current.is_file():
+        return result
+    backbone = canonical_backbone_name(result["config"]["backbone"])
+    seed = int(result["config"]["seed"])
+    candidates = list((version_root / "runs" / backbone / f"seed-{seed}").glob("*.ckpt"))
+    if len(candidates) == 1:
+        checkpoint["path"] = str(candidates[0].resolve())
+    return result
+
+
+def load_completed_results(version_root: Path, rewrite_paths: bool = True) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for backbone in BACKBONES:
+        for seed in SEEDS:
+            metrics_path = version_root / "runs" / backbone / f"seed-{seed}" / "metrics.json"
+            if not metrics_path.is_file():
+                raise FileNotFoundError(f"Missing completed run metrics: {metrics_path}")
+            result = json.loads(metrics_path.read_text(encoding="utf-8"))
+            if result.get("status") != "complete":
+                raise RuntimeError(f"Run is not complete: {metrics_path}")
+            old_checkpoint_path = result.get("checkpoint", {}).get("path")
+            rebased = rebase_checkpoint_reference(result, version_root)
+            if rewrite_paths and rebased.get("checkpoint", {}).get("path") != old_checkpoint_path:
+                json_dump(metrics_path, rebased)
+            results.append(rebased)
+    return results
+
+
+def run_one(backbone: str, seed: int, snapshot_dir: Path, version_root: Path, image_dir: Path, force: bool = False) -> dict[str, Any]:
     snapshot = snapshot_metadata(snapshot_dir)
     config = config_for(backbone, seed, snapshot)
-    run_directory = output_root / "runs" / canonical_backbone_name(backbone) / f"seed-{seed}"
+    run_directory = version_root / "runs" / canonical_backbone_name(backbone) / f"seed-{seed}"
     metrics_path = run_directory / "metrics.json"
     if metrics_path.is_file() and not force:
         existing = json.loads(metrics_path.read_text(encoding="utf-8"))
         if existing.get("config") == config and existing.get("status") == "complete":
+            old_checkpoint_path = existing.get("checkpoint", {}).get("path")
+            rebased = rebase_checkpoint_reference(existing, version_root)
+            if rebased.get("checkpoint", {}).get("path") != old_checkpoint_path:
+                json_dump(metrics_path, rebased)
             print(f"Skipping completed run: {run_id(backbone, seed)}", flush=True)
-            return existing
+            return rebased
 
     pending = run_directory.with_name(run_directory.name + ".pending")
     if pending.exists():
@@ -395,7 +594,7 @@ def run_one(backbone: str, seed: int, snapshot_dir: Path, output_root: Path, ima
     metrics = compute_metrics(actual, predicted)
     epochs_trained = int(trainer.fit_loop.epoch_progress.current.completed)
     checkpoint_hash = sha256_for(best_checkpoint)
-    final_directory = output_root / "runs" / canonical_backbone_name(backbone) / f"seed-{seed}"
+    final_directory = version_root / "runs" / canonical_backbone_name(backbone) / f"seed-{seed}"
     if final_directory.exists():
         shutil.rmtree(final_directory)
     pending.rename(final_directory)
@@ -621,23 +820,69 @@ def main() -> None:
     parser.add_argument("--image-dir", type=Path, default=PROJECT_DIR / "step-2-final-water-data")
     parser.add_argument("--backbone", choices=BACKBONES)
     parser.add_argument("--seed", type=int, choices=SEEDS)
-    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--version", help="existing version name or unique prefix to resume")
+    parser.add_argument("--force", action="store_true", help="create a new version instead of resuming an incomplete matching version")
+    parser.add_argument("--refresh-artifacts", action="store_true", help="regenerate reports for an existing completed version without retraining")
     parser.add_argument("--dry-run", action="store_true", help="validate snapshot and print planned runs without training")
     args = parser.parse_args()
     snapshot = snapshot_metadata(args.snapshot_dir.resolve())
-    planned = [(args.backbone, args.seed)] if args.backbone and args.seed else [(backbone, seed) for backbone in BACKBONES for seed in SEEDS]
+    all_planned = [(backbone, seed) for backbone in BACKBONES for seed in SEEDS]
+    selected_runs = [(args.backbone, args.seed)] if args.backbone and args.seed else all_planned
     if args.backbone and not args.seed or args.seed and not args.backbone:
         raise ValueError("--backbone and --seed must be supplied together")
+    if args.refresh_artifacts:
+        if not args.version or args.backbone or args.seed or args.force:
+            raise ValueError("--refresh-artifacts requires --version and cannot be combined with run selection or --force")
+        version_root = resolve_version_directory(args.output_root.resolve(), args.version)
+        manifest_path = version_root / "experiment_manifest.json"
+        if not manifest_path.is_file():
+            raise FileNotFoundError(f"Experiment version manifest not found: {manifest_path}")
+        version_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        results = load_completed_results(version_root)
+        aggregate = aggregate_results(results)
+        write_comparison_artifacts(results, aggregate, version_root)
+        update_experiment_index(args.output_root.resolve(), version_manifest)
+        print(f"Refreshed Experiment C artifacts in {version_root}")
+        return
     print(f"Snapshot {snapshot['name']}: {snapshot['counts']}")
-    print("Planned runs: " + ", ".join(run_id(backbone, seed) for backbone, seed in planned))
+    print("Selected runs: " + ", ".join(run_id(backbone, seed) for backbone, seed in selected_runs))
     if args.dry_run:
         return
+    version_root, version_manifest = prepare_experiment_version(
+        args.output_root.resolve(),
+        snapshot,
+        all_planned,
+        requested_version=args.version,
+        force_new=args.force,
+    )
+    print(f"Experiment version: {version_root.name}")
+    update_experiment_index(args.output_root.resolve(), version_manifest)
     make_cuda_usable_if_needed()
-    results = [run_one(backbone, seed, args.snapshot_dir.resolve(), args.output_root.resolve(), args.image_dir.resolve(), args.force) for backbone, seed in planned]
-    if len(results) == len(BACKBONES) * len(SEEDS):
+    results: list[dict[str, Any]] = []
+    for backbone, seed in selected_runs:
+        result = run_one(backbone, seed, args.snapshot_dir.resolve(), version_root, args.image_dir.resolve(), False)
+        results.append(result)
+        completed_runs = set(version_manifest.get("completed_runs", []))
+        if result.get("status") == "complete":
+            completed_runs.add(result["run_id"])
+        version_manifest["completed_runs"] = sorted(completed_runs)
+        json_dump(version_root / "experiment_manifest.json", version_manifest)
+        update_experiment_index(args.output_root.resolve(), version_manifest)
+    if set(version_manifest.get("completed_runs", [])) == {run_id(backbone, seed) for backbone, seed in all_planned}:
+        results = load_completed_results(version_root)
         aggregate = aggregate_results(results)
-        write_comparison_artifacts(results, aggregate, args.output_root.resolve())
-        print(f"Wrote Experiment C artifacts to {args.output_root.resolve()}")
+        write_comparison_artifacts(results, aggregate, version_root)
+        version_manifest["status"] = "complete"
+        version_manifest["completed_at_utc"] = utc_now()
+        version_manifest["artifacts"] = {
+            "aggregate_metrics": str((version_root / "aggregate_metrics.json").relative_to(args.output_root.resolve())),
+            "csv": str((version_root / "backbone_comparison.csv").relative_to(args.output_root.resolve())),
+            "markdown": str((version_root / "backbone_comparison.md").relative_to(args.output_root.resolve())),
+            "plots": str((version_root / "plots").relative_to(args.output_root.resolve())),
+        }
+        json_dump(version_root / "experiment_manifest.json", version_manifest)
+        update_experiment_index(args.output_root.resolve(), version_manifest)
+        print(f"Wrote Experiment C artifacts to {version_root}")
 
 
 if __name__ == "__main__":
