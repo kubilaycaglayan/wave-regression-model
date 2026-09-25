@@ -6,7 +6,10 @@ python step_1_b_preprocess_water_inputs.py
 python step_2_a_reduce_black_water_area.py
 python step_2_b_label_data.py        # labeling UI at http://localhost:8055, saves labels.csv
 python step_3_a_prepare_dataset_split.py
-python train.py                       # or: python step_5_b_train.py
+python train.py                       # EfficientNet-B0 default
+# Or select explicitly:
+python train.py --backbone resnet18
+python train.py --backbone efficientnet_b0
 python step_6_a_evaluate_test.py
 ```
 
@@ -248,16 +251,20 @@ The training script:
 New checkpoints will be created in:
 
 ```text
-step-5-checkpoints/vN-mae-<best-mae>/
+step-5-checkpoints/vN-mae-<best-mae>-<backbone>/
 ```
 
 Each training version directory contains its checkpoint, manifest, summary,
-training history, and plots. Existing root-level artifacts can be organized with:
+training history, and plots. Existing legacy version directories can be renamed with:
 
 ```bash
-python migrate_step_5_checkpoints.py --dry-run
-python migrate_step_5_checkpoints.py
+python migrate_step_5_checkpoints.py --dry-run --fallback-backbone resnet18
+python migrate_step_5_checkpoints.py --fallback-backbone resnet18
 ```
+
+Use `--fallback-backbone` only for legacy directories whose checkpoint metadata
+cannot identify the architecture. The current historical Step 5 directories
+are ResNet18 runs.
 
 The command prints the exact best checkpoint path. Use that path for later evaluation or prediction.
 
@@ -285,7 +292,7 @@ Configure the prediction checkpoint in `.env` (or the environment) using:
 
 ```text
 # Use the exact best-checkpoint path printed by train.py.
-PREDICT_CHECKPOINT_PATH=step-5-checkpoints/vN-mae-<best-mae>/<best-checkpoint>.ckpt
+PREDICT_CHECKPOINT_PATH=step-5-checkpoints/vN-mae-<best-mae>-<backbone>/<best-checkpoint>.ckpt
 ```
 
 After training, update `PREDICT_CHECKPOINT_PATH` to the new checkpoint path printed by `train.py`.

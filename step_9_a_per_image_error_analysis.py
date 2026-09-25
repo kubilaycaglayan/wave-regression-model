@@ -464,7 +464,7 @@ def run(config: RunConfig) -> dict[str, Any]:
     print(f"Selected validation snapshot: {config.split_snapshot}")
     print(f"Evaluation device: {device}")
     load_started = time.perf_counter()
-    model = WaveRegressionModel.load_from_checkpoint(config.checkpoint, map_location=device)
+    model = WaveRegressionModel.load_from_checkpoint(config.checkpoint, map_location=device, pretrained=False)
     model.to(device); model.eval()
     print(f"Checkpoint loaded in {time.perf_counter() - load_started:.2f}s")
 

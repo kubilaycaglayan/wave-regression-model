@@ -353,7 +353,7 @@ def main() -> None:
             print_timing("Load segmentation model", started)
 
         started = time.perf_counter()
-        model = WaveRegressionModel.load_from_checkpoint(checkpoint_path, map_location=device)
+        model = WaveRegressionModel.load_from_checkpoint(checkpoint_path, map_location=device, pretrained=False)
         model.to(device)
         model.eval()
         print_timing("Load regression checkpoint", started)

@@ -341,7 +341,7 @@ def main() -> None:
     print(f"Evaluation device: {device}")
 
     load_started = time.perf_counter()
-    model = WaveRegressionModel.load_from_checkpoint(CHECKPOINT_PATH, map_location=device)
+    model = WaveRegressionModel.load_from_checkpoint(CHECKPOINT_PATH, map_location=device, pretrained=False)
     model.to(device)
     model.eval()
     print(f"Checkpoint loaded in {time.perf_counter() - load_started:.2f}s")

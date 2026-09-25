@@ -334,11 +334,13 @@ def build_feature_extractor(backbone_name: str, pretrained: bool = True) -> tupl
         feature_dim = model.fc.in_features
         model.fc = nn.Identity()
         weights_name = "ResNet34_Weights.DEFAULT (ImageNet)"
-    else:
+    elif name == "efficientnet_b0":
         model = efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT if pretrained else None)
         feature_dim = model.classifier[-1].in_features
         model.classifier = nn.Identity()
         weights_name = "EfficientNet_B0_Weights.DEFAULT (ImageNet)"
+    else:  # pragma: no cover - canonical_backbone_name guards this branch.
+        raise AssertionError(f"Unhandled backbone: {name}")
     return model, feature_dim, weights_name
 
 

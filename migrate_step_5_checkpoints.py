@@ -1,7 +1,7 @@
-"""Migrate legacy Step 5 artifacts into version-specific directories.
+"""Migrate legacy Step 5 checkpoint artifacts and version directories.
 
-Run without arguments to perform the migration. Use ``--dry-run`` to inspect
-the planned moves and reference updates first.
+Run with ``--dry-run`` first to inspect planned moves and reference updates.
+The migration refuses to guess a backbone or overwrite an existing target.
 """
 
 from __future__ import annotations
@@ -10,16 +10,21 @@ import argparse
 import json
 import math
 import os
+import pickle
 import re
 import shutil
 from pathlib import Path
+
+from step_5_a_wave_regression_model import canonical_backbone_name, infer_backbone_from_checkpoint
 
 
 VERSION_PATTERN = re.compile(r"(?:^|[-_])v(\d+)(?:[-_.]|$)")
 MANIFEST_PATTERN = re.compile(r"^training_manifest_.*\.json$")
 VERSION_DIRECTORY_PATTERN = re.compile(r"^(v\d+)$")
-VERSIONED_MAE_DIRECTORY_PATTERN = re.compile(r"^(v\d+)-mae-(\d+(?:\.\d+)?)$")
+LEGACY_MAE_DIRECTORY_PATTERN = re.compile(r"^(v\d+)-mae-(\d+(?:\.\d+)?)$")
+VERSIONED_MAE_DIRECTORY_PATTERN = re.compile(r"^v\d+-mae-\d+(?:\.\d+)?-[a-z0-9_]+$")
 SUMMARY_MAE_PATTERN = re.compile(r"^best validation MAE:\s*([0-9]+(?:\.[0-9]+)?)\s*$", re.MULTILINE)
+SUMMARY_BACKBONE_PATTERN = re.compile(r"^(?:backbone|architecture):.*?\b(ResNet18|EfficientNet[-_ ]?B0)\b", re.MULTILINE | re.IGNORECASE)
 
 
 def version_from_name(name: str) -> str | None:
@@ -64,6 +69,42 @@ def directory_mae(directory: Path) -> float | None:
     return next(iter(unique_values)) if unique_values else None
 
 
+def _backbone_from_manifest(path: Path) -> str | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    configured = value.get("backbone_name") or value.get("backbone")
+    if isinstance(configured, str):
+        return canonical_backbone_name(configured)
+    return None
+
+
+def backbone_from_directory(directory: Path, fallback: str | None = None) -> str:
+    """Identify one unambiguous backbone for a legacy version directory."""
+    candidates: set[str] = set()
+    for manifest in sorted(directory.rglob("training_manifest_*.json")):
+        configured = _backbone_from_manifest(manifest)
+        if configured:
+            candidates.add(configured)
+    for summary in sorted(directory.glob("training_summary_*.txt")):
+        match = SUMMARY_BACKBONE_PATTERN.search(summary.read_text(encoding="utf-8"))
+        if match:
+            candidates.add(canonical_backbone_name(match.group(1)))
+    for checkpoint in sorted(directory.glob("*.ckpt")):
+        try:
+            candidates.add(infer_backbone_from_checkpoint(checkpoint))
+        except (OSError, RuntimeError, ValueError, json.JSONDecodeError, pickle.UnpicklingError):
+            continue
+    if len(candidates) == 0 and fallback is not None:
+        return canonical_backbone_name(fallback)
+    if len(candidates) != 1:
+        raise ValueError(
+            f"Cannot identify one backbone for {directory}; detected {sorted(candidates) or 'none'}"
+        )
+    return next(iter(candidates))
+
+
 def collect_moves(root: Path) -> tuple[list[tuple[Path, Path]], list[Path]]:
     moves: list[tuple[Path, Path]] = []
     unresolved: list[Path] = []
@@ -78,18 +119,24 @@ def collect_moves(root: Path) -> tuple[list[tuple[Path, Path]], list[Path]]:
     return moves, unresolved
 
 
-def collect_version_directory_renames(root: Path) -> tuple[list[tuple[Path, Path]], list[Path]]:
+def collect_version_directory_renames(
+    root: Path,
+    fallback_backbone: str | None = None,
+) -> tuple[list[tuple[Path, Path]], list[Path]]:
     renames: list[tuple[Path, Path]] = []
     unresolved: list[Path] = []
     for directory in sorted(path for path in root.iterdir() if path.is_dir()):
-        match = VERSION_DIRECTORY_PATTERN.fullmatch(directory.name)
-        if not match:
+        version_match = VERSION_DIRECTORY_PATTERN.fullmatch(directory.name)
+        legacy_match = LEGACY_MAE_DIRECTORY_PATTERN.fullmatch(directory.name)
+        if not version_match and not legacy_match:
             continue
         mae = directory_mae(directory)
         if mae is None or not 0.0 <= mae <= 1.0:
             unresolved.append(directory)
             continue
-        renames.append((directory, root / f"{match.group(1)}-mae-{mae:.4f}"))
+        backbone = backbone_from_directory(directory, fallback=fallback_backbone)
+        version = version_match.group(1) if version_match else legacy_match.group(1)
+        renames.append((directory, root / f"{version}-mae-{mae:.4f}-{backbone}"))
     return renames, unresolved
 
 
@@ -116,7 +163,8 @@ def update_text_references(root: Path, replacements: dict[str, str], dry_run: bo
 
 def repair_versioned_references(root: Path, dry_run: bool) -> None:
     """Repair references using the containing final directory as source of truth."""
-    for directory in sorted(path for path in root.iterdir() if path.is_dir() and VERSIONED_MAE_DIRECTORY_PATTERN.fullmatch(path.name)):
+    pattern = re.compile(r"^v\d+-mae-\d+(?:\.\d+)?-[a-z0-9_]+$")
+    for directory in sorted(path for path in root.iterdir() if path.is_dir() and pattern.fullmatch(path.name)):
         for manifest in sorted(directory.rglob("training_manifest_*.json")):
             value = json.loads(manifest.read_text(encoding="utf-8"))
             changed = False
@@ -128,15 +176,6 @@ def repair_versioned_references(root: Path, dry_run: bool) -> None:
                 if key == "best_checkpoint_path" or candidate.is_file():
                     if value[key] != str(candidate):
                         value[key] = str(candidate)
-                        changed = True
-            plot_paths = value.get("plot_paths")
-            if isinstance(plot_paths, dict):
-                for key, reference in list(plot_paths.items()):
-                    if not isinstance(reference, str):
-                        continue
-                    candidate = directory / Path(reference).name
-                    if candidate.is_file() and plot_paths[key] != str(candidate):
-                        plot_paths[key] = str(candidate)
                         changed = True
             if changed:
                 print(f"repair {manifest}")
@@ -163,7 +202,7 @@ def repair_versioned_references(root: Path, dry_run: bool) -> None:
                     summary.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
 
 
-def migrate(root: Path, dry_run: bool = False) -> int:
+def migrate(root: Path, dry_run: bool = False, fallback_backbone: str | None = None) -> int:
     root.mkdir(parents=True, exist_ok=True)
     moves, unresolved = collect_moves(root)
 
@@ -181,14 +220,18 @@ def migrate(root: Path, dry_run: bool = False) -> int:
         for source, destination in moves:
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(source), str(destination))
-    renames, unresolved_directories = collect_version_directory_renames(root)
+
+    renames, unresolved_directories = collect_version_directory_renames(root, fallback_backbone=fallback_backbone)
+    if unresolved_directories:
+        raise ValueError(
+            "Cannot safely migrate version directories: "
+            + ", ".join(str(path) for path in unresolved_directories)
+        )
     for source, destination in renames:
         if destination.exists():
             raise FileExistsError(f"Migration destination already exists: {destination}")
         print(f"rename {source} -> {destination}")
         replacements[str(source.resolve())] = str(destination.resolve())
-    for directory in unresolved_directories:
-        print(f"unresolved directory (left in place): {directory}")
     if not dry_run:
         for source, destination in renames:
             source.rename(destination)
@@ -201,8 +244,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("step-5-checkpoints"))
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--fallback-backbone",
+        choices=("resnet18", "efficientnet_b0"),
+        help="explicitly identify legacy directories with no readable architecture metadata",
+    )
     args = parser.parse_args()
-    return migrate(args.root.resolve(), args.dry_run)
+    return migrate(args.root.resolve(), args.dry_run, args.fallback_backbone)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ def test_migrate_moves_versioned_files_and_updates_manifest(tmp_path: Path) -> N
         json.dumps(
             {
                 "run_version": "v12",
+                "backbone_name": "resnet18",
                 "best_validation_mae": 0.123456,
                 "best_checkpoint_path": str(checkpoint),
             }
@@ -25,8 +26,8 @@ def test_migrate_moves_versioned_files_and_updates_manifest(tmp_path: Path) -> N
 
     migration.migrate(root)
 
-    migrated_checkpoint = root / "v12-mae-0.1235" / checkpoint.name
-    migrated_manifest = root / "v12-mae-0.1235" / manifest.name
+    migrated_checkpoint = root / "v12-mae-0.1235-resnet18" / checkpoint.name
+    migrated_manifest = root / "v12-mae-0.1235-resnet18" / manifest.name
     assert migrated_checkpoint.is_file()
     assert migrated_manifest.is_file()
     assert not checkpoint.exists()
@@ -53,11 +54,11 @@ def test_migrate_renames_existing_versions_without_prefix_collisions(tmp_path: P
         directory = root / version
         directory.mkdir()
         (directory / f"training_summary_{version}.txt").write_text(
-            f"best validation MAE: {mae}\n",
+            f"backbone: resnet18\nbest validation MAE: {mae}\n",
             encoding="utf-8",
         )
 
     migration.migrate(root)
 
-    assert (root / "v1-mae-0.1000").is_dir()
-    assert (root / "v10-mae-0.2000").is_dir()
+    assert (root / "v1-mae-0.1000-resnet18").is_dir()
+    assert (root / "v10-mae-0.2000-resnet18").is_dir()

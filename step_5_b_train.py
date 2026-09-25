@@ -6,6 +6,7 @@ import time
 import re
 import json
 import math
+import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,7 +19,11 @@ import torch
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 
 from step_4_b_wave_datamodule import WaveDataModule
-from step_5_a_wave_regression_model import WaveRegressionModel
+from step_5_a_wave_regression_model import (
+    SUPPORTED_BACKBONES,
+    WaveRegressionModel,
+    canonical_backbone_name,
+)
 from step_5_c_plot_training import (
     LOSS_METRICS,
     TrainingHistoryCallback,
@@ -35,6 +40,7 @@ MAX_EPOCHS = 100
 EARLY_STOPPING_PATIENCE = 10
 CHECKPOINT_DIR = Path("step-5-checkpoints")
 SPLIT_SNAPSHOT_DIR = Path("step-3-dataset-splits/snapshots")
+DEFAULT_BACKBONE = "efficientnet_b0"
 
 
 def parameter_counts(model: torch.nn.Module) -> tuple[int, int, int]:
@@ -59,11 +65,11 @@ def next_run_version(directory: Path) -> str:
     return f"v{max(versions, default=0) + 1}"
 
 
-def version_directory_name(run_version: str, best_mae: float) -> str:
+def version_directory_name(run_version: str, best_mae: float, backbone_name: str) -> str:
     """Return the stable directory name for a completed training run."""
     if not math.isfinite(best_mae) or not 0.0 <= best_mae <= 1.0:
         raise ValueError(f"Best validation MAE must be finite and within [0, 1], got {best_mae!r}")
-    return f"{run_version}-mae-{best_mae:.4f}"
+    return f"{run_version}-mae-{best_mae:.4f}-{canonical_backbone_name(backbone_name)}"
 
 
 def latest_split_snapshot() -> Path:
@@ -114,8 +120,9 @@ def write_summary(
             [
                 "Sea-waviness regression baseline",
                 f"run version: {run_version}",
-                "architecture: torchvision ResNet18; backbone features -> Linear(512, 1) -> Sigmoid",
-                "pretrained weights: ResNet18_Weights.DEFAULT (ImageNet)",
+                f"backbone: {model.backbone_name}",
+                f"architecture: torchvision {model.backbone_name}; feature extractor -> Linear({model.feature_dim}, 1) -> Sigmoid",
+                f"pretrained weights: {model.weights_name}",
                 "backbone status: frozen; regression head status: trainable",
                 "loss: SmoothL1Loss",
                 "optimizer: AdamW (trainable parameters only)",
@@ -156,6 +163,8 @@ def write_summary(
                 "created_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "run_version": run_version,
                 "random_seed": seed,
+                "backbone_name": model.backbone_name,
+                "weights_name": model.weights_name,
                 "split_snapshot": str(split_snapshot),
                 "best_checkpoint_path": str(best_checkpoint_path),
                 "best_validation_mae": float(best_mae) if best_mae is not None else None,
@@ -176,12 +185,16 @@ def write_summary(
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--backbone", choices=SUPPORTED_BACKBONES, default=DEFAULT_BACKBONE)
+    args = parser.parse_args()
+    backbone_name = canonical_backbone_name(args.backbone)
     started = time.perf_counter()
     print(f"Random seed: {RANDOM_SEED}")
     pl.seed_everything(RANDOM_SEED, workers=True)
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     run_version = next_run_version(CHECKPOINT_DIR)
-    run_directory = CHECKPOINT_DIR / f"{run_version}-pending"
+    run_directory = CHECKPOINT_DIR / f"{run_version}-pending-{backbone_name}"
     run_directory.mkdir(parents=True, exist_ok=False)
     print(f"Run version: {run_version}")
     split_snapshot = latest_split_snapshot()
@@ -191,11 +204,15 @@ def main() -> None:
     make_cuda_usable_if_needed()
 
     data = WaveDataModule(batch_size=BATCH_SIZE, num_workers=0)
-    model = WaveRegressionModel(learning_rate=LEARNING_RATE)
+    model = WaveRegressionModel(
+        learning_rate=LEARNING_RATE,
+        backbone_name=backbone_name,
+        pretrained=True,
+    )
     total, trainable, frozen = parameter_counts(model)
     print(f"Parameters: total={total:,}, trainable={trainable:,}, frozen={frozen:,}")
     if trainable == 0 or frozen == 0:
-        raise RuntimeError("Expected a trainable regression head and a frozen ResNet backbone")
+        raise RuntimeError("Expected a trainable regression head and a frozen backbone")
 
     data.setup("fit")
     if data.train_dataset is None or data.val_dataset is None:
@@ -208,7 +225,7 @@ def main() -> None:
     print(f"Trainable head parameters: {trainable_head:,}")
     print(f"Frozen BatchNorm modules: {batch_norm_modules}")
     print("BatchNorm modules in train mode: 0")
-    print(f"Regression head training mode: {model.backbone.fc.training}")
+    print(f"Regression head training mode: {model._head().training}")
     batch_images, _ = next(iter(data.train_dataloader()))
     with torch.inference_mode():
         sanity_predictions = model(batch_images)
@@ -221,7 +238,7 @@ def main() -> None:
 
     checkpoint = ModelCheckpoint(
         dirpath=run_directory,
-        filename=f"wave-regression-baseline-{run_version}-best-val-mae-{{epoch:02d}}-{{val_mae:.4f}}",
+        filename=f"wave-regression-{backbone_name}-{run_version}-best-val-mae-{{epoch:02d}}-{{val_mae:.4f}}",
         monitor="val_mae",
         mode="min",
         save_top_k=1,
@@ -266,10 +283,10 @@ def main() -> None:
     )
     performance_metric = f"{performance_monitor.removeprefix('val_').upper()} (lower is better)"
 
-    best_model = WaveRegressionModel.load_from_checkpoint(checkpoint.best_model_path)
+    best_model = WaveRegressionModel.load_from_checkpoint(checkpoint.best_model_path, pretrained=False)
     best_metrics = trainer.validate(best_model, datamodule=data, verbose=False)[0]
     best_mae = float(best_metrics["val_mae"])
-    completed_directory = CHECKPOINT_DIR / version_directory_name(run_version, best_mae)
+    completed_directory = CHECKPOINT_DIR / version_directory_name(run_version, best_mae, backbone_name)
     if completed_directory.exists():
         raise FileExistsError(f"Completed run directory already exists: {completed_directory}")
     run_directory.rename(completed_directory)
