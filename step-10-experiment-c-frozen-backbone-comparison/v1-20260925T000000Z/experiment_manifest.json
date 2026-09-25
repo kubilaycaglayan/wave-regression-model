@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "version_id": "v1-20260925T000000Z",
+  "version_number": 1,
+  "created_at_utc": "2026-09-25T00:00:00Z",
+  "migrated_at_utc": "2026-09-25T00:00:00Z",
+  "status": "complete",
+  "config_fingerprint": "49b64e878b913971bce323123e12e0ee935b0fe0957ab9765ee3fe274ea16e34",
+  "configuration": {
+    "experiment": "C_frozen_pretrained_backbone_comparison",
+    "planned_runs": [
+      {"backbone": "resnet18", "seed": 42},
+      {"backbone": "resnet18", "seed": 43},
+      {"backbone": "resnet18", "seed": 44},
+      {"backbone": "resnet34", "seed": 42},
+      {"backbone": "resnet34", "seed": 43},
+      {"backbone": "resnet34", "seed": 44},
+      {"backbone": "efficientnet_b0", "seed": 42},
+      {"backbone": "efficientnet_b0", "seed": 43},
+      {"backbone": "efficientnet_b0", "seed": 44}
+    ],
+    "source_sha256": "84f2d031345fc71659605f79a629330a28997f7e582bd189eb438380d19292c2",
+    "split_snapshot": {
+      "name": "20260923T133043052012Z",
+      "counts": {"train": 68, "validation": 14, "test": 14},
+      "train_sha256": "498eb3a665c5edc024dbbe5f91a65ffe04956ed070fafda6ddb9b4ae783e0958",
+      "validation_sha256": "bcabb9419b20a82cfa253f5dee31a38b89a5fc9604a5cb43ee113932006c573a",
+      "test_sha256": "8dc916358893fbd23f2e0e81c289fddcce02fa8eb09d0c30fbfed2fc704e7322"
+    },
+    "training": {
+      "pretrained_weights": "torchvision DEFAULT ImageNet weights",
+      "backbone_frozen": true,
+      "batchnorm_eval": true,
+      "regression_head": "Linear(feature_dim, 1) -> Sigmoid",
+      "loss": "SmoothL1Loss",
+      "optimizer": "AdamW",
+      "learning_rate": 0.001,
+      "batch_size": 8,
+      "max_epochs": 100,
+      "early_stopping": {"monitor": "val_mae", "mode": "min", "patience": 10},
+      "image_size": [224, 224],
+      "imagenet_mean": [0.485, 0.456, 0.406],
+      "imagenet_std": [0.229, 0.224, 0.225]
+    },
+    "test_evaluated": false
+  },
+  "completed_runs": [
+    "efficientnet_b0-seed-42",
+    "efficientnet_b0-seed-43",
+    "efficientnet_b0-seed-44",
+    "resnet18-seed-42",
+    "resnet18-seed-43",
+    "resnet18-seed-44",
+    "resnet34-seed-42",
+    "resnet34-seed-43",
+    "resnet34-seed-44"
+  ],
+  "artifacts": {
+    "aggregate_metrics": "v1-20260925T000000Z/aggregate_metrics.json",
+    "csv": "v1-20260925T000000Z/backbone_comparison.csv",
+    "markdown": "v1-20260925T000000Z/backbone_comparison.md",
+    "plots": "v1-20260925T000000Z/plots"
+  }
+}

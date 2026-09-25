@@ -1,11 +1,11 @@
 {
   "checkpoint": {
-    "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/runs/resnet34/seed-43/resnet34-seed-43-best-val-mae-epoch=08-val_mae=0.1625.ckpt",
-    "sha256": "7c4ad5b4771a228f9d5a72caf1e8ba2891b9787df74aa291d56a1cd8e849167b"
+    "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/v1-20260925T000000Z/runs/resnet18/seed-43/resnet18-seed-43-best-val-mae-epoch=14-val_mae=0.1921.ckpt",
+    "sha256": "292dda3e8f26cb6193c34f00f966fae6ef49f1722c01c694b462f62cf5520546"
   },
   "config": {
     "augmentations": "RandomHorizontalFlip(p=0.5) + ColorJitter(brightness=0.25, contrast=0.25, saturation=0.20, hue=0.02)",
-    "backbone": "resnet34",
+    "backbone": "resnet18",
     "backbone_frozen": true,
     "batch_size": 8,
     "batchnorm_eval": true,
@@ -90,96 +90,96 @@
     },
     "test_evaluated": false
   },
-  "created_at_utc": "2026-09-25T09:49:17.729977Z",
-  "epochs_trained": 19,
+  "created_at_utc": "2026-09-25T09:48:13.502039Z",
+  "epochs_trained": 25,
   "frozen_backbone_checks": {
-    "frozen_backbone_parameters": 21284672,
-    "frozen_batchnorm_modules": 36,
+    "frozen_backbone_parameters": 11176512,
+    "frozen_batchnorm_modules": 20,
     "trainable_parameters": 513
   },
   "metrics": {
     "actual_range_width": 0.849999975413084,
     "high_range_count": 5,
-    "high_range_signed_error": -0.32252652645111085,
+    "high_range_signed_error": -0.29729859828948973,
     "low_range_count": 5,
-    "low_range_signed_error": 0.029761072248220444,
-    "maximum_absolute_error": 0.4949861466884613,
-    "mean_signed_error": -0.09292613954416343,
-    "median_absolute_error": 0.13347747549414635,
-    "prediction_actual_range_width_ratio": 0.6160379335540637,
-    "prediction_maximum": 0.6722462773323059,
-    "prediction_minimum": 0.1486140489578247,
-    "prediction_range_width": 0.5236322283744812,
+    "low_range_signed_error": 0.1419914148747921,
+    "maximum_absolute_error": 0.5100415349006653,
+    "mean_signed_error": -0.0569428452955825,
+    "median_absolute_error": 0.1618925929069519,
+    "prediction_actual_range_width_ratio": 0.5099992689227145,
+    "prediction_maximum": 0.671538233757019,
+    "prediction_minimum": 0.23803886771202087,
+    "prediction_range_width": 0.43349936604499817,
     "validation_count": 14,
-    "validation_mae": 0.16253898053296975,
-    "validation_rmse": 0.2163042837249395
+    "validation_mae": 0.1921313242720706,
+    "validation_rmse": 0.22153294832367632
   },
   "parameter_counts": {
-    "frozen": 21284672,
-    "total": 21285185,
+    "frozen": 11176512,
+    "total": 11177025,
     "trainable": 513
   },
   "predictions": [
     {
       "actual": 0.699999988079071,
-      "predicted": 0.37590160965919495
+      "predicted": 0.4659785330295563
     },
     {
       "actual": 0.75,
-      "predicted": 0.5523235201835632
+      "predicted": 0.45376086235046387
     },
     {
       "actual": 0.8999999761581421,
-      "predicted": 0.5337878465652466
+      "predicted": 0.3899584412574768
     },
     {
       "actual": 0.30000001192092896,
-      "predicted": 0.22019509971141815
+      "predicted": 0.3842829465866089
     },
     {
       "actual": 0.05000000074505806,
-      "predicted": 0.1834774762392044
+      "predicted": 0.23803886771202087
     },
     {
       "actual": 0.75,
-      "predicted": 0.2550138533115387
+      "predicted": 0.4822709262371063
     },
     {
       "actual": 0.20000000298023224,
-      "predicted": 0.1486140489578247
+      "predicted": 0.30018365383148193
     },
     {
       "actual": 0.30000001192092896,
-      "predicted": 0.30400916934013367
+      "predicted": 0.41141676902770996
     },
     {
       "actual": 0.20000000298023224,
-      "predicted": 0.34250959753990173
+      "predicted": 0.4260348677635193
     },
     {
       "actual": 0.4000000059604645,
-      "predicted": 0.4350473880767822
+      "predicted": 0.26471441984176636
     },
     {
       "actual": 0.4000000059604645,
-      "predicted": 0.37989455461502075
+      "predicted": 0.47446969151496887
     },
     {
       "actual": 0.5,
-      "predicted": 0.6722462773323059
+      "predicted": 0.6618925929069519
     },
     {
       "actual": 0.4000000059604645,
-      "predicted": 0.3756731152534485
+      "predicted": 0.27825939655303955
     },
     {
       "actual": 0.8500000238418579,
-      "predicted": 0.6203405261039734
+      "predicted": 0.671538233757019
     }
   ],
-  "run_id": "resnet34-seed-43",
+  "run_id": "resnet18-seed-43",
   "schema_version": 1,
   "status": "complete",
   "test_evaluated": false,
-  "training_time_seconds": 22.15921033199993
+  "training_time_seconds": 20.44266927499848
 }

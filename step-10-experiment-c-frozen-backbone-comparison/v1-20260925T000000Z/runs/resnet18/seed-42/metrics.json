@@ -1,6 +1,6 @@
 {
   "checkpoint": {
-    "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/runs/resnet18/seed-42/resnet18-seed-42-best-val-mae-epoch=23-val_mae=0.1758.ckpt",
+    "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/v1-20260925T000000Z/runs/resnet18/seed-42/resnet18-seed-42-best-val-mae-epoch=23-val_mae=0.1758.ckpt",
     "sha256": "a226652a2dd7a7b92a0ee8f2a01c2ddf17c04549077174a2cd8eecf2b1a49daf"
   },
   "config": {

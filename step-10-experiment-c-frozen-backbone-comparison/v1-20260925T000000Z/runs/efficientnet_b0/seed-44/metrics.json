@@ -1,11 +1,11 @@
 {
   "checkpoint": {
-    "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/runs/resnet34/seed-44/resnet34-seed-44-best-val-mae-epoch=11-val_mae=0.1575.ckpt",
-    "sha256": "cd1a178543b2cdc3e984673c17cb3f6fe92671ac530d0b27f1454fa30e30c8f3"
+    "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/v1-20260925T000000Z/runs/efficientnet_b0/seed-44/efficientnet_b0-seed-44-best-val-mae-epoch=48-val_mae=0.1519.ckpt",
+    "sha256": "a460c7839bbeadc1d7acb65df2b74d39b033d063c4831640fd4f031850877a12"
   },
   "config": {
     "augmentations": "RandomHorizontalFlip(p=0.5) + ColorJitter(brightness=0.25, contrast=0.25, saturation=0.20, hue=0.02)",
-    "backbone": "resnet34",
+    "backbone": "efficientnet_b0",
     "backbone_frozen": true,
     "batch_size": 8,
     "batchnorm_eval": true,
@@ -90,96 +90,96 @@
     },
     "test_evaluated": false
   },
-  "created_at_utc": "2026-09-25T09:49:43.374010Z",
-  "epochs_trained": 22,
+  "created_at_utc": "2026-09-25T09:52:10.382809Z",
+  "epochs_trained": 59,
   "frozen_backbone_checks": {
-    "frozen_backbone_parameters": 21284672,
-    "frozen_batchnorm_modules": 36,
-    "trainable_parameters": 513
+    "frozen_backbone_parameters": 4007548,
+    "frozen_batchnorm_modules": 49,
+    "trainable_parameters": 1281
   },
   "metrics": {
     "actual_range_width": 0.849999975413084,
     "high_range_count": 5,
-    "high_range_signed_error": -0.27709646224975587,
+    "high_range_signed_error": -0.19862878918647767,
     "low_range_count": 5,
-    "low_range_signed_error": 0.08270252868533134,
-    "maximum_absolute_error": 0.4200880229473114,
-    "mean_signed_error": -0.055710743846637864,
-    "median_absolute_error": 0.1469959169626236,
-    "prediction_actual_range_width_ratio": 0.6573345746117839,
-    "prediction_maximum": 0.7654256820678711,
-    "prediction_minimum": 0.20669130980968475,
-    "prediction_range_width": 0.5587343722581863,
+    "low_range_signed_error": 0.1124090425670147,
+    "maximum_absolute_error": 0.4472779929637909,
+    "mean_signed_error": -0.01915691819574152,
+    "median_absolute_error": 0.1320260912179947,
+    "prediction_actual_range_width_ratio": 0.6796358284073563,
+    "prediction_maximum": 0.79051673412323,
+    "prediction_minimum": 0.21282629668712616,
+    "prediction_range_width": 0.5776904374361038,
     "validation_count": 14,
-    "validation_mae": 0.15753596355872496,
-    "validation_rmse": 0.20137931839347079
+    "validation_mae": 0.15193912998906203,
+    "validation_rmse": 0.19014137875881823
   },
   "parameter_counts": {
-    "frozen": 21284672,
-    "total": 21285185,
-    "trainable": 513
+    "frozen": 4007548,
+    "total": 4008829,
+    "trainable": 1281
   },
   "predictions": [
     {
       "actual": 0.699999988079071,
-      "predicted": 0.41870638728141785
+      "predicted": 0.5412764549255371
     },
     {
       "actual": 0.75,
-      "predicted": 0.5408527255058289
+      "predicted": 0.6823388934135437
     },
     {
       "actual": 0.8999999761581421,
-      "predicted": 0.5999550223350525
+      "predicted": 0.4527219831943512
     },
     {
       "actual": 0.30000001192092896,
-      "predicted": 0.26920145750045776
+      "predicted": 0.36214613914489746
     },
     {
       "actual": 0.05000000074505806,
-      "predicted": 0.2612360119819641
+      "predicted": 0.21282629668712616
     },
     {
       "actual": 0.75,
-      "predicted": 0.3299119770526886
+      "predicted": 0.5725899934768677
     },
     {
       "actual": 0.20000000298023224,
-      "predicted": 0.20669130980968475
+      "predicted": 0.33202609419822693
     },
     {
       "actual": 0.30000001192092896,
-      "predicted": 0.3793879747390747
+      "predicted": 0.23327162861824036
     },
     {
       "actual": 0.20000000298023224,
-      "predicted": 0.34699591994285583
+      "predicted": 0.471775084733963
     },
     {
       "actual": 0.4000000059604645,
-      "predicted": 0.3407770097255707
+      "predicted": 0.41018515825271606
     },
     {
       "actual": 0.4000000059604645,
-      "predicted": 0.3827769160270691
+      "predicted": 0.37878188490867615
     },
     {
       "actual": 0.5,
-      "predicted": 0.7654256820678711
+      "predicted": 0.79051673412323
     },
     {
       "actual": 0.4000000059604645,
-      "predicted": 0.4030396640300751
+      "predicted": 0.28341811895370483
     },
     {
       "actual": 0.8500000238418579,
-      "predicted": 0.675091564655304
+      "predicted": 0.7079287171363831
     }
   ],
-  "run_id": "resnet34-seed-44",
+  "run_id": "efficientnet_b0-seed-44",
   "schema_version": 1,
   "status": "complete",
   "test_evaluated": false,
-  "training_time_seconds": 25.642059915990103
+  "training_time_seconds": 50.054488722002134
 }
