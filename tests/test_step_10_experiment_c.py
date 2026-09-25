@@ -1,0 +1,61 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+import torch
+
+import step_10_a_experiment_c as experiment
+
+
+def test_snapshot_metadata_requires_exact_requested_snapshot() -> None:
+    snapshot = experiment.snapshot_metadata(experiment.DEFAULT_SNAPSHOT_DIR)
+    assert snapshot["name"] == experiment.DEFAULT_SNAPSHOT
+    assert snapshot["counts"] == {"train": 68, "validation": 14, "test": 14}
+
+
+def test_snapshot_metadata_rejects_modified_manifest(tmp_path: Path) -> None:
+    source = experiment.DEFAULT_SNAPSHOT_DIR
+    target = tmp_path / source.name
+    target.mkdir()
+    for name in ("manifest.json", "train.csv", "validation.csv", "test.csv"):
+        (target / name).write_bytes((source / name).read_bytes())
+    (target / "validation.csv").write_text((target / "validation.csv").read_text() + "step-2_fake.jpg,0.2\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Expected 14 validation rows"):
+        experiment.snapshot_metadata(target)
+
+
+def test_metric_definitions_include_bias_and_range_compression() -> None:
+    metrics = experiment.compute_metrics([0.0, 0.5, 1.0], [0.2, 0.4, 0.8])
+    assert metrics["validation_mae"] == pytest.approx(0.1666666667)
+    assert metrics["mean_signed_error"] == pytest.approx(-0.0333333333)
+    assert metrics["low_range_signed_error"] == pytest.approx(0.2)
+    assert metrics["high_range_signed_error"] == pytest.approx(-0.2)
+    assert metrics["prediction_actual_range_width_ratio"] == pytest.approx(0.6)
+
+
+def test_model_has_only_head_trainable_without_loading_weights(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = experiment.FrozenBackboneWaveRegressionModel("resnet18", pretrained=False)
+    model.train()
+    checks = model.frozen_backbone_mode_checks()
+    assert checks["trainable_parameters"] == 513
+    assert checks["frozen_batchnorm_modules"] > 0
+    assert all(not parameter.requires_grad for parameter in model.feature_extractor.parameters())
+    assert all(parameter.requires_grad for parameter in model.regression_head.parameters())
+
+
+def test_aggregate_requires_three_seeds() -> None:
+    result = {
+        "config": {"backbone": "resnet18", "seed": 42},
+        "metrics": {
+            "validation_mae": 0.1,
+            "validation_rmse": 0.2,
+            "prediction_actual_range_width_ratio": 0.5,
+            "low_range_signed_error": 0.1,
+            "high_range_signed_error": -0.1,
+        },
+        "checkpoint": {"path": "model.ckpt", "sha256": "abc"},
+    }
+    with pytest.raises(RuntimeError, match="Expected 3 completed seeds"):
+        experiment.aggregate_results([result])
