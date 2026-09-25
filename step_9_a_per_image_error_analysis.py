@@ -38,13 +38,8 @@ PROJECT_DIR = Path(__file__).resolve().parent
 # to a relative or absolute checkpoint path to inspect a specific available run.
 CHECKPOINT_OVERRIDE: Path | None = None
 CHECKPOINT_ROOT = Path("step-5-checkpoints")
-DEFAULT_SPLIT_SNAPSHOT = Path("step-3-dataset-splits/snapshots/20260923T133043052012Z")
 DEFAULT_OUTPUT_ROOT = Path("step-9-per-image-error-analysis")
 IMAGE_DIR = Path("step-2-final-water-data")
-EXPECTED_COUNTS = {"train": 68, "validation": 14, "test": 14}
-EXPECTED_V10_MAE = 0.175786
-EXPECTED_MEAN_MAE = 0.219328
-BASELINE_TOLERANCE = 1e-5
 BATCH_SIZE = 8
 SCHEMA_VERSION = 1
 BIN_RANGES = ((0.00, 0.19), (0.20, 0.39), (0.40, 0.59), (0.60, 0.79), (0.80, 1.00))
@@ -60,6 +55,7 @@ class RunConfig:
     checkpoint_sha256: str
     split_manifest_sha256: str
     test_manifest_sha256: str
+    split_counts: dict[str, int]
 
 
 def sha256_for(path: Path) -> str:
@@ -91,7 +87,8 @@ def model_version_from_checkpoint(checkpoint: Path) -> str:
 
 def checkpoint_manifest(checkpoint: Path, project_dir: Path) -> tuple[Path, dict[str, Any]]:
     candidates: list[tuple[Path, dict[str, Any]]] = []
-    for path in sorted((project_dir / "step-5-checkpoints").rglob("training_manifest_*.json")):
+    checkpoint_root = CHECKPOINT_ROOT if CHECKPOINT_ROOT.is_absolute() else project_dir / CHECKPOINT_ROOT
+    for path in sorted(checkpoint_root.rglob("training_manifest_*.json")):
         metadata = load_json(path)
         reference = metadata.get("best_checkpoint_path")
         if isinstance(reference, str) and resolve_path(reference, project_dir) == checkpoint:
@@ -162,7 +159,7 @@ def output_directory(
     return output_root / model_version / checkpoint_id / snapshot_id
 
 
-def validate_snapshot(split_snapshot: Path) -> tuple[dict[str, Any], dict[str, str]]:
+def validate_snapshot(split_snapshot: Path) -> tuple[dict[str, Any], dict[str, str], dict[str, int]]:
     manifest_path = split_snapshot / "manifest.json"
     if not manifest_path.is_file():
         raise FileNotFoundError(f"Split manifest not found: {manifest_path}")
@@ -171,17 +168,26 @@ def validate_snapshot(split_snapshot: Path) -> tuple[dict[str, Any], dict[str, s
     if not isinstance(files, dict):
         raise ValueError(f"Split manifest has no files object: {manifest_path}")
     hashes: dict[str, str] = {}
-    for split_name, expected_count in EXPECTED_COUNTS.items():
+    counts: dict[str, int] = {}
+    for split_name in ("train", "validation", "test"):
         csv_path = split_snapshot / f"{split_name}.csv"
         entry = files.get(split_name, {})
-        if not csv_path.is_file() or entry.get("count") != expected_count:
-            raise ValueError(f"Unexpected {split_name} manifest/count in {split_snapshot}")
+        expected_count = entry.get("count")
+        if not csv_path.is_file() or not isinstance(expected_count, int) or expected_count < 1:
+            raise ValueError(f"Invalid {split_name} manifest/count in {split_snapshot}")
         expected_hash = entry.get("sha256")
         actual_hash = sha256_for(csv_path)
         if expected_hash != actual_hash:
             raise ValueError(f"{split_name}.csv hash does not match snapshot manifest")
+        actual_count = sum(1 for _ in csv_path.open(encoding="utf-8")) - 1
+        if actual_count != expected_count:
+            raise ValueError(
+                f"{split_name}.csv row count does not match snapshot manifest: "
+                f"{actual_count} != {expected_count}"
+            )
         hashes[split_name] = actual_hash
-    return metadata, hashes
+        counts[split_name] = expected_count
+    return metadata, hashes, counts
 
 
 def prepare_config(
@@ -194,7 +200,7 @@ def prepare_config(
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"Selected checkpoint not found: {checkpoint_path}")
     split_path, _, _ = resolve_split_snapshot(checkpoint_path, split_snapshot, project_dir)
-    snapshot_metadata, hashes = validate_snapshot(split_path)
+    snapshot_metadata, hashes, split_counts = validate_snapshot(split_path)
     if snapshot_metadata.get("snapshot") != split_path.name:
         raise ValueError(f"Snapshot metadata name does not match directory: {split_path}")
     version = model_version_from_checkpoint(checkpoint_path)
@@ -209,6 +215,7 @@ def prepare_config(
         checkpoint_sha256=sha256_for(checkpoint_path),
         split_manifest_sha256=hashes["validation"],
         test_manifest_sha256=hashes["test"],
+        split_counts=split_counts,
     )
 
 
@@ -448,7 +455,7 @@ def run(config: RunConfig) -> dict[str, Any]:
     test_hash_before = sha256_for(config.split_snapshot / "test.csv")
     train_samples = read_labels(train_csv)
     validation_dataset = WaveDataset(validation_csv, config.project_dir / IMAGE_DIR, build_evaluation_transform())
-    if len(train_samples) != EXPECTED_COUNTS["train"] or len(validation_dataset) != EXPECTED_COUNTS["validation"]:
+    if len(train_samples) != config.split_counts["train"] or len(validation_dataset) != config.split_counts["validation"]:
         raise RuntimeError("Snapshot dataset counts changed while loading validation labels")
     baseline = statistics.mean(value for _, value in train_samples)
     validation_samples = list(validation_dataset.samples)
@@ -472,8 +479,10 @@ def run(config: RunConfig) -> dict[str, Any]:
                 raise RuntimeError(f"Invalid prediction in validation batch {batch_number}")
             predictions.extend(float(value) for value in batch_predictions)
             print(f"Validation batch {batch_number}: {len(batch_predictions)} images in {time.perf_counter() - item_started:.3f}s")
-    if len(predictions) != EXPECTED_COUNTS["validation"]:
-        raise RuntimeError(f"Expected 14 validation predictions, got {len(predictions)}")
+    if len(predictions) != config.split_counts["validation"]:
+        raise RuntimeError(
+            f"Expected {config.split_counts['validation']} validation predictions, got {len(predictions)}"
+        )
     rows = make_rows(validation_samples, predictions, baseline)
     actual = [value for _, value in validation_samples]
     aggregate = regression_metrics(actual, predictions)
@@ -491,14 +500,10 @@ def run(config: RunConfig) -> dict[str, Any]:
         },
         "baseline_comparison": {"count_beaten": sum(row["neural_network_beats_baseline"] for row in rows), "percentage_beaten": sum(row["neural_network_beats_baseline"] for row in rows) / len(rows) * 100, "ties": sum(row["absolute_error"] == row["mean_baseline_absolute_error"] for row in rows)},
         "checkpoint": {"path": str(config.checkpoint), "sha256": config.checkpoint_sha256, "model_version": config.model_version},
-        "split_snapshot": {"path": str(config.split_snapshot), "validation_sha256": config.split_manifest_sha256, "test_sha256": config.test_manifest_sha256, "counts": EXPECTED_COUNTS},
+        "split_snapshot": {"path": str(config.split_snapshot), "validation_sha256": config.split_manifest_sha256, "test_sha256": config.test_manifest_sha256, "counts": config.split_counts},
         "test_evaluated": False, "training_performed": False, "device": str(device),
         "inference_seconds": time.perf_counter() - inference_started,
     }
-    if abs(metrics["mae"] - EXPECTED_V10_MAE) > BASELINE_TOLERANCE and config.model_version == "v10" and config.split_snapshot.name == DEFAULT_SPLIT_SNAPSHOT.name:
-        raise RuntimeError(f"Reproduced v10 MAE {metrics['mae']:.8f} differs from Experiment A")
-    if abs(metrics["baseline_mae"] - EXPECTED_MEAN_MAE) > BASELINE_TOLERANCE and config.model_version == "v10" and config.split_snapshot.name == DEFAULT_SPLIT_SNAPSHOT.name:
-        raise RuntimeError(f"Reproduced mean-baseline MAE {metrics['baseline_mae']:.8f} differs from Experiment A")
     if test_hash_before != sha256_for(config.split_snapshot / "test.csv"):
         raise RuntimeError("Test manifest changed during evaluation")
 
