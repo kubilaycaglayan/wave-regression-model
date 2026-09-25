@@ -25,4 +25,10 @@
   canonical input or configuration (for example, the selected checkpoint), and
   fail with a clear error when the expected naming format cannot be parsed.
 
-- We created a camera feeder for this project, so we expect to have incoming data such as sea photos, in time. So when we are creating the pipeline or modifying it, we should expect that there will be more data in the future and we will be doing daily updates and we will be creating new checkpoints every few days or every few weeks.
+- We created a camera feeder for this project; it is on hold for now and only
+  used when needed, so incoming data may occasionally come from it (typically
+  UUID-named files). Most sea photos are currently taken manually on an iPhone
+  (HEIC, zoomed in on the sea) from a few recurring spots with 3–4 different
+  angles, roughly 2–10 photos per day. When creating or modifying the pipeline,
+  expect the dataset to keep growing, with updates every day or every few days
+  and new checkpoints every few days or weeks.
