@@ -248,7 +248,7 @@ The training script:
 New checkpoints will be created in:
 
 ```text
-step-5-checkpoints/vN/
+step-5-checkpoints/vN-mae-<best-mae>/
 ```
 
 Each training version directory contains its checkpoint, manifest, summary,
@@ -285,7 +285,7 @@ Configure the prediction checkpoint in `.env` (or the environment) using:
 
 ```text
 # Use the exact best-checkpoint path printed by train.py.
-PREDICT_CHECKPOINT_PATH=step-5-checkpoints/vN/<best-checkpoint>.ckpt
+PREDICT_CHECKPOINT_PATH=step-5-checkpoints/vN-mae-<best-mae>/<best-checkpoint>.ckpt
 ```
 
 After training, update `PREDICT_CHECKPOINT_PATH` to the new checkpoint path printed by `train.py`.

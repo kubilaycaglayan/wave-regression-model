@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 import re
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -58,6 +59,13 @@ def next_run_version(directory: Path) -> str:
     return f"v{max(versions, default=0) + 1}"
 
 
+def version_directory_name(run_version: str, best_mae: float) -> str:
+    """Return the stable directory name for a completed training run."""
+    if not math.isfinite(best_mae) or not 0.0 <= best_mae <= 1.0:
+        raise ValueError(f"Best validation MAE must be finite and within [0, 1], got {best_mae!r}")
+    return f"{run_version}-mae-{best_mae:.4f}"
+
+
 def latest_split_snapshot() -> Path:
     snapshots = sorted(path for path in SPLIT_SNAPSHOT_DIR.iterdir() if path.is_dir()) if SPLIT_SNAPSHOT_DIR.is_dir() else []
     if not snapshots:
@@ -95,6 +103,7 @@ def write_summary(
     performance_metric: str,
     labeled_sample_count: int,
     output_dir: Path,
+    best_checkpoint_path: Path,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     best_mae = best_metrics["val_mae"]
@@ -118,8 +127,8 @@ def write_summary(
                 f"split snapshot: {split_snapshot}",
                 f"best validation MAE: {float(best_mae) if best_mae is not None else 'unavailable'}",
                 f"best validation RMSE: {float(best_rmse) if best_rmse is not None else 'unavailable'}",
-                f"best checkpoint path: {checkpoint.best_model_path}",
-                f"best checkpoint epoch: {best_checkpoint_epoch(checkpoint.best_model_path)}",
+                f"best checkpoint path: {best_checkpoint_path}",
+                f"best checkpoint epoch: {best_checkpoint_epoch(str(best_checkpoint_path))}",
                 f"epochs actually trained: {epochs_trained}",
                 f"early stopping triggered: {early_stopping.stopped_epoch > 0}",
                 f"performance plot metric: {performance_metric}",
@@ -148,7 +157,7 @@ def write_summary(
                 "run_version": run_version,
                 "random_seed": seed,
                 "split_snapshot": str(split_snapshot),
-                "best_checkpoint_path": str(checkpoint.best_model_path),
+                "best_checkpoint_path": str(best_checkpoint_path),
                 "best_validation_mae": float(best_mae) if best_mae is not None else None,
                 "best_validation_rmse": float(best_rmse) if best_rmse is not None else None,
                 "epochs_trained": epochs_trained,
@@ -172,7 +181,7 @@ def main() -> None:
     pl.seed_everything(RANDOM_SEED, workers=True)
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     run_version = next_run_version(CHECKPOINT_DIR)
-    run_directory = CHECKPOINT_DIR / run_version
+    run_directory = CHECKPOINT_DIR / f"{run_version}-pending"
     run_directory.mkdir(parents=True, exist_ok=False)
     print(f"Run version: {run_version}")
     split_snapshot = latest_split_snapshot()
@@ -259,6 +268,14 @@ def main() -> None:
 
     best_model = WaveRegressionModel.load_from_checkpoint(checkpoint.best_model_path)
     best_metrics = trainer.validate(best_model, datamodule=data, verbose=False)[0]
+    best_mae = float(best_metrics["val_mae"])
+    completed_directory = CHECKPOINT_DIR / version_directory_name(run_version, best_mae)
+    if completed_directory.exists():
+        raise FileExistsError(f"Completed run directory already exists: {completed_directory}")
+    run_directory.rename(completed_directory)
+    best_checkpoint_path = completed_directory / Path(checkpoint.best_model_path).name
+    history_path = completed_directory / history_path.name
+    plot_path = completed_directory / plot_path.name
     summary_path = write_summary(
         checkpoint,
         early_stopping,
@@ -273,12 +290,13 @@ def main() -> None:
         plot_path,
         performance_metric,
         labeled_sample_count,
-        run_directory,
+        completed_directory,
+        best_checkpoint_path,
     )
     print(f"Best validation MAE: {best_metrics['val_mae']:.6f}")
     print(f"Best validation RMSE: {best_metrics['val_rmse']:.6f}")
-    print(f"Best checkpoint path: {checkpoint.best_model_path}")
-    print(f"Best checkpoint epoch: {best_checkpoint_epoch(checkpoint.best_model_path)}")
+    print(f"Best checkpoint path: {best_checkpoint_path}")
+    print(f"Best checkpoint epoch: {best_checkpoint_epoch(str(best_checkpoint_path))}")
     print(f"Epochs actually trained: {epochs_trained}")
     print(f"Early stopping triggered: {early_stopping.stopped_epoch > 0}")
     print(f"Training summary: {summary_path}")

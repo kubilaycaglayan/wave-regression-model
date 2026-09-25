@@ -76,7 +76,7 @@ Configure the validation-selected checkpoint in `.env`:
 
 ```dotenv
 # Use the exact best-checkpoint path printed by train.py.
-PREDICT_CHECKPOINT_PATH=step-5-checkpoints/vN/<best-checkpoint>.ckpt
+PREDICT_CHECKPOINT_PATH=step-5-checkpoints/vN-mae-<best-mae>/<best-checkpoint>.ckpt
 ```
 
 Test evaluation automatically selects the newest training manifest's best checkpoint. To pin a
@@ -84,7 +84,7 @@ specific checkpoint for a reproducible historical evaluation, configure it separ
 
 ```dotenv
 # Optional: use the exact checkpoint path to evaluate a specific run.
-EVALUATION_CHECKPOINT_PATH=step-5-checkpoints/vN/<checkpoint>.ckpt
+EVALUATION_CHECKPOINT_PATH=step-5-checkpoints/vN-mae-<best-mae>/<checkpoint>.ckpt
 ```
 
 Each evaluation is saved under `step-6-test-evaluation/` using the checkpoint filename and a
