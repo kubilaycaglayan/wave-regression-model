@@ -319,6 +319,14 @@ python step_8_a_constant_prediction_baselines.py
 
 Step 8 compares training-mean and training-median baselines with the matching neural-network checkpoint. Its append-only JSON and Markdown reports are kept in `step-8-baseline experiment/`; test data is not evaluated.
 
+## Step 9: Review per-image errors
+
+```bash
+python step_9_a_per_image_error_analysis.py
+```
+
+Step 9 shows which validation images the model understands well and where its waviness judgments are least reliable. It helps reveal patterns in the model’s mistakes so future improvements can focus on the images that need the most attention.
+
 ## Important notes
 
 - `step_1_a_prepare_water_masks.py` is an inspection step; `step_1_b_preprocess_water_inputs.py` is the actual Step 1 training-data preparation.

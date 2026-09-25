@@ -39,3 +39,30 @@ def test_complete_outputs_requires_all_deliverables(tmp_path: Path) -> None:
     for name in names:
         (tmp_path / name).write_text("x", encoding="utf-8")
     assert experiment.complete_outputs(tmp_path)
+
+
+def test_select_checkpoint_uses_newest_training_manifest(tmp_path: Path) -> None:
+    checkpoint_root = tmp_path / "step-5-checkpoints"
+    older = checkpoint_root / "v10" / "training_manifest_20260101T000000000000Z.json"
+    newer = checkpoint_root / "v11" / "training_manifest_20260102T000000000000Z.json"
+    older.parent.mkdir(parents=True)
+    newer.parent.mkdir(parents=True)
+    old_checkpoint = older.parent / "old.ckpt"
+    new_checkpoint = newer.parent / "new.ckpt"
+    old_checkpoint.write_bytes(b"old")
+    new_checkpoint.write_bytes(b"new")
+    older.write_text(json.dumps({"best_checkpoint_path": str(old_checkpoint)}), encoding="utf-8")
+    newer.write_text(json.dumps({"best_checkpoint_path": str(new_checkpoint)}), encoding="utf-8")
+
+    selected = experiment.select_checkpoint(tmp_path, checkpoint_root=checkpoint_root)
+
+    assert selected == new_checkpoint.resolve()
+
+
+def test_select_checkpoint_allows_explicit_override(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "chosen.ckpt"
+    checkpoint.write_bytes(b"checkpoint")
+
+    selected = experiment.select_checkpoint(tmp_path, checkpoint)
+
+    assert selected == checkpoint.resolve()

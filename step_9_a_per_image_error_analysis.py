@@ -34,9 +34,10 @@ from step_5_a_wave_regression_model import WaveRegressionModel
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-DEFAULT_CHECKPOINT = Path(
-    "step-5-checkpoints/v10-mae-0.1758/wave-regression-baseline-v10-best-val-mae-epoch=42-val_mae=0.1758.ckpt"
-)
+# Leave unset to use the checkpoint from the newest training manifest. Set this
+# to a relative or absolute checkpoint path to inspect a specific available run.
+CHECKPOINT_OVERRIDE: Path | None = None
+CHECKPOINT_ROOT = Path("step-5-checkpoints")
 DEFAULT_SPLIT_SNAPSHOT = Path("step-3-dataset-splits/snapshots/20260923T133043052012Z")
 DEFAULT_OUTPUT_ROOT = Path("step-9-per-image-error-analysis")
 IMAGE_DIR = Path("step-2-final-water-data")
@@ -100,6 +101,42 @@ def checkpoint_manifest(checkpoint: Path, project_dir: Path) -> tuple[Path, dict
     return candidates[-1]
 
 
+def checkpoint_from_latest_manifest(
+    checkpoint_root: Path = CHECKPOINT_ROOT,
+    project_dir: Path = PROJECT_DIR,
+) -> tuple[Path, Path]:
+    """Return the checkpoint recorded by the newest training manifest."""
+    manifests = sorted(checkpoint_root.rglob("training_manifest_*.json"), key=lambda path: path.name)
+    if not manifests:
+        raise FileNotFoundError(f"No training manifests found in {checkpoint_root}")
+    manifest_path = manifests[-1]
+    metadata = load_json(manifest_path)
+    reference = metadata.get("best_checkpoint_path")
+    if not isinstance(reference, str) or not reference.strip():
+        raise ValueError(f"Training manifest has no best_checkpoint_path: {manifest_path}")
+    checkpoint = resolve_path(reference, project_dir)
+    if not checkpoint.is_file():
+        raise FileNotFoundError(
+            f"Training manifest {manifest_path} references missing checkpoint: {checkpoint}"
+        )
+    return checkpoint, manifest_path
+
+
+def select_checkpoint(
+    project_dir: Path = PROJECT_DIR,
+    configured_checkpoint: Path | None = None,
+    checkpoint_root: Path = CHECKPOINT_ROOT,
+) -> Path:
+    """Select an explicit checkpoint or the checkpoint from the newest manifest."""
+    if configured_checkpoint is None:
+        configured_checkpoint = CHECKPOINT_OVERRIDE
+    if configured_checkpoint is not None:
+        return resolve_path(configured_checkpoint, project_dir)
+    root = checkpoint_root if checkpoint_root.is_absolute() else project_dir / checkpoint_root
+    checkpoint, _ = checkpoint_from_latest_manifest(root, project_dir)
+    return checkpoint
+
+
 def resolve_split_snapshot(
     checkpoint: Path, requested: Path | None, project_dir: Path
 ) -> tuple[Path, Path, dict[str, Any]]:
@@ -149,11 +186,11 @@ def validate_snapshot(split_snapshot: Path) -> tuple[dict[str, Any], dict[str, s
 
 def prepare_config(
     project_dir: Path = PROJECT_DIR,
-    checkpoint: Path = DEFAULT_CHECKPOINT,
+    checkpoint: Path | None = None,
     split_snapshot: Path | None = None,
     output_root: Path = DEFAULT_OUTPUT_ROOT,
 ) -> RunConfig:
-    checkpoint_path = resolve_path(checkpoint, project_dir)
+    checkpoint_path = select_checkpoint(project_dir, checkpoint)
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"Selected checkpoint not found: {checkpoint_path}")
     split_path, _, _ = resolve_split_snapshot(checkpoint_path, split_snapshot, project_dir)
@@ -480,7 +517,12 @@ def run(config: RunConfig) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-dir", type=Path, default=PROJECT_DIR)
-    parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
+        help="checkpoint to evaluate; defaults to the newest training manifest",
+    )
     parser.add_argument(
         "--split-snapshot",
         type=Path,
