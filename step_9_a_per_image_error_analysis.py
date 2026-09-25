@@ -38,7 +38,7 @@ PROJECT_DIR = Path(__file__).resolve().parent
 # to a relative or absolute checkpoint path to inspect a specific available run.
 CHECKPOINT_OVERRIDE: Path | None = None
 CHECKPOINT_ROOT = Path("step-5-checkpoints")
-DEFAULT_OUTPUT_ROOT = Path("step-9-per-image-error-analysis")
+DEFAULT_OUTPUT_ROOT = Path("step-9-experiment-b-per-image-error-analysis")
 IMAGE_DIR = Path("step-2-final-water-data")
 BATCH_SIZE = 8
 SCHEMA_VERSION = 1

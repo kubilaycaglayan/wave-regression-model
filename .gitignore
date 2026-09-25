@@ -45,4 +45,4 @@ step-5-checkpoints/training_summary_*.txt
 step-5-checkpoints/*
 
 # Locally generated Experiment A report history.
-step-8-baseline experiment/
+step-8-experiment-a-baseline/

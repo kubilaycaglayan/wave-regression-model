@@ -317,7 +317,7 @@ The prediction directory contains one append-only `.txt` history per input photo
 python step_8_a_constant_prediction_baselines.py
 ```
 
-Step 8 compares training-mean and training-median baselines with the matching neural-network checkpoint. Its append-only JSON and Markdown reports are kept in `step-8-baseline experiment/`; test data is not evaluated.
+Step 8 compares training-mean and training-median baselines with the matching neural-network checkpoint. Its append-only JSON and Markdown reports are kept in `step-8-experiment-a-baseline/`; test data is not evaluated.
 
 ## Step 9: Review per-image errors
 
