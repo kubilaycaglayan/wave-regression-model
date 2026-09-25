@@ -33,6 +33,39 @@ def test_latest_manifest_selects_newest_existing_checkpoint(tmp_path: Path) -> N
     assert manifest == newest_manifest
 
 
+def test_latest_manifest_finds_manifest_in_version_directory(tmp_path: Path) -> None:
+    checkpoint_dir = tmp_path / "checkpoints"
+    version_dir = checkpoint_dir / "v12"
+    version_dir.mkdir(parents=True)
+    checkpoint = version_dir / "model.ckpt"
+    checkpoint.write_bytes(b"checkpoint")
+    manifest = write_manifest(version_dir, "20260103T000000Z", checkpoint)
+
+    selected, selected_manifest = evaluation.checkpoint_from_latest_manifest(checkpoint_dir)
+
+    assert selected == checkpoint
+    assert selected_manifest == manifest
+
+
+def test_latest_manifest_sort_ignores_version_directory_order(tmp_path: Path) -> None:
+    checkpoint_dir = tmp_path / "checkpoints"
+    older_dir = checkpoint_dir / "v11"
+    newer_dir = checkpoint_dir / "v12"
+    older_dir.mkdir(parents=True)
+    newer_dir.mkdir(parents=True)
+    older = older_dir / "older.ckpt"
+    newer = newer_dir / "newer.ckpt"
+    older.write_bytes(b"older")
+    newer.write_bytes(b"newer")
+    write_manifest(older_dir, "20260101T000000Z", older)
+    newest_manifest = write_manifest(newer_dir, "20260102T000000Z", newer)
+
+    selected, manifest = evaluation.checkpoint_from_latest_manifest(checkpoint_dir)
+
+    assert selected == newer
+    assert manifest == newest_manifest
+
+
 def test_latest_manifest_missing_checkpoint_fails_without_fallback(tmp_path: Path) -> None:
     checkpoint_dir = tmp_path / "checkpoints"
     checkpoint_dir.mkdir()

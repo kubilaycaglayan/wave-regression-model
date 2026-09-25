@@ -248,7 +248,15 @@ The training script:
 New checkpoints will be created in:
 
 ```text
-step-5-checkpoints/
+step-5-checkpoints/vN/
+```
+
+Each training version directory contains its checkpoint, manifest, summary,
+training history, and plots. Existing root-level artifacts can be organized with:
+
+```bash
+python migrate_step_5_checkpoints.py --dry-run
+python migrate_step_5_checkpoints.py
 ```
 
 The command prints the exact best checkpoint path. Use that path for later evaluation or prediction.
@@ -277,7 +285,7 @@ Configure the prediction checkpoint in `.env` (or the environment) using:
 
 ```text
 # Use the exact best-checkpoint path printed by train.py.
-PREDICT_CHECKPOINT_PATH=step-5-checkpoints/<best-checkpoint>.ckpt
+PREDICT_CHECKPOINT_PATH=step-5-checkpoints/vN/<best-checkpoint>.ckpt
 ```
 
 After training, update `PREDICT_CHECKPOINT_PATH` to the new checkpoint path printed by `train.py`.

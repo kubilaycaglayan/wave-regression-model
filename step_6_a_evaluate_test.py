@@ -73,7 +73,10 @@ def _checkpoint_from_manifest(manifest_path: Path) -> Path:
 def checkpoint_from_latest_manifest(
     checkpoint_dir: Path = CHECKPOINT_DIR,
 ) -> tuple[Path, Path]:
-    manifests = sorted(checkpoint_dir.glob("training_manifest_*.json"))
+    manifests = sorted(
+        checkpoint_dir.rglob("training_manifest_*.json"),
+        key=lambda path: path.name,
+    )
     if not manifests:
         raise FileNotFoundError(f"No training manifests found in {checkpoint_dir}")
     manifest_path = manifests[-1]

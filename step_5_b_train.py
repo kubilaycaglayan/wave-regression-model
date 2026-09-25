@@ -48,11 +48,13 @@ def best_checkpoint_epoch(path: str) -> int | None:
 
 
 def next_run_version(directory: Path) -> str:
-    """Return the next unused vN label without overwriting prior runs."""
-    versions = []
+    """Return the next unused vN label from legacy files and version folders."""
+    versions: list[int] = []
     if directory.exists():
-        for path in directory.iterdir():
+        for path in directory.rglob("*"):
             versions.extend(int(value) for value in re.findall(r"(?:^|[-_])v(\d+)(?:[-_.]|$)", path.name))
+            if path.is_dir():
+                versions.extend(int(value) for value in re.findall(r"^v(\d+)$", path.name))
     return f"v{max(versions, default=0) + 1}"
 
 
@@ -92,11 +94,12 @@ def write_summary(
     plot_path: Path,
     performance_metric: str,
     labeled_sample_count: int,
+    output_dir: Path,
 ) -> Path:
-    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     best_mae = best_metrics["val_mae"]
     best_rmse = best_metrics["val_rmse"]
-    summary_path = CHECKPOINT_DIR / f"training_summary_{run_version}.txt"
+    summary_path = output_dir / f"training_summary_{run_version}.txt"
     summary_path.write_text(
         "\n".join(
             [
@@ -133,10 +136,10 @@ def write_summary(
         encoding="utf-8",
     )
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    manifest_path = CHECKPOINT_DIR / f"training_manifest_{timestamp}.json"
+    manifest_path = output_dir / f"training_manifest_{timestamp}.json"
     while manifest_path.exists():
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        manifest_path = CHECKPOINT_DIR / f"training_manifest_{timestamp}.json"
+        manifest_path = output_dir / f"training_manifest_{timestamp}.json"
     manifest_path.write_text(
         json.dumps(
             {
@@ -169,6 +172,8 @@ def main() -> None:
     pl.seed_everything(RANDOM_SEED, workers=True)
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     run_version = next_run_version(CHECKPOINT_DIR)
+    run_directory = CHECKPOINT_DIR / run_version
+    run_directory.mkdir(parents=True, exist_ok=False)
     print(f"Run version: {run_version}")
     split_snapshot = latest_split_snapshot()
     print(f"Split snapshot: {split_snapshot}")
@@ -206,7 +211,7 @@ def main() -> None:
     print("Sanity prediction range: within [0.0, 1.0]")
 
     checkpoint = ModelCheckpoint(
-        dirpath=CHECKPOINT_DIR,
+        dirpath=run_directory,
         filename=f"wave-regression-baseline-{run_version}-best-val-mae-{{epoch:02d}}-{{val_mae:.4f}}",
         monitor="val_mae",
         mode="min",
@@ -241,11 +246,11 @@ def main() -> None:
     )
     trainer.fit(model, datamodule=data)
     epochs_trained = int(trainer.fit_loop.epoch_progress.current.completed)
-    history_path = write_training_history(history, run_version, CHECKPOINT_DIR)
+    history_path = write_training_history(history, run_version, run_directory)
     plot_path = plot_training_history(
         history,
         run_version,
-        CHECKPOINT_DIR,
+        run_directory,
         performance_monitor,
         early_stopping.monitor,
         labeled_sample_count,
@@ -268,6 +273,7 @@ def main() -> None:
         plot_path,
         performance_metric,
         labeled_sample_count,
+        run_directory,
     )
     print(f"Best validation MAE: {best_metrics['val_mae']:.6f}")
     print(f"Best validation RMSE: {best_metrics['val_rmse']:.6f}")

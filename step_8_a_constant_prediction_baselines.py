@@ -111,7 +111,7 @@ def select_checkpoint(
     project_dir: Path = PROJECT_DIR,
 ) -> CheckpointSelection | None:
     matches: list[CheckpointSelection] = []
-    for manifest_path in sorted(checkpoint_root.glob("training_manifest_*.json")):
+    for manifest_path in sorted(checkpoint_root.rglob("training_manifest_*.json")):
         metadata = load_json(manifest_path)
         reference = metadata.get("split_snapshot")
         checkpoint_reference = metadata.get("best_checkpoint_path")

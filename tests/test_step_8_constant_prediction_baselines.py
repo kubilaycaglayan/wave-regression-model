@@ -58,6 +58,32 @@ def test_select_checkpoint_chooses_lowest_matching_validation_mae(tmp_path: Path
     assert selected.path.name == "second.ckpt"
 
 
+def test_select_checkpoint_discovers_versioned_manifest(tmp_path: Path) -> None:
+    snapshot_dir = tmp_path / "snapshot-a"
+    snapshot_dir.mkdir()
+    snapshot = experiment.Snapshot("snapshot-a", snapshot_dir, {})
+    checkpoint_dir = tmp_path / "checkpoints"
+    version_dir = checkpoint_dir / "v12"
+    version_dir.mkdir(parents=True)
+    checkpoint = version_dir / "model.ckpt"
+    checkpoint.write_bytes(b"checkpoint")
+    (version_dir / "training_manifest_run.json").write_text(
+        json.dumps(
+            {
+                "split_snapshot": "snapshot-a",
+                "best_checkpoint_path": "checkpoints/v12/model.ckpt",
+                "best_validation_mae": 0.1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    selected = experiment.select_checkpoint(snapshot, checkpoint_dir, tmp_path)
+
+    assert selected is not None
+    assert selected.path == checkpoint
+
+
 def test_reports_append_and_preserve_history(tmp_path: Path) -> None:
     checkpoint = tmp_path / "model.ckpt"
     checkpoint.write_bytes(b"checkpoint")
