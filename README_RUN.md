@@ -13,10 +13,10 @@ python step_6_a_evaluate_test.py
 Predict one or more new photos:
 
 ```bash
-# put HEIC/JPG/PNG in predict-holder/, then:
+# put HEIC/JPG/PNG in step-7-predict-captures-holder/, then:
 python step_7_a_predict.py
 # previews -> step-7-inference-preview/
-# prediction histories -> predict-holder/predictions/
+# prediction histories -> step-7-predict-captures-holder/predictions/
 ```
 
 Notes: steps skip existing outputs, so reruns are safe. Use `--device cpu` on the step 1/2 scripts to force CPU.
@@ -68,7 +68,7 @@ python step_1_a_prepare_water_masks.py
 Open this file in a browser:
 
 ```text
-water-mask-preview/index.html
+step-1-water-mask-preview/index.html
 ```
 
 Inspect the original, mask, and overlay images. The generated `original` and `overlay` files are previews and should not be committed.
@@ -293,7 +293,7 @@ After training, update `PREDICT_CHECKPOINT_PATH` to the new checkpoint path prin
 Then put new inference photos in:
 
 ```text
-predict-holder/
+step-7-predict-captures-holder/
 ```
 
 Run:
@@ -306,7 +306,7 @@ Predictions and processed previews are written to:
 
 ```text
 step-7-inference-preview/
-predict-holder/predictions/
+step-7-predict-captures-holder/predictions/
 ```
 
 The prediction directory contains one append-only `.txt` history per input photo. Each record includes the waviness prediction, selected checkpoint path, checkpoint SHA-256, timestamp, device, and elapsed processing time. A valid `step-7-inference-preview/<photo-stem>-model-input.jpg` is the checkpoint-independent cached model input, so changing checkpoints reuses the preview and reruns only regression inference. A photo is skipped only when both its valid preview and a record for the same checkpoint are present. Missing previews trigger Steps 1 and 2; malformed previews fail clearly rather than being silently replaced. Delete a preview to force regeneration.

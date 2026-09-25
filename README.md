@@ -29,7 +29,7 @@ path separator.
 The pipeline folders are `step-0-raw-data/`, `step-1-processed-data/`, and
 `step-2-final-water-data/`. Step outputs use namespaced filenames such as
 `step-1_<original-name>` and `step-2_<original-name>`. Preview files and gallery
-are written to `water-mask-preview/`.
+are written to `step-1-water-mask-preview/`.
 
 To rerun segmentation with changed settings while retaining the existing
 result for comparison, use:
@@ -70,7 +70,7 @@ image with the new result.
 
 ## Predict waviness
 
-Put HEIC, HEIF, JPEG, or PNG photos in `predict-holder/`, then run `python step_7_a_predict.py`; photos are predicted one by one and previews are saved in `step-7-inference-preview/`. Each photo also gets an append-only prediction history at `predict-holder/predictions/<photo-stem>.txt`, including the prediction and checkpoint fingerprint.
+Put HEIC, HEIF, JPEG, or PNG photos in `step-7-predict-captures-holder/`, then run `python step_7_a_predict.py`; photos are predicted one by one and previews are saved in `step-7-inference-preview/`. Each photo also gets an append-only prediction history at `step-7-predict-captures-holder/predictions/<photo-stem>.txt`, including the prediction and checkpoint fingerprint.
 
 Configure the validation-selected checkpoint in `.env`:
 

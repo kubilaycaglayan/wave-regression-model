@@ -8,7 +8,7 @@ import step_7_a_predict as predict_script
 
 
 def setup_paths(tmp_path, monkeypatch):
-    input_dir = tmp_path / "predict-holder"
+    input_dir = tmp_path / "step-7-predict-captures-holder"
     input_dir.mkdir()
     photo = input_dir / "IMG_1234.jpg"
     photo.write_bytes(b"photo bytes")
@@ -35,7 +35,7 @@ def test_matching_checkpoint_is_recorded_and_can_be_read(tmp_path, monkeypatch):
 
     log_path = write_record(photo, checkpoint)
 
-    assert log_path == tmp_path / "predict-holder" / "predictions" / "IMG_1234.txt"
+    assert log_path == tmp_path / "step-7-predict-captures-holder" / "predictions" / "IMG_1234.txt"
     assert predict_script.has_matching_prediction(
         photo, checkpoint, predict_script.sha256_for(checkpoint)
     )

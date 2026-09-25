@@ -120,7 +120,7 @@ def write_gallery(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-dir", type=Path, action="append", help="Additional input directory; repeatable")
-    parser.add_argument("--output-dir", type=Path, default=Path("water-mask-preview"))
+    parser.add_argument("--output-dir", type=Path, default=Path("step-1-water-mask-preview"))
     parser.add_argument("--device", default=None)
     parser.add_argument(
         "--skip-cache",

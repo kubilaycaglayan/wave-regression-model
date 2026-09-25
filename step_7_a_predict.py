@@ -32,7 +32,7 @@ from step_5_a_wave_regression_model import WaveRegressionModel
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-INPUT_DIR = PROJECT_DIR / "predict-holder"
+INPUT_DIR = PROJECT_DIR / "step-7-predict-captures-holder"
 
 
 def checkpoint_path_from_env() -> Path:

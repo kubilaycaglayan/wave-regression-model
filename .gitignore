@@ -1,7 +1,7 @@
 step-0-raw-data/*
 !step-0-raw-data/.gitkeep
-predict-holder/*
-!predict-holder/.gitkeep
+step-7-predict-captures-holder/*
+!step-7-predict-captures-holder/.gitkeep
 
 # Input images and previews that may reveal the user's location or surroundings.
 **/*_original.*
@@ -20,14 +20,14 @@ step-7-inference-preview/
 .ckpt
 
 step-1-processed-data/index.html
-water-mask-preview/index.html
+step-1-water-mask-preview/index.html
 
 step-3-dataset-splits/snapshots/*
 step-3-dataset-splits/benchmarks/*
 AUDIT_RESULTS.md
 TODO
 .env
-water-mask-preview/*
+step-1-water-mask-preview/*
 *.jpg
 !readme_files/*.jpg
 discarded_images.csv
