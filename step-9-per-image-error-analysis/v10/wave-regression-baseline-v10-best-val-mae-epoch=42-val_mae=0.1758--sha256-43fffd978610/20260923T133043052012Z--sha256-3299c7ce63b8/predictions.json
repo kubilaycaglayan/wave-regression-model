@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "rows": [
+    {
+      "filename": "step-2_IMG_7274.jpg",
+      "actual_waviness": 0.9,
+      "predicted_waviness": 0.4547514021396637,
+      "signed_error": -0.4452485978603363,
+      "absolute_error": 0.4452485978603363,
+      "mean_baseline_prediction": 0.38235294117647056,
+      "mean_baseline_absolute_error": 0.5176470588235295,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7418.jpg",
+      "actual_waviness": 0.5,
+      "predicted_waviness": 0.7749571800231934,
+      "signed_error": 0.27495718002319336,
+      "absolute_error": 0.27495718002319336,
+      "mean_baseline_prediction": 0.38235294117647056,
+      "mean_baseline_absolute_error": 0.11764705882352944,
+      "neural_network_beats_baseline": false
+    },
+    {
+      "filename": "step-2_IMG_7395.jpg",
+      "actual_waviness": 0.2,
+      "predicted_waviness": 0.4640117287635803,
+      "signed_error": 0.2640117287635803,
+      "absolute_error": 0.2640117287635803,
+      "mean_baseline_prediction": 0.38235294117647056,
+      "mean_baseline_absolute_error": 0.18235294117647055,
+      "neural_network_beats_baseline": false
+    },
+    {
+      "filename": "step-2_IMG_7148.jpg",
+      "actual_waviness": 0.7,
+      "predicted_waviness": 0.46347886323928833,
+      "signed_error": -0.23652113676071163,
+      "absolute_error": 0.23652113676071163,
+      "mean_baseline_prediction": 0.38235294117647056,
+      "mean_baseline_absolute_error": 0.3176470588235294,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7149.jpg",
+      "actual_waviness": 0.75,
+      "predicted_waviness": 0.53724604845047,
+      "signed_error": -0.21275395154953003,
+      "absolute_error": 0.21275395154953003,
+      "mean_baseline_prediction": 0.38235294117647056,
+      "mean_baseline_absolute_error": 0.36764705882352944,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7306.jpg",
+      "actual_waviness": 0.05,
+      "predicted_waviness": 0.25943830609321594,
+      "signed_error": 0.20943830609321595,
+      "absolute_error": 0.20943830609321595,
+      "mean_baseline_prediction": 0.38235294117647056,
+      "mean_baseline_absolute_error": 0.3323529411764706,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7415.jpg",
+      "actual_waviness": 0.4,
+      "predicted_waviness": 0.5830798149108887,
+      "signed_error": 0.18307981491088865,
+      "absolute_error": 0.18307981491088865,
+      "mean_baseline_prediction": 0.38235294117647056,
+      "mean_baseline_absolute_error": 0.01764705882352946,
+      "neural_network_beats_baseline": false
+    },
+    {
+      "filename": "step-2_IMG_7311.jpg",
+      "actual_waviness": 0.75,
+      "predicted_waviness": 0.5757895112037659,
+      "signed_error": -0.17421048879623413,
+      "absolute_error": 0.17421048879623413,
+      "mean_baseline_prediction": 0.38235294117647056,
+      "mean_baseline_absolute_error": 0.36764705882352944,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7371.jpg",
+      "actual_waviness": 0.3,
+      "predicted_waviness": 0.4710366725921631,
+      "signed_error": 0.1710366725921631,
+      "absolute_error": 0.1710366725921631,
+      "mean_baseline_prediction": 0.38235294117647056,
+      "mean_baseline_absolute_error": 0.08235294117647057,
+      "neural_network_beats_baseline": false
+    },
+    {
+      "filename": "step-2_IMG_7411.jpg",
+      "actual_waviness": 0.4,
+      "predicted_waviness": 0.2951662540435791,
+      "signed_error": -0.10483374595642092,
+      "absolute_error": 0.10483374595642092,
+      "mean_baseline_prediction": 0.38235294117647056,
+      "mean_baseline_absolute_error": 0.01764705882352946,
+      "neural_network_beats_baseline": false
+    },
+    {
+      "filename": "step-2_IMG_7335.jpg",
+      "actual_waviness": 0.2,
+      "predicted_waviness": 0.2793486416339874,
+      "signed_error": 0.07934864163398742,
+      "absolute_error": 0.07934864163398742,
+      "mean_baseline_prediction": 0.38235294117647056,
+      "mean_baseline_absolute_error": 0.18235294117647055,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7531.jpg",
+      "actual_waviness": 0.4,
+      "predicted_waviness": 0.35522207617759705,
+      "signed_error": -0.044777923822402976,
+      "absolute_error": 0.044777923822402976,
+      "mean_baseline_prediction": 0.38235294117647056,
+      "mean_baseline_absolute_error": 0.01764705882352946,
+      "neural_network_beats_baseline": false
+    },
+    {
+      "filename": "step-2_IMG_7305.jpg",
+      "actual_waviness": 0.3,
+      "predicted_waviness": 0.2674207389354706,
+      "signed_error": -0.03257926106452941,
+      "absolute_error": 0.03257926106452941,
+      "mean_baseline_prediction": 0.38235294117647056,
+      "mean_baseline_absolute_error": 0.08235294117647057,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7541.jpg",
+      "actual_waviness": 0.85,
+      "predicted_waviness": 0.8217899203300476,
+      "signed_error": -0.02821007966995237,
+      "absolute_error": 0.02821007966995237,
+      "mean_baseline_prediction": 0.38235294117647056,
+      "mean_baseline_absolute_error": 0.4676470588235294,
+      "neural_network_beats_baseline": true
+    }
+  ]
+}
