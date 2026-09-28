@@ -812,6 +812,11 @@ def write_comparison_artifacts(results: list[dict[str, Any]], aggregate: dict[st
     high_bias_resnet18 = aggregate["backbones"]["resnet18"]["mean_high_end_bias"]
     range_ratio_best = aggregate["backbones"][best_backbone]["mean_prediction_range_ratio"]
     range_ratio_resnet18 = aggregate["backbones"]["resnet18"]["mean_prediction_range_ratio"]
+    best_range_ratio_backbone = max(
+        BACKBONES,
+        key=lambda name: aggregate["backbones"][name]["mean_prediction_range_ratio"],
+    )
+    best_range_ratio = aggregate["backbones"][best_range_ratio_backbone]["mean_prediction_range_ratio"]
     report_lines.extend([
         "",
         "## Answers to final report questions",
@@ -822,7 +827,7 @@ def write_comparison_artifacts(results: list[dict[str, Any]], aggregate: dict[st
         f"4. **{best_backbone}** reduces calm-water overprediction relative to ResNet18: low-range signed bias `{low_bias_best:.6f}` versus `{low_bias_resnet18:.6f}`. ResNet34 is lower still at `{aggregate['backbones']['resnet34']['mean_low_end_bias']:.6f}`.",
         f"5. **{best_backbone}** reduces rough-water underprediction relative to ResNet18: high-range signed bias `{high_bias_best:.6f}` versus `{high_bias_resnet18:.6f}`. ResNet34 is worse at `{aggregate['backbones']['resnet34']['mean_high_end_bias']:.6f}`.",
         f"6. The improvement is not uniform over every validation image: the best {best_backbone} checkpoint has lower absolute error on `{image_wins['resnet18']}/{len(best_runs[best_backbone]['predictions'])}` images versus the best ResNet18 checkpoint and `{image_wins['resnet34']}/{len(best_runs[best_backbone]['predictions'])}` versus the best ResNet34 checkpoint. The aggregate gain is therefore helped by several large per-image improvements rather than every image improving.",
-        f"7. Evidence supports changing the default backbone to **{best_backbone}** for this frozen-head setup: it has the lowest mean MAE, the lowest seed variability, the highest prediction-range ratio, and improved high-end bias. The conclusion remains validation-only and should be confirmed with future data before treating it as final production policy.",
+        f"7. Evidence supports changing the default backbone to **{best_backbone}** for this frozen-head setup: it has the lowest mean MAE and seed variability, and improved high-end bias. **{best_range_ratio_backbone}** has the highest prediction-range ratio (`{best_range_ratio:.4f}`). The conclusion remains validation-only and should be confirmed with future data before treating it as final production policy.",
         "",
         "## Selected checkpoints",
         "",

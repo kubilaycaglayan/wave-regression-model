@@ -22,7 +22,7 @@
 4. **efficientnet_b0** reduces calm-water overprediction relative to ResNet18: low-range signed bias `0.136737` versus `0.196753`. ResNet34 is lower still at `0.118808`.
 5. **efficientnet_b0** reduces rough-water underprediction relative to ResNet18: high-range signed bias `-0.192434` versus `-0.198088`. ResNet34 is worse at `-0.281921`.
 6. The improvement is not uniform over every validation image: the best efficientnet_b0 checkpoint has lower absolute error on `10/17` images versus the best ResNet18 checkpoint and `10/17` versus the best ResNet34 checkpoint. The aggregate gain is therefore helped by several large per-image improvements rather than every image improving.
-7. Evidence supports changing the default backbone to **efficientnet_b0** for this frozen-head setup: it has the lowest mean MAE, the lowest seed variability, the highest prediction-range ratio, and improved high-end bias. The conclusion remains validation-only and should be confirmed with future data before treating it as final production policy.
+7. Evidence supports changing the default backbone to **efficientnet_b0** for this frozen-head setup: it has the lowest mean MAE and seed variability, and improved high-end bias. **resnet34** has the highest prediction-range ratio (`0.7171`). The conclusion remains validation-only and should be confirmed with future data before treating it as final production policy.
 
 ## Selected checkpoints
 
