@@ -24,7 +24,7 @@ from step_5_a_wave_regression_model import WaveRegressionModel
 
 PROJECT_DIR = Path(__file__).resolve().parent
 CHECKPOINT_DIR = PROJECT_DIR / "step-5-checkpoints"
-BENCHMARK_TEST_MANIFEST = Path("step-3-dataset-splits/benchmarks/benchmark-v1-test.csv")
+SPLIT_SNAPSHOT_DIR = Path("step-3-dataset-splits/snapshots")
 
 
 def _dotenv_value(key: str) -> str | None:
@@ -105,7 +105,20 @@ if _MODEL_VERSION_MATCH is None:
     raise ValueError(f"Checkpoint filename does not contain a model version: {CHECKPOINT_PATH.name}")
 MODEL_VERSION = f"v{_MODEL_VERSION_MATCH.group(1)}"
 IMAGE_DIR = Path("step-2-final-water-data")
-TEST_CSV = BENCHMARK_TEST_MANIFEST
+def latest_test_manifest(snapshot_dir: Path = SPLIT_SNAPSHOT_DIR) -> Path:
+    """Select the test manifest from the newest dataset split snapshot."""
+    snapshots = sorted(path for path in snapshot_dir.iterdir() if path.is_dir()) if snapshot_dir.is_dir() else []
+    if not snapshots:
+        raise FileNotFoundError(
+            f"No split snapshots found in {snapshot_dir}; run step_3_a_prepare_dataset_split.py first"
+        )
+    test_manifest = snapshots[-1] / "test.csv"
+    if not test_manifest.is_file():
+        raise FileNotFoundError(f"Latest split snapshot has no test manifest: {test_manifest}")
+    return test_manifest
+
+
+TEST_CSV = latest_test_manifest()
 TRAIN_CSV = Path("step-3-dataset-splits/train.csv")
 DISCARDED_PATH = Path("discarded_images.csv")
 
@@ -294,7 +307,7 @@ def main() -> None:
         "--test-manifest",
         type=Path,
         default=TEST_CSV,
-        help="test CSV to evaluate (default: immutable benchmark-v1)",
+        help="test CSV to evaluate (default: test.csv from the latest split snapshot)",
     )
     args = parser.parse_args()
     TEST_CSV = args.test_manifest
