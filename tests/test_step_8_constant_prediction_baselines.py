@@ -4,7 +4,7 @@ import json
 import math
 from pathlib import Path
 
-import step_8_a_constant_prediction_baselines as experiment
+import step_8_experiment_a_constant_prediction_baselines as experiment
 
 
 def test_mean_absolute_error_and_reduction() -> None:

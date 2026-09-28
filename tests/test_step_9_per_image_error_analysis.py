@@ -4,7 +4,7 @@ import json
 import math
 from pathlib import Path
 
-import step_9_a_per_image_error_analysis as experiment
+import step_9_experiment_b_per_image_error_analysis as experiment
 
 
 def test_metrics_and_bins() -> None:

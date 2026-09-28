@@ -6,23 +6,27 @@ from pathlib import Path
 import pytest
 import torch
 
-import step_10_a_experiment_c as experiment
+import step_10_experiment_c as experiment
 
 
 def test_snapshot_metadata_requires_exact_requested_snapshot() -> None:
-    snapshot = experiment.snapshot_metadata(experiment.DEFAULT_SNAPSHOT_DIR)
-    assert snapshot["name"] == experiment.DEFAULT_SNAPSHOT
-    assert snapshot["counts"] == {"train": 68, "validation": 14, "test": 14}
+    snapshot_dir = experiment.newest_snapshot_dir()
+    snapshot = experiment.snapshot_metadata(snapshot_dir)
+    assert snapshot["name"] == snapshot_dir.name
+    assert snapshot["counts"] == {
+        split: snapshot["snapshot_manifest"]["files"][split]["count"]
+        for split in ("train", "validation", "test")
+    }
 
 
 def test_snapshot_metadata_rejects_modified_manifest(tmp_path: Path) -> None:
-    source = experiment.DEFAULT_SNAPSHOT_DIR
+    source = experiment.newest_snapshot_dir()
     target = tmp_path / source.name
     target.mkdir()
     for name in ("manifest.json", "train.csv", "validation.csv", "test.csv"):
         (target / name).write_bytes((source / name).read_bytes())
     (target / "validation.csv").write_text((target / "validation.csv").read_text() + "step-2_fake.jpg,0.2\n", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="Expected 14 validation rows"):
+    with pytest.raises(RuntimeError, match="Snapshot manifest count does not match validation"):
         experiment.snapshot_metadata(target)
 
 
@@ -62,7 +66,7 @@ def test_aggregate_requires_three_seeds() -> None:
 
 
 def test_new_version_and_matching_incomplete_version_resume(tmp_path: Path) -> None:
-    snapshot = experiment.snapshot_metadata(experiment.DEFAULT_SNAPSHOT_DIR)
+    snapshot = experiment.snapshot_metadata(experiment.newest_snapshot_dir())
     planned = [("resnet18", 42)]
     first, first_manifest = experiment.prepare_experiment_version(tmp_path, snapshot, planned)
     assert first.name.startswith("v1-")
@@ -75,7 +79,7 @@ def test_new_version_and_matching_incomplete_version_resume(tmp_path: Path) -> N
 
 
 def test_changed_configuration_creates_new_version(tmp_path: Path) -> None:
-    snapshot = experiment.snapshot_metadata(experiment.DEFAULT_SNAPSHOT_DIR)
+    snapshot = experiment.snapshot_metadata(experiment.newest_snapshot_dir())
     experiment.prepare_experiment_version(tmp_path, snapshot, [("resnet18", 42)])
     second, _ = experiment.prepare_experiment_version(tmp_path, snapshot, [("resnet34", 42)])
     assert second.name.startswith("v2-")
@@ -83,7 +87,7 @@ def test_changed_configuration_creates_new_version(tmp_path: Path) -> None:
 
 
 def test_completed_version_is_immutable(tmp_path: Path) -> None:
-    snapshot = experiment.snapshot_metadata(experiment.DEFAULT_SNAPSHOT_DIR)
+    snapshot = experiment.snapshot_metadata(experiment.newest_snapshot_dir())
     version, manifest = experiment.prepare_experiment_version(tmp_path, snapshot, [("resnet18", 42)])
     manifest["status"] = "complete"
     experiment.json_dump(version / "experiment_manifest.json", manifest)
@@ -92,7 +96,7 @@ def test_completed_version_is_immutable(tmp_path: Path) -> None:
 
 
 def test_index_updates_one_record_per_version(tmp_path: Path) -> None:
-    snapshot = experiment.snapshot_metadata(experiment.DEFAULT_SNAPSHOT_DIR)
+    snapshot = experiment.snapshot_metadata(experiment.newest_snapshot_dir())
     version, manifest = experiment.prepare_experiment_version(tmp_path, snapshot, [("resnet18", 42)])
     experiment.update_experiment_index(tmp_path, manifest)
     manifest["status"] = "complete"

@@ -20,7 +20,7 @@ The current Step 5 model is tied directly to ResNet18 in `step_5_a_wave_regressi
 
 The evaluation and prediction scripts load `WaveRegressionModel` from checkpoints rather than constructing ResNet18 themselves. They should therefore require only small metadata/checkpoint-selection updates after the model class is generalized.
 
-Step 10 already contains the reusable EfficientNet-B0 implementation in `step_10_a_experiment_c.py`:
+Step 10 already contains the reusable EfficientNet-B0 implementation in `step_10_experiment_c.py`:
 
 - `efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT)`
 - feature dimension from `model.classifier[-1].in_features`
@@ -166,7 +166,7 @@ Review and update, where necessary:
 
 - `step_6_a_evaluate_test.py`
 - `step_7_a_predict.py`
-- `step_9_a_per_image_error_analysis.py`
+- `step_9_experiment_b_per_image_error_analysis.py`
 
 These scripts should continue loading the architecture from the checkpoint. Their output metadata should also record:
 
@@ -234,7 +234,7 @@ Adding another supported backbone should require updating the centralized factor
 - `step_5_b_train.py`
 - `step_6_a_evaluate_test.py` — only if metadata/checkpoint handling needs adjustment
 - `step_7_a_predict.py` — only if metadata/checkpoint handling needs adjustment
-- `step_9_a_per_image_error_analysis.py` — only if metadata/checkpoint handling needs adjustment
-- `step_10_a_experiment_c.py` — explicit factory/registry cleanup
+- `step_9_experiment_b_per_image_error_analysis.py` — only if metadata/checkpoint handling needs adjustment
+- `step_10_experiment_c.py` — explicit factory/registry cleanup
 - a separate Step 5 checkpoint-version migration utility or explicitly scoped migration step
 - new or updated model/backbone tests under `tests/`

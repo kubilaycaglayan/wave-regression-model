@@ -159,6 +159,18 @@ def output_directory(
     return output_root / model_version / checkpoint_id / snapshot_id
 
 
+def next_output_version(base_directory: Path) -> Path:
+    """Allocate a new result directory so repeated analyses remain available."""
+    existing: list[int] = []
+    if base_directory.is_dir():
+        for path in base_directory.iterdir():
+            match = re.fullmatch(r"v(\d+)-.+", path.name)
+            if path.is_dir() and match:
+                existing.append(int(match.group(1)))
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    return base_directory / f"v{max(existing, default=0) + 1}-{stamp}"
+
+
 def validate_snapshot(split_snapshot: Path) -> tuple[dict[str, Any], dict[str, str], dict[str, int]]:
     manifest_path = split_snapshot / "manifest.json"
     if not manifest_path.is_file():
@@ -208,9 +220,9 @@ def prepare_config(
         project_dir=project_dir,
         checkpoint=checkpoint_path,
         split_snapshot=split_path,
-        output_dir=output_directory(
+        output_dir=next_output_version(output_directory(
             resolve_path(output_root, project_dir), version, checkpoint_path, split_path, project_dir
-        ),
+        )),
         model_version=version,
         checkpoint_sha256=sha256_for(checkpoint_path),
         split_manifest_sha256=hashes["validation"],

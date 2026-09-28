@@ -7,6 +7,7 @@ import csv
 import hashlib
 import json
 import math
+import re
 import statistics
 import time
 from dataclasses import dataclass
@@ -29,7 +30,6 @@ IMAGE_DIR = Path("step-2-final-water-data")
 REPORT_DIRECTORY = Path("step-8-experiment-a-baseline")
 JSON_OUTPUT = REPORT_DIRECTORY / "baseline_experiment.json"
 MARKDOWN_OUTPUT = REPORT_DIRECTORY / "baseline_experiment.md"
-EXPECTED_COUNTS = {"train": 68, "validation": 14, "test": 14}
 BATCH_SIZE = 8
 REPORT_SCHEMA_VERSION = 2
 
@@ -87,15 +87,24 @@ def find_snapshot(snapshot_root: Path = SNAPSHOT_ROOT) -> Snapshot:
             files = manifest.get("files")
             if not isinstance(files, dict):
                 continue
-            counts = {name: files.get(name, {}).get("count") for name in EXPECTED_COUNTS}
-            if counts != EXPECTED_COUNTS:
+            if not all(isinstance(files.get(name), dict) for name in ("train", "validation", "test")):
                 continue
-            if not all((directory / f"{name}.csv").is_file() for name in EXPECTED_COUNTS):
+            valid = True
+            for name in ("train", "validation", "test"):
+                csv_path = directory / f"{name}.csv"
+                entry = files[name]
+                if not csv_path.is_file() or not isinstance(entry.get("count"), int):
+                    valid = False
+                    break
+                if entry["count"] != sum(1 for _ in csv_path.open(encoding="utf-8")) - 1 or entry.get("sha256") != sha256(csv_path):
+                    valid = False
+                    break
+            if not valid:
                 continue
             candidates.append(Snapshot(directory.name, directory, manifest))
     if not candidates:
         raise FileNotFoundError(
-            f"No immutable split snapshot with counts {EXPECTED_COUNTS} found in {snapshot_root}"
+            f"No valid immutable split snapshot found in {snapshot_root}"
         )
     return candidates[0]
 
@@ -208,7 +217,11 @@ def _base_result(snapshot: Snapshot, train_dataset: WaveDataset, validation_data
             "name": snapshot.name,
             "directory": str(snapshot.directory),
             "manifest": str(snapshot.directory / "manifest.json"),
-            "counts": {"train": len(train_dataset), "validation": len(validation_dataset), "test": EXPECTED_COUNTS["test"]},
+            "counts": {
+                "train": len(train_dataset),
+                "validation": len(validation_dataset),
+                "test": snapshot.manifest["files"]["test"]["count"],
+            },
             "train_sha256": sha256(snapshot.train_csv),
             "validation_sha256": sha256(snapshot.validation_csv),
             "test_sha256": sha256(snapshot.test_csv),
@@ -234,6 +247,19 @@ def _base_result(snapshot: Snapshot, train_dataset: WaveDataset, validation_data
 
 def _timestamp_run_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def versioned_report_paths(project_dir: Path) -> tuple[Path, Path]:
+    """Choose a fresh immutable output directory for each Experiment A run."""
+    root = project_dir / REPORT_DIRECTORY
+    existing_versions = []
+    if root.is_dir():
+        for path in root.iterdir():
+            match = re.fullmatch(r"v(\d+)-.+", path.name)
+            if path.is_dir() and match:
+                existing_versions.append(int(match.group(1)))
+    version_dir = root / f"v{max(existing_versions, default=0) + 1}-{_timestamp_run_id()}"
+    return version_dir / JSON_OUTPUT.name, version_dir / MARKDOWN_OUTPUT.name
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -368,14 +394,15 @@ def run(project_dir: Path = PROJECT_DIR) -> dict[str, Any]:
     image_dir = project_dir / IMAGE_DIR
     train_dataset = WaveDataset(snapshot.train_csv, image_dir, build_evaluation_transform())
     validation_dataset = WaveDataset(snapshot.validation_csv, image_dir, build_evaluation_transform())
-    if len(train_dataset) != EXPECTED_COUNTS["train"] or len(validation_dataset) != EXPECTED_COUNTS["validation"]:
+    if len(train_dataset) != snapshot.manifest["files"]["train"]["count"] or len(validation_dataset) != snapshot.manifest["files"]["validation"]["count"]:
         raise RuntimeError("Snapshot dataset counts changed while loading labels")
 
     result = _base_result(snapshot, train_dataset, validation_dataset)
+    json_output, markdown_output = versioned_report_paths(project_dir)
     checkpoint = select_checkpoint(snapshot, project_dir / CHECKPOINT_ROOT, project_dir)
     if checkpoint is None:
         result["status"] = "incomplete_no_matching_checkpoint"
-        write_reports(result, project_dir / JSON_OUTPUT, project_dir / MARKDOWN_OUTPUT)
+        write_reports(result, json_output, markdown_output)
         print("No checkpoint trained on the selected split; comparison cannot yet be completed.")
         return result
 
@@ -403,7 +430,7 @@ def run(project_dir: Path = PROJECT_DIR) -> dict[str, Any]:
     result["device"] = str(device)
     result["inference_seconds"] = inference_seconds
     result["elapsed_seconds"] = time.perf_counter() - started
-    write_reports(result, project_dir / JSON_OUTPUT, project_dir / MARKDOWN_OUTPUT)
+    write_reports(result, json_output, markdown_output)
     print(f"Experiment completed in {result['elapsed_seconds']:.2f}s")
     return result
 

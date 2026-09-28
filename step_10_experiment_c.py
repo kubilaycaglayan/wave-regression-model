@@ -13,7 +13,6 @@ import hashlib
 import json
 import math
 import re
-import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,13 +45,10 @@ from torchvision.models import (
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-DEFAULT_SNAPSHOT = "20260923T133043052012Z"
-DEFAULT_SNAPSHOT_DIR = PROJECT_DIR / "step-3-dataset-splits" / "snapshots" / DEFAULT_SNAPSHOT
+SNAPSHOT_ROOT = PROJECT_DIR / "step-3-dataset-splits" / "snapshots"
 OUTPUT_ROOT = PROJECT_DIR / "step-10-experiment-c-frozen-backbone-comparison"
 BACKBONES = ("resnet18", "resnet34", "efficientnet_b0")
 SEEDS = (42, 43, 44)
-EXPECTED_COUNTS = {"train": 68, "validation": 14, "test": 14}
-CONSTANT_MEAN_BASELINE_MAE = 0.21932773109243697
 LEARNING_RATE = 1e-3
 BATCH_SIZE = 8
 MAX_EPOCHS = 100
@@ -256,16 +252,20 @@ def snapshot_metadata(snapshot_dir: Path) -> dict[str, Any]:
         "counts": {},
         "files": {},
     }
-    for split, expected_count in EXPECTED_COUNTS.items():
+    files = manifest.get("files")
+    if not isinstance(files, dict):
+        raise ValueError(f"Split snapshot manifest has no files object: {manifest_path}")
+    for split in ("train", "validation", "test"):
         path = snapshot_dir / f"{split}.csv"
         if not path.is_file():
             raise FileNotFoundError(f"Missing {split} split in {snapshot_dir}")
         rows = read_rows(path)
-        if len(rows) != expected_count:
-            raise RuntimeError(f"Expected {expected_count} {split} rows, found {len(rows)} in {path}")
+        expected_count = files.get(split, {}).get("count")
+        if not isinstance(expected_count, int) or len(rows) != expected_count:
+            raise RuntimeError(f"Snapshot manifest count does not match {split}: {len(rows)} != {expected_count}")
         file_hash = sha256_for(path)
         recorded = manifest.get("files", {}).get(split, {})
-        if recorded.get("count") != expected_count or recorded.get("sha256") != file_hash:
+        if recorded.get("sha256") != file_hash:
             raise RuntimeError(f"Snapshot manifest does not match {path}")
         actual["counts"][split] = len(rows)
         actual["files"][split] = {
@@ -273,8 +273,25 @@ def snapshot_metadata(snapshot_dir: Path) -> dict[str, Any]:
             "sha256": file_hash,
             "count": len(rows),
         }
+    train_rows = read_rows(snapshot_dir / "train.csv")
+    validation_rows = read_rows(snapshot_dir / "validation.csv")
+    train_mean = sum(float(row["waviness"]) for row in train_rows) / len(train_rows)
+    actual["constant_mean_baseline_validation_mae"] = sum(
+        abs(float(row["waviness"]) - train_mean) for row in validation_rows
+    ) / len(validation_rows)
     actual["snapshot_manifest"] = manifest
     return actual
+
+
+def newest_snapshot_dir(snapshot_root: Path = SNAPSHOT_ROOT) -> Path:
+    """Return the newest snapshot that passes manifest and file validation."""
+    for candidate in sorted((path for path in snapshot_root.iterdir() if path.is_dir()), reverse=True):
+        try:
+            snapshot_metadata(candidate)
+        except (FileNotFoundError, ValueError, RuntimeError, KeyError, TypeError):
+            continue
+        return candidate
+    raise FileNotFoundError(f"No valid immutable split snapshot found in {snapshot_root}")
 
 
 class SnapshotDataModule(pl.LightningDataModule):
@@ -549,10 +566,9 @@ def run_one(backbone: str, seed: int, snapshot_dir: Path, version_root: Path, im
             print(f"Skipping completed run: {run_id(backbone, seed)}", flush=True)
             return rebased
 
-    pending = run_directory.with_name(run_directory.name + ".pending")
-    if pending.exists():
-        shutil.rmtree(pending)
-    pending.mkdir(parents=True, exist_ok=True)
+    attempt_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    pending = run_directory.with_name(run_directory.name + f".pending-{attempt_stamp}")
+    pending.mkdir(parents=True, exist_ok=False)
     started = time.perf_counter()
     json_dump(pending / "config.json", config)
     pl.seed_everything(seed, workers=True)
@@ -598,7 +614,7 @@ def run_one(backbone: str, seed: int, snapshot_dir: Path, version_root: Path, im
     checkpoint_hash = sha256_for(best_checkpoint)
     final_directory = version_root / "runs" / canonical_backbone_name(backbone) / f"seed-{seed}"
     if final_directory.exists():
-        shutil.rmtree(final_directory)
+        raise FileExistsError(f"Refusing to replace existing Experiment C run results: {final_directory}")
     pending.rename(final_directory)
     final_checkpoint = final_directory / best_checkpoint.name
     result = {
@@ -649,7 +665,7 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         aggregates[backbone] = aggregate
     return {
         "schema_version": 1,
-        "constant_mean_baseline_validation_mae": CONSTANT_MEAN_BASELINE_MAE,
+        "constant_mean_baseline_validation_mae": results[0]["config"]["split_snapshot"]["constant_mean_baseline_validation_mae"],
         "backbones": aggregates,
     }
 
@@ -689,7 +705,8 @@ def write_comparison_artifacts(results: list[dict[str, Any]], aggregate: dict[st
         values = [row["validation_mae"] for row in rows if row["backbone"] == backbone]
         axis.scatter([index] * len(values), values, label="seeds" if index == 0 else None, zorder=3)
     axis.errorbar(range(len(BACKBONES)), means, yerr=deviations, fmt="o", capsize=5, label="mean ± SD", zorder=4)
-    axis.axhline(CONSTANT_MEAN_BASELINE_MAE, color="gray", linestyle="--", label="constant mean baseline")
+    baseline_mae = aggregate["constant_mean_baseline_validation_mae"]
+    axis.axhline(baseline_mae, color="gray", linestyle="--", label="constant mean baseline")
     axis.set_xticks(range(len(BACKBONES)), BACKBONES)
     axis.set_ylabel("Validation MAE")
     axis.set_title("Experiment C: validation MAE by frozen backbone")
@@ -755,7 +772,7 @@ def write_comparison_artifacts(results: list[dict[str, Any]], aggregate: dict[st
         "",
         f"- Split snapshot: `{results[0]['config']['split_snapshot']['name']}`",
         "- Test set evaluated: **no**",
-        f"- Constant training-mean validation MAE: **{CONSTANT_MEAN_BASELINE_MAE:.8f}**",
+        f"- Constant training-mean validation MAE: **{aggregate['constant_mean_baseline_validation_mae']:.8f}**",
         "",
         "## Aggregate comparison",
         "",
@@ -804,7 +821,7 @@ def write_comparison_artifacts(results: list[dict[str, Any]], aggregate: dict[st
         f"3. **{best_backbone}** materially reduces range compression relative to ResNet18: mean range ratio `{range_ratio_best:.4f}` versus `{range_ratio_resnet18:.4f}` (+`{range_ratio_best - range_ratio_resnet18:.4f}`), though predictions remain compressed below 1.0.",
         f"4. **{best_backbone}** reduces calm-water overprediction relative to ResNet18: low-range signed bias `{low_bias_best:.6f}` versus `{low_bias_resnet18:.6f}`. ResNet34 is lower still at `{aggregate['backbones']['resnet34']['mean_low_end_bias']:.6f}`.",
         f"5. **{best_backbone}** reduces rough-water underprediction relative to ResNet18: high-range signed bias `{high_bias_best:.6f}` versus `{high_bias_resnet18:.6f}`. ResNet34 is worse at `{aggregate['backbones']['resnet34']['mean_high_end_bias']:.6f}`.",
-        f"6. The improvement is not uniform over every validation image: the best {best_backbone} checkpoint has lower absolute error on `{image_wins['resnet18']}/14` images versus the best ResNet18 checkpoint and `{image_wins['resnet34']}/14` versus the best ResNet34 checkpoint. The aggregate gain is therefore helped by several large per-image improvements rather than every image improving.",
+        f"6. The improvement is not uniform over every validation image: the best {best_backbone} checkpoint has lower absolute error on `{image_wins['resnet18']}/{len(best_runs[best_backbone]['predictions'])}` images versus the best ResNet18 checkpoint and `{image_wins['resnet34']}/{len(best_runs[best_backbone]['predictions'])}` versus the best ResNet34 checkpoint. The aggregate gain is therefore helped by several large per-image improvements rather than every image improving.",
         f"7. Evidence supports changing the default backbone to **{best_backbone}** for this frozen-head setup: it has the lowest mean MAE, the lowest seed variability, the highest prediction-range ratio, and improved high-end bias. The conclusion remains validation-only and should be confirmed with future data before treating it as final production policy.",
         "",
         "## Selected checkpoints",
@@ -817,7 +834,7 @@ def write_comparison_artifacts(results: list[dict[str, Any]], aggregate: dict[st
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--snapshot-dir", type=Path, default=DEFAULT_SNAPSHOT_DIR)
+    parser.add_argument("--snapshot-dir", type=Path, default=None, help="immutable split snapshot (defaults to the newest valid snapshot)")
     parser.add_argument("--output-root", type=Path, default=OUTPUT_ROOT)
     parser.add_argument("--image-dir", type=Path, default=PROJECT_DIR / "step-2-final-water-data")
     parser.add_argument("--backbone", choices=BACKBONES)
@@ -827,7 +844,8 @@ def main() -> None:
     parser.add_argument("--refresh-artifacts", action="store_true", help="regenerate reports for an existing completed version without retraining")
     parser.add_argument("--dry-run", action="store_true", help="validate snapshot and print planned runs without training")
     args = parser.parse_args()
-    snapshot = snapshot_metadata(args.snapshot_dir.resolve())
+    snapshot_dir = args.snapshot_dir.resolve() if args.snapshot_dir else newest_snapshot_dir()
+    snapshot = snapshot_metadata(snapshot_dir)
     all_planned = [(backbone, seed) for backbone in BACKBONES for seed in SEEDS]
     selected_runs = [(args.backbone, args.seed)] if args.backbone and args.seed else all_planned
     if args.backbone and not args.seed or args.seed and not args.backbone:
@@ -862,7 +880,7 @@ def main() -> None:
     make_cuda_usable_if_needed()
     results: list[dict[str, Any]] = []
     for backbone, seed in selected_runs:
-        result = run_one(backbone, seed, args.snapshot_dir.resolve(), version_root, args.image_dir.resolve(), False)
+        result = run_one(backbone, seed, snapshot_dir, version_root, args.image_dir.resolve(), False)
         results.append(result)
         completed_runs = set(version_manifest.get("completed_runs", []))
         if result.get("status") == "complete":

@@ -321,18 +321,28 @@ The prediction directory contains one append-only `.txt` history per input photo
 ## Step 8: Run the baseline experiment
 
 ```bash
-python step_8_a_constant_prediction_baselines.py
+python step_8_experiment_a_constant_prediction_baselines.py
 ```
 
-Step 8 compares training-mean and training-median baselines with the matching neural-network checkpoint. Its append-only JSON and Markdown reports are kept in `step-8-experiment-a-baseline/`; test data is not evaluated.
+Step 8 compares training-mean and training-median baselines with the matching neural-network checkpoint. Each run writes JSON and Markdown reports to a new `vN-timestamp/` folder under `step-8-experiment-a-baseline/`; test data is not evaluated.
 
 ## Step 9: Review per-image errors
 
 ```bash
-python step_9_a_per_image_error_analysis.py
+python step_9_experiment_b_per_image_error_analysis.py
 ```
 
 Step 9 shows which validation images the model understands well and where its waviness judgments are least reliable. It helps reveal patterns in the model’s mistakes so future improvements can focus on the images that need the most attention.
+
+Each run writes to a new `vN-timestamp/` folder under the checkpoint and split snapshot result path in `step-9-experiment-b-per-image-error-analysis/`.
+
+## Step 10: Compare frozen backbones
+
+```bash
+python step_10_experiment_c.py
+```
+
+Step 10 compares three frozen ImageNet backbones across three seeds using the newest valid dataset split by default. Results are kept in a versioned folder under `step-10-experiment-c-frozen-backbone-comparison/`. Pass `--dry-run` to check the selected split and planned runs without training.
 
 ## Important notes
 
