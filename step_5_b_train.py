@@ -18,6 +18,7 @@ import lightning.pytorch as pl
 import torch
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 
+from step_4_a_wave_dataset import IMAGE_SIZE
 from step_4_b_wave_datamodule import WaveDataModule
 from step_5_a_wave_regression_model import (
     SUPPORTED_BACKBONES,
@@ -226,11 +227,14 @@ def main() -> None:
     print(f"Frozen BatchNorm modules: {batch_norm_modules}")
     print("BatchNorm modules in train mode: 0")
     print(f"Regression head training mode: {model._head().training}")
-    batch_images, _ = next(iter(data.train_dataloader()))
+    # Keep diagnostics from advancing the RNG used by the shuffled, augmented
+    # training loader. A fixed synthetic tensor is sufficient for checking the
+    # model's input/output contract.
+    sanity_images = torch.zeros((1, 3, *IMAGE_SIZE), dtype=torch.float32)
     with torch.inference_mode():
-        sanity_predictions = model(batch_images)
-    print(f"Sanity forward shape: {tuple(sanity_predictions.shape)} (expected [{batch_images.size(0)}])")
-    if sanity_predictions.shape != (batch_images.size(0),):
+        sanity_predictions = model(sanity_images)
+    print(f"Sanity forward shape: {tuple(sanity_predictions.shape)} (expected [{sanity_images.size(0)}])")
+    if sanity_predictions.shape != (sanity_images.size(0),):
         raise RuntimeError(f"Unexpected prediction shape: {sanity_predictions.shape}")
     if not torch.all((sanity_predictions >= 0.0) & (sanity_predictions <= 1.0)):
         raise RuntimeError("Sanity predictions are outside [0, 1]")
