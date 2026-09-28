@@ -1,0 +1,198 @@
+{
+  "checkpoint": {
+    "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/v2-20260928T130354Z/runs/resnet34/seed-42/resnet34-seed-42-best-val-mae-epoch=39-val_mae=0.1989.ckpt",
+    "sha256": "fb6fd71a71769c197bd02422475cb0ecdb509559651c6cbb2e9679470330dfec"
+  },
+  "config": {
+    "augmentations": "RandomHorizontalFlip(p=0.5) + ColorJitter(brightness=0.25, contrast=0.25, saturation=0.20, hue=0.02)",
+    "backbone": "resnet34",
+    "backbone_frozen": true,
+    "batch_size": 8,
+    "batchnorm_eval": true,
+    "early_stopping": {
+      "mode": "min",
+      "monitor": "val_mae",
+      "patience": 10
+    },
+    "experiment": "C_frozen_pretrained_backbone_comparison",
+    "image_size": [
+      224,
+      224
+    ],
+    "imagenet_mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "imagenet_std": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "learning_rate": 0.001,
+    "loss": "SmoothL1Loss",
+    "max_epochs": 100,
+    "optimizer": "AdamW",
+    "pretrained_weights": "torchvision DEFAULT ImageNet weights",
+    "regression_head": "Linear(feature_dim, 1) -> Sigmoid",
+    "seed": 42,
+    "split_snapshot": {
+      "constant_mean_baseline_validation_mae": 0.2186919504643963,
+      "counts": {
+        "test": 16,
+        "train": 76,
+        "validation": 17
+      },
+      "directory": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z",
+      "files": {
+        "test": {
+          "count": 16,
+          "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/test.csv",
+          "sha256": "5f575acd82911efc9294de27d052c278119a31a9285d7b9d5552d8604f68f744"
+        },
+        "train": {
+          "count": 76,
+          "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/train.csv",
+          "sha256": "a1d881b1eb5238551fb5072409dbe9e18174ee5cb70587f3d8d7c003f07fbd47"
+        },
+        "validation": {
+          "count": 17,
+          "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/validation.csv",
+          "sha256": "2d27e16c7fa1097def134488949c5ce00b109def08fc015ea68e3e2c1c66db78"
+        }
+      },
+      "manifest": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/manifest.json",
+      "name": "20260928T120720292607Z",
+      "snapshot_manifest": {
+        "created_at_utc": "2026-09-28T12:07:20.296505Z",
+        "files": {
+          "test": {
+            "count": 16,
+            "path": "snapshots/20260928T120720292607Z/test.csv",
+            "sha256": "5f575acd82911efc9294de27d052c278119a31a9285d7b9d5552d8604f68f744"
+          },
+          "train": {
+            "count": 76,
+            "path": "snapshots/20260928T120720292607Z/train.csv",
+            "sha256": "a1d881b1eb5238551fb5072409dbe9e18174ee5cb70587f3d8d7c003f07fbd47"
+          },
+          "validation": {
+            "count": 17,
+            "path": "snapshots/20260928T120720292607Z/validation.csv",
+            "sha256": "2d27e16c7fa1097def134488949c5ce00b109def08fc015ea68e3e2c1c66db78"
+          }
+        },
+        "labels_sha256": "58f4444b63385001ed55972a8ce26a609b2b890db1ba131c59e73d58861d724c",
+        "mode": "append-existing",
+        "schema_version": 1,
+        "seed": 42,
+        "snapshot": "20260928T120720292607Z"
+      }
+    },
+    "test_evaluated": false
+  },
+  "created_at_utc": "2026-09-28T13:08:40.026760Z",
+  "epochs_trained": 50,
+  "frozen_backbone_checks": {
+    "frozen_backbone_parameters": 21284672,
+    "frozen_batchnorm_modules": 36,
+    "trainable_parameters": 513
+  },
+  "metrics": {
+    "actual_range_width": 0.8999999761581421,
+    "high_range_count": 6,
+    "high_range_signed_error": -0.30601799984773,
+    "low_range_count": 7,
+    "low_range_signed_error": 0.09697697364858218,
+    "maximum_absolute_error": 0.5310937166213989,
+    "mean_signed_error": -0.05080869289882043,
+    "median_absolute_error": 0.20393825694918633,
+    "prediction_actual_range_width_ratio": 0.7694509498132851,
+    "prediction_maximum": 0.8219573497772217,
+    "prediction_minimum": 0.12945151329040527,
+    "prediction_range_width": 0.6925058364868164,
+    "validation_count": 17,
+    "validation_mae": 0.19890971722848275,
+    "validation_rmse": 0.24295829957037032
+  },
+  "parameter_counts": {
+    "frozen": 21284672,
+    "total": 21285185,
+    "trainable": 513
+  },
+  "predictions": [
+    {
+      "actual": 0.699999988079071,
+      "predicted": 0.3493017852306366
+    },
+    {
+      "actual": 0.75,
+      "predicted": 0.5108103156089783
+    },
+    {
+      "actual": 0.8999999761581421,
+      "predicted": 0.6179602742195129
+    },
+    {
+      "actual": 0.30000001192092896,
+      "predicted": 0.12945151329040527
+    },
+    {
+      "actual": 0.05000000074505806,
+      "predicted": 0.2539382576942444
+    },
+    {
+      "actual": 0.75,
+      "predicted": 0.21890628337860107
+    },
+    {
+      "actual": 0.20000000298023224,
+      "predicted": 0.14956746995449066
+    },
+    {
+      "actual": 0.30000001192092896,
+      "predicted": 0.3049258589744568
+    },
+    {
+      "actual": 0.20000000298023224,
+      "predicted": 0.48435136675834656
+    },
+    {
+      "actual": 0.4000000059604645,
+      "predicted": 0.3344825506210327
+    },
+    {
+      "actual": 0.4000000059604645,
+      "predicted": 0.42937037348747253
+    },
+    {
+      "actual": 0.5,
+      "predicted": 0.8219573497772217
+    },
+    {
+      "actual": 0.4000000059604645,
+      "predicted": 0.4077111482620239
+    },
+    {
+      "actual": 0.8500000238418579,
+      "predicted": 0.5626758337020874
+    },
+    {
+      "actual": 0.6000000238418579,
+      "predicted": 0.45423752069473267
+    },
+    {
+      "actual": 0.30000001192092896,
+      "predicted": 0.4250621199607849
+    },
+    {
+      "actual": 0.0,
+      "predicted": 0.28154227137565613
+    }
+  ],
+  "run_id": "resnet34-seed-42",
+  "schema_version": 1,
+  "status": "complete",
+  "test_evaluated": false,
+  "training_time_seconds": 77.68462904001353
+}

@@ -1,0 +1,123 @@
+{
+  "backbones": {
+    "efficientnet_b0": {
+      "backbone": "efficientnet_b0",
+      "best_validation_mae": 0.14859353509895942,
+      "mean_high_end_bias": -0.19243448972702026,
+      "mean_low_end_bias": 0.13673709208766618,
+      "mean_prediction_range_ratio": 0.6660378983560641,
+      "mean_rmse": 0.1957294296139986,
+      "mean_validation_mae": 0.1516533369088874,
+      "runs": [
+        {
+          "checkpoint": {
+            "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/v2-20260928T130354Z/runs/efficientnet_b0/seed-42/efficientnet_b0-seed-42-best-val-mae-epoch=40-val_mae=0.1486.ckpt",
+            "sha256": "5b4c7e2dabdcc5e72fd481b89c7cf16da38497bd8c0ed6bbd0fd375eb93f6801"
+          },
+          "seed": 42
+        },
+        {
+          "checkpoint": {
+            "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/v2-20260928T130354Z/runs/efficientnet_b0/seed-43/efficientnet_b0-seed-43-best-val-mae-epoch=42-val_mae=0.1525.ckpt",
+            "sha256": "0b7b993c74892263225884a5008ffed137416351e6bd1dee19275c06159394f6"
+          },
+          "seed": 43
+        },
+        {
+          "checkpoint": {
+            "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/v2-20260928T130354Z/runs/efficientnet_b0/seed-44/efficientnet_b0-seed-44-best-val-mae-epoch=41-val_mae=0.1539.ckpt",
+            "sha256": "05f8825aed62d6c6a62de0ebeafe656ac5bc1607a33fcd65a0a0387e4d50e1bb"
+          },
+          "seed": 44
+        }
+      ],
+      "seed_count": 3,
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "std_validation_mae": 0.0027357084955670283
+    },
+    "resnet18": {
+      "backbone": "resnet18",
+      "best_validation_mae": 0.1758935195119942,
+      "mean_high_end_bias": -0.19808778829044763,
+      "mean_low_end_bias": 0.19675320546541897,
+      "mean_prediction_range_ratio": 0.55322143024572,
+      "mean_rmse": 0.2183131924449909,
+      "mean_validation_mae": 0.18514986431189615,
+      "runs": [
+        {
+          "checkpoint": {
+            "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/v2-20260928T130354Z/runs/resnet18/seed-42/resnet18-seed-42-best-val-mae-epoch=39-val_mae=0.1865.ckpt",
+            "sha256": "e8e861628b78e0ed4466228aba9e3554709f2ad452db166ecdb524e1e70125f1"
+          },
+          "seed": 42
+        },
+        {
+          "checkpoint": {
+            "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/v2-20260928T130354Z/runs/resnet18/seed-43/resnet18-seed-43-best-val-mae-epoch=37-val_mae=0.1931.ckpt",
+            "sha256": "242a83cd7147b6e5b83be7b50145f798ac592df42daecd052aa7987219176ba4"
+          },
+          "seed": 43
+        },
+        {
+          "checkpoint": {
+            "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/v2-20260928T130354Z/runs/resnet18/seed-44/resnet18-seed-44-best-val-mae-epoch=35-val_mae=0.1759.ckpt",
+            "sha256": "fe16322e2a2c842f602489a37ec4461ad5da6b055025f586e35bc061e09d88c3"
+          },
+          "seed": 44
+        }
+      ],
+      "seed_count": 3,
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "std_validation_mae": 0.008666099536812669
+    },
+    "resnet34": {
+      "backbone": "resnet34",
+      "best_validation_mae": 0.1800154138575582,
+      "mean_high_end_bias": -0.2819205092059241,
+      "mean_low_end_bias": 0.11880836263298988,
+      "mean_prediction_range_ratio": 0.7171492192608132,
+      "mean_rmse": 0.2302132939786118,
+      "mean_validation_mae": 0.18802962737048376,
+      "runs": [
+        {
+          "checkpoint": {
+            "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/v2-20260928T130354Z/runs/resnet34/seed-42/resnet34-seed-42-best-val-mae-epoch=39-val_mae=0.1989.ckpt",
+            "sha256": "fb6fd71a71769c197bd02422475cb0ecdb509559651c6cbb2e9679470330dfec"
+          },
+          "seed": 42
+        },
+        {
+          "checkpoint": {
+            "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/v2-20260928T130354Z/runs/resnet34/seed-43/resnet34-seed-43-best-val-mae-epoch=09-val_mae=0.1852.ckpt",
+            "sha256": "7e52c450092a12d354650ad9340018d99c5f85eb46383889239e0e6f51efda8f"
+          },
+          "seed": 43
+        },
+        {
+          "checkpoint": {
+            "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/v2-20260928T130354Z/runs/resnet34/seed-44/resnet34-seed-44-best-val-mae-epoch=13-val_mae=0.1800.ckpt",
+            "sha256": "b458205d786f54ed05cf2861c6c8a9f16edc0bbb1279b21a45631df96ef33b50"
+          },
+          "seed": 44
+        }
+      ],
+      "seed_count": 3,
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "std_validation_mae": 0.00976773312427563
+    }
+  },
+  "constant_mean_baseline_validation_mae": 0.2186919504643963,
+  "schema_version": 1
+}

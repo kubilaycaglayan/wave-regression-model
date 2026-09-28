@@ -1,0 +1,198 @@
+{
+  "checkpoint": {
+    "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-10-experiment-c-frozen-backbone-comparison/v2-20260928T130354Z/runs/resnet18/seed-43/resnet18-seed-43-best-val-mae-epoch=37-val_mae=0.1931.ckpt",
+    "sha256": "242a83cd7147b6e5b83be7b50145f798ac592df42daecd052aa7987219176ba4"
+  },
+  "config": {
+    "augmentations": "RandomHorizontalFlip(p=0.5) + ColorJitter(brightness=0.25, contrast=0.25, saturation=0.20, hue=0.02)",
+    "backbone": "resnet18",
+    "backbone_frozen": true,
+    "batch_size": 8,
+    "batchnorm_eval": true,
+    "early_stopping": {
+      "mode": "min",
+      "monitor": "val_mae",
+      "patience": 10
+    },
+    "experiment": "C_frozen_pretrained_backbone_comparison",
+    "image_size": [
+      224,
+      224
+    ],
+    "imagenet_mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "imagenet_std": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "learning_rate": 0.001,
+    "loss": "SmoothL1Loss",
+    "max_epochs": 100,
+    "optimizer": "AdamW",
+    "pretrained_weights": "torchvision DEFAULT ImageNet weights",
+    "regression_head": "Linear(feature_dim, 1) -> Sigmoid",
+    "seed": 43,
+    "split_snapshot": {
+      "constant_mean_baseline_validation_mae": 0.2186919504643963,
+      "counts": {
+        "test": 16,
+        "train": 76,
+        "validation": 17
+      },
+      "directory": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z",
+      "files": {
+        "test": {
+          "count": 16,
+          "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/test.csv",
+          "sha256": "5f575acd82911efc9294de27d052c278119a31a9285d7b9d5552d8604f68f744"
+        },
+        "train": {
+          "count": 76,
+          "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/train.csv",
+          "sha256": "a1d881b1eb5238551fb5072409dbe9e18174ee5cb70587f3d8d7c003f07fbd47"
+        },
+        "validation": {
+          "count": 17,
+          "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/validation.csv",
+          "sha256": "2d27e16c7fa1097def134488949c5ce00b109def08fc015ea68e3e2c1c66db78"
+        }
+      },
+      "manifest": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/manifest.json",
+      "name": "20260928T120720292607Z",
+      "snapshot_manifest": {
+        "created_at_utc": "2026-09-28T12:07:20.296505Z",
+        "files": {
+          "test": {
+            "count": 16,
+            "path": "snapshots/20260928T120720292607Z/test.csv",
+            "sha256": "5f575acd82911efc9294de27d052c278119a31a9285d7b9d5552d8604f68f744"
+          },
+          "train": {
+            "count": 76,
+            "path": "snapshots/20260928T120720292607Z/train.csv",
+            "sha256": "a1d881b1eb5238551fb5072409dbe9e18174ee5cb70587f3d8d7c003f07fbd47"
+          },
+          "validation": {
+            "count": 17,
+            "path": "snapshots/20260928T120720292607Z/validation.csv",
+            "sha256": "2d27e16c7fa1097def134488949c5ce00b109def08fc015ea68e3e2c1c66db78"
+          }
+        },
+        "labels_sha256": "58f4444b63385001ed55972a8ce26a609b2b890db1ba131c59e73d58861d724c",
+        "mode": "append-existing",
+        "schema_version": 1,
+        "seed": 42,
+        "snapshot": "20260928T120720292607Z"
+      }
+    },
+    "test_evaluated": false
+  },
+  "created_at_utc": "2026-09-28T13:05:44.327147Z",
+  "epochs_trained": 48,
+  "frozen_backbone_checks": {
+    "frozen_backbone_parameters": 11176512,
+    "frozen_batchnorm_modules": 20,
+    "trainable_parameters": 513
+  },
+  "metrics": {
+    "actual_range_width": 0.8999999761581421,
+    "high_range_count": 6,
+    "high_range_signed_error": -0.22762072086334229,
+    "low_range_count": 7,
+    "low_range_signed_error": 0.1966484673321247,
+    "maximum_absolute_error": 0.47152823209762573,
+    "mean_signed_error": 0.02188261357300422,
+    "median_absolute_error": 0.1861763596534729,
+    "prediction_actual_range_width_ratio": 0.566003470050056,
+    "prediction_maximum": 0.7749598622322083,
+    "prediction_minimum": 0.2655567526817322,
+    "prediction_range_width": 0.5094031095504761,
+    "validation_count": 17,
+    "validation_mae": 0.19307065601734555,
+    "validation_rmse": 0.22604609882764443
+  },
+  "parameter_counts": {
+    "frozen": 11176512,
+    "total": 11177025,
+    "trainable": 513
+  },
+  "predictions": [
+    {
+      "actual": 0.699999988079071,
+      "predicted": 0.5138236284255981
+    },
+    {
+      "actual": 0.75,
+      "predicted": 0.5069694519042969
+    },
+    {
+      "actual": 0.8999999761581421,
+      "predicted": 0.42847174406051636
+    },
+    {
+      "actual": 0.30000001192092896,
+      "predicted": 0.31013259291648865
+    },
+    {
+      "actual": 0.05000000074505806,
+      "predicted": 0.2655567526817322
+    },
+    {
+      "actual": 0.75,
+      "predicted": 0.5208553075790405
+    },
+    {
+      "actual": 0.20000000298023224,
+      "predicted": 0.3218139410018921
+    },
+    {
+      "actual": 0.30000001192092896,
+      "predicted": 0.5176276564598083
+    },
+    {
+      "actual": 0.20000000298023224,
+      "predicted": 0.4801786243915558
+    },
+    {
+      "actual": 0.4000000059604645,
+      "predicted": 0.3306421637535095
+    },
+    {
+      "actual": 0.4000000059604645,
+      "predicted": 0.5756036639213562
+    },
+    {
+      "actual": 0.5,
+      "predicted": 0.7749598622322083
+    },
+    {
+      "actual": 0.4000000059604645,
+      "predicted": 0.3799838125705719
+    },
+    {
+      "actual": 0.8500000238418579,
+      "predicted": 0.736607551574707
+    },
+    {
+      "actual": 0.6000000238418579,
+      "predicted": 0.4775480031967163
+    },
+    {
+      "actual": 0.30000001192092896,
+      "predicted": 0.43872684240341187
+    },
+    {
+      "actual": 0.0,
+      "predicted": 0.39250290393829346
+    }
+  ],
+  "run_id": "resnet18-seed-43",
+  "schema_version": 1,
+  "status": "complete",
+  "test_evaluated": false,
+  "training_time_seconds": 58.38729877898004
+}

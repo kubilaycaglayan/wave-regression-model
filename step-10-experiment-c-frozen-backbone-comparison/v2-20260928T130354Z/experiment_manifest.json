@@ -1,0 +1,153 @@
+{
+  "artifacts": {
+    "aggregate_metrics": "v2-20260928T130354Z/aggregate_metrics.json",
+    "csv": "v2-20260928T130354Z/backbone_comparison.csv",
+    "markdown": "v2-20260928T130354Z/backbone_comparison.md",
+    "plots": "v2-20260928T130354Z/plots"
+  },
+  "completed_at_utc": "2026-09-28T13:13:15.993614Z",
+  "completed_runs": [
+    "efficientnet_b0-seed-42",
+    "efficientnet_b0-seed-43",
+    "efficientnet_b0-seed-44",
+    "resnet18-seed-42",
+    "resnet18-seed-43",
+    "resnet18-seed-44",
+    "resnet34-seed-42",
+    "resnet34-seed-43",
+    "resnet34-seed-44"
+  ],
+  "config_fingerprint": "a31ee7fdf51c368666b06400c1666a611022e26a595316b9a8dbc8426da1e8dd",
+  "configuration": {
+    "experiment": "C_frozen_pretrained_backbone_comparison",
+    "planned_runs": [
+      {
+        "backbone": "resnet18",
+        "seed": 42
+      },
+      {
+        "backbone": "resnet18",
+        "seed": 43
+      },
+      {
+        "backbone": "resnet18",
+        "seed": 44
+      },
+      {
+        "backbone": "resnet34",
+        "seed": 42
+      },
+      {
+        "backbone": "resnet34",
+        "seed": 43
+      },
+      {
+        "backbone": "resnet34",
+        "seed": 44
+      },
+      {
+        "backbone": "efficientnet_b0",
+        "seed": 42
+      },
+      {
+        "backbone": "efficientnet_b0",
+        "seed": 43
+      },
+      {
+        "backbone": "efficientnet_b0",
+        "seed": 44
+      }
+    ],
+    "source_sha256": "e589390f67c41a0792af704e5ab67e78d6752a65f36196a763534e51ed27ef99",
+    "split_snapshot": {
+      "constant_mean_baseline_validation_mae": 0.2186919504643963,
+      "counts": {
+        "test": 16,
+        "train": 76,
+        "validation": 17
+      },
+      "directory": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z",
+      "files": {
+        "test": {
+          "count": 16,
+          "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/test.csv",
+          "sha256": "5f575acd82911efc9294de27d052c278119a31a9285d7b9d5552d8604f68f744"
+        },
+        "train": {
+          "count": 76,
+          "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/train.csv",
+          "sha256": "a1d881b1eb5238551fb5072409dbe9e18174ee5cb70587f3d8d7c003f07fbd47"
+        },
+        "validation": {
+          "count": 17,
+          "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/validation.csv",
+          "sha256": "2d27e16c7fa1097def134488949c5ce00b109def08fc015ea68e3e2c1c66db78"
+        }
+      },
+      "manifest": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/manifest.json",
+      "name": "20260928T120720292607Z",
+      "snapshot_manifest": {
+        "created_at_utc": "2026-09-28T12:07:20.296505Z",
+        "files": {
+          "test": {
+            "count": 16,
+            "path": "snapshots/20260928T120720292607Z/test.csv",
+            "sha256": "5f575acd82911efc9294de27d052c278119a31a9285d7b9d5552d8604f68f744"
+          },
+          "train": {
+            "count": 76,
+            "path": "snapshots/20260928T120720292607Z/train.csv",
+            "sha256": "a1d881b1eb5238551fb5072409dbe9e18174ee5cb70587f3d8d7c003f07fbd47"
+          },
+          "validation": {
+            "count": 17,
+            "path": "snapshots/20260928T120720292607Z/validation.csv",
+            "sha256": "2d27e16c7fa1097def134488949c5ce00b109def08fc015ea68e3e2c1c66db78"
+          }
+        },
+        "labels_sha256": "58f4444b63385001ed55972a8ce26a609b2b890db1ba131c59e73d58861d724c",
+        "mode": "append-existing",
+        "schema_version": 1,
+        "seed": 42,
+        "snapshot": "20260928T120720292607Z"
+      }
+    },
+    "test_evaluated": false,
+    "training": {
+      "augmentations": "RandomHorizontalFlip(p=0.5) + ColorJitter(brightness=0.25, contrast=0.25, saturation=0.20, hue=0.02)",
+      "backbone_frozen": true,
+      "batch_size": 8,
+      "batchnorm_eval": true,
+      "early_stopping": {
+        "mode": "min",
+        "monitor": "val_mae",
+        "patience": 10
+      },
+      "image_size": [
+        224,
+        224
+      ],
+      "imagenet_mean": [
+        0.485,
+        0.456,
+        0.406
+      ],
+      "imagenet_std": [
+        0.229,
+        0.224,
+        0.225
+      ],
+      "learning_rate": 0.001,
+      "loss": "SmoothL1Loss",
+      "max_epochs": 100,
+      "optimizer": "AdamW",
+      "pretrained_weights": "torchvision DEFAULT ImageNet weights",
+      "regression_head": "Linear(feature_dim, 1) -> Sigmoid"
+    }
+  },
+  "created_at_utc": "2026-09-28T13:03:54.027542Z",
+  "schema_version": 1,
+  "status": "complete",
+  "version_id": "v2-20260928T130354Z",
+  "version_number": 2
+}

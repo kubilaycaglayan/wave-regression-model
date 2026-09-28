@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-09-28T13:03:29.329319Z",
+  "sample_count": 17,
+  "baseline_prediction": 0.39407894736842103,
+  "baseline_mae": 0.2186919504643963,
+  "mae": 0.1412108863101286,
+  "rmse": 0.18663688991006963,
+  "mean_signed_error": -0.0035774378215565387,
+  "median_absolute_error": 0.1073325753211975,
+  "maximum_absolute_error": 0.458188408613205,
+  "range_metrics": {
+    "0.00-0.19": {
+      "count": 2,
+      "mae": 0.1680285096168518
+    },
+    "0.20-0.39": {
+      "count": 5,
+      "mae": 0.10130635857582092
+    },
+    "0.40-0.59": {
+      "count": 4,
+      "mae": 0.11238333433866501
+    },
+    "0.60-0.79": {
+      "count": 4,
+      "mae": 0.12488630861043928
+    },
+    "0.80-1.00": {
+      "count": 2,
+      "mae": 0.3044588416814804
+    }
+  },
+  "endpoint_bias": {
+    "actual_0.00-0.39": {
+      "count": 7,
+      "mean_signed_error": 0.11549949560846602
+    },
+    "actual_0.60-1.00": {
+      "count": 6,
+      "mean_signed_error": -0.18474381963411965
+    }
+  },
+  "actual_prediction_ranges": {
+    "actual_min": 0.0,
+    "actual_max": 0.9,
+    "prediction_min": 0.17768660187721252,
+    "prediction_max": 0.8271583318710327,
+    "actual_width": 0.9,
+    "prediction_width": 0.6494717299938202,
+    "prediction_to_actual_width_ratio": 0.7216352555486891
+  },
+  "baseline_comparison": {
+    "count_beaten": 12,
+    "percentage_beaten": 70.58823529411765,
+    "ties": 0
+  },
+  "checkpoint": {
+    "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-5-checkpoints/v13-mae-0.1412-efficientnet_b0/wave-regression-efficientnet_b0-v13-best-val-mae-epoch=59-val_mae=0.1412.ckpt",
+    "sha256": "5065015f56a3ca05c12b78bce43bed7a339fc5cb864f0be1c1d25c91d8b3fc33",
+    "model_version": "v13"
+  },
+  "split_snapshot": {
+    "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z",
+    "validation_sha256": "2d27e16c7fa1097def134488949c5ce00b109def08fc015ea68e3e2c1c66db78",
+    "test_sha256": "5f575acd82911efc9294de27d052c278119a31a9285d7b9d5552d8604f68f744",
+    "counts": {
+      "train": 76,
+      "validation": 17,
+      "test": 16
+    }
+  },
+  "test_evaluated": false,
+  "training_performed": false,
+  "device": "cpu",
+  "inference_seconds": 0.49566955701448023,
+  "elapsed_seconds": 1.8135716089745983
+}

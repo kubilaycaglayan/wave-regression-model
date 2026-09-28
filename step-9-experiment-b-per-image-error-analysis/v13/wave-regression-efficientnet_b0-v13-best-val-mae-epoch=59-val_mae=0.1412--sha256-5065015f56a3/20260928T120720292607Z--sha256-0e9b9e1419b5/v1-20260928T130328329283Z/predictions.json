@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "rows": [
+    {
+      "filename": "step-2_IMG_7274.jpg",
+      "actual_waviness": 0.9,
+      "predicted_waviness": 0.44181159138679504,
+      "signed_error": -0.458188408613205,
+      "absolute_error": 0.458188408613205,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.5059210526315789,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7418.jpg",
+      "actual_waviness": 0.5,
+      "predicted_waviness": 0.8271583318710327,
+      "signed_error": 0.3271583318710327,
+      "absolute_error": 0.3271583318710327,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.10592105263157897,
+      "neural_network_beats_baseline": false
+    },
+    {
+      "filename": "step-2_IMG_7395.jpg",
+      "actual_waviness": 0.2,
+      "predicted_waviness": 0.514545202255249,
+      "signed_error": 0.314545202255249,
+      "absolute_error": 0.314545202255249,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.19407894736842102,
+      "neural_network_beats_baseline": false
+    },
+    {
+      "filename": "step-2_IMG_7148.jpg",
+      "actual_waviness": 0.7,
+      "predicted_waviness": 0.4929830729961395,
+      "signed_error": -0.20701692700386043,
+      "absolute_error": 0.20701692700386043,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.3059210526315789,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7569.jpg",
+      "actual_waviness": 0.0,
+      "predicted_waviness": 0.17768660187721252,
+      "signed_error": 0.17768660187721252,
+      "absolute_error": 0.17768660187721252,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.39407894736842103,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7306.jpg",
+      "actual_waviness": 0.05,
+      "predicted_waviness": 0.2083704173564911,
+      "signed_error": 0.1583704173564911,
+      "absolute_error": 0.1583704173564911,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.34407894736842104,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7541.jpg",
+      "actual_waviness": 0.85,
+      "predicted_waviness": 0.6992707252502441,
+      "signed_error": -0.15072927474975584,
+      "absolute_error": 0.15072927474975584,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.45592105263157895,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7311.jpg",
+      "actual_waviness": 0.75,
+      "predicted_waviness": 0.6062536835670471,
+      "signed_error": -0.14374631643295288,
+      "absolute_error": 0.14374631643295288,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.35592105263157897,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7335.jpg",
+      "actual_waviness": 0.2,
+      "predicted_waviness": 0.3073325753211975,
+      "signed_error": 0.1073325753211975,
+      "absolute_error": 0.1073325753211975,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.19407894736842102,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7149.jpg",
+      "actual_waviness": 0.75,
+      "predicted_waviness": 0.6593565344810486,
+      "signed_error": -0.09064346551895142,
+      "absolute_error": 0.09064346551895142,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.35592105263157897,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7531.jpg",
+      "actual_waviness": 0.4,
+      "predicted_waviness": 0.3247350752353668,
+      "signed_error": -0.0752649247646332,
+      "absolute_error": 0.0752649247646332,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.0059210526315789935,
+      "neural_network_beats_baseline": false
+    },
+    {
+      "filename": "step-2_IMG_7551.jpg",
+      "actual_waviness": 0.6,
+      "predicted_waviness": 0.5418614745140076,
+      "signed_error": -0.05813852548599241,
+      "absolute_error": 0.05813852548599241,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.20592105263157895,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7305.jpg",
+      "actual_waviness": 0.3,
+      "predicted_waviness": 0.3540325164794922,
+      "signed_error": 0.0540325164794922,
+      "absolute_error": 0.0540325164794922,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.09407894736842104,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7415.jpg",
+      "actual_waviness": 0.4,
+      "predicted_waviness": 0.37007325887680054,
+      "signed_error": -0.029926741123199485,
+      "absolute_error": 0.029926741123199485,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.0059210526315789935,
+      "neural_network_beats_baseline": false
+    },
+    {
+      "filename": "step-2_IMG_7411.jpg",
+      "actual_waviness": 0.4,
+      "predicted_waviness": 0.4171833395957947,
+      "signed_error": 0.017183339595794656,
+      "absolute_error": 0.017183339595794656,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.0059210526315789935,
+      "neural_network_beats_baseline": false
+    },
+    {
+      "filename": "step-2_IMG_7371.jpg",
+      "actual_waviness": 0.3,
+      "predicted_waviness": 0.28295382857322693,
+      "signed_error": -0.01704617142677306,
+      "absolute_error": 0.01704617142677306,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.09407894736842104,
+      "neural_network_beats_baseline": true
+    },
+    {
+      "filename": "step-2_IMG_7565.jpg",
+      "actual_waviness": 0.3,
+      "predicted_waviness": 0.3135753273963928,
+      "signed_error": 0.013575327396392833,
+      "absolute_error": 0.013575327396392833,
+      "mean_baseline_prediction": 0.39407894736842103,
+      "mean_baseline_absolute_error": 0.09407894736842104,
+      "neural_network_beats_baseline": true
+    }
+  ]
+}
