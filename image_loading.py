@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 from pillow_heif import register_heif_opener
 
 
@@ -17,6 +17,7 @@ register_heif_opener()
 
 
 def load_rgb_image(path: str | Path) -> Image.Image:
-    """Decode an image with Pillow and return a detached RGB copy."""
+    """Decode an image, apply its EXIF orientation, and return detached RGB."""
     with Image.open(path) as opened:
-        return opened.convert("RGB")
+        oriented = ImageOps.exif_transpose(opened)
+        return oriented.convert("RGB")
