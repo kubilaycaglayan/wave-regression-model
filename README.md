@@ -88,10 +88,11 @@ EVALUATION_CHECKPOINT_PATH=step-5-checkpoints/vN-mae-<best-mae>-<backbone>/<chec
 ```
 
 Each evaluation is saved under `step-6-test-evaluation/` using the checkpoint filename and a
-checkpoint SHA-256 prefix. The directory contains predictions, a summary, an inspection gallery,
+checkpoint SHA-256 prefix, followed by the test split snapshot ID (when applicable) and test
+manifest SHA-256 prefix. The directory contains predictions, a summary, an inspection gallery,
 and metadata including the exact checkpoint and test-manifest fingerprints. Existing complete
-evaluations are skipped; a different checkpoint gets a separate result directory.
-Older root-level files in this directory may be legacy evaluation outputs.
+evaluations for the same checkpoint and manifest are skipped; a changed checkpoint or split gets
+a separate result directory. Older root-level files in this directory may be legacy outputs.
 
 Step 7 treats `step-7-inference-preview/<photo-stem>-model-input.jpg` as the checkpoint-independent, canonical preprocessed model input. Existing previews must be detached RGB `224x224` JPEG inputs; malformed previews fail clearly and are not replaced automatically. A valid preview is reused when selecting a different checkpoint, so only regression inference runs again. A photo is skipped only when its valid preview and a matching prediction record for the selected checkpoint both exist. If the preview is missing, Steps 1 and 2 run again even when a prediction record exists; delete a preview to force regeneration.
 

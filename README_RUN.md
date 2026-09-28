@@ -276,7 +276,7 @@ Run:
 python step_6_a_evaluate_test.py
 ```
 
-The evaluation uses the immutable `benchmark-v1` test manifest by default and automatically selects the newest training manifest's best checkpoint. To evaluate a specific checkpoint, set `EVALUATION_CHECKPOINT_PATH` to its path.
+The evaluation uses `test.csv` from the latest dataset split snapshot by default and automatically selects the newest training manifest's best checkpoint. To evaluate a specific checkpoint, set `EVALUATION_CHECKPOINT_PATH` to its path. Use `--test-manifest` to select another test CSV.
 
 Results are written to a checkpoint- and SHA-256-specific directory under:
 
@@ -284,7 +284,7 @@ Results are written to a checkpoint- and SHA-256-specific directory under:
 step-6-test-evaluation/
 ```
 
-Evaluations from different checkpoints are preserved in separate directories.
+Each result directory is keyed by the checkpoint filename and SHA-256, then by the split snapshot ID and test-manifest SHA-256. Predictions, summary, gallery, and metadata stay together. A complete evaluation for the same checkpoint and manifest is reused on later runs; a new split snapshot or checkpoint gets its own directory.
 
 ## Step 7: Use the new checkpoint for predictions
 
@@ -339,4 +339,4 @@ Step 9 shows which validation images the model understands well and where its wa
 - `step_1_a_prepare_water_masks.py` is an inspection step; `step_1_b_preprocess_water_inputs.py` is the actual Step 1 training-data preparation.
 - Do not train directly from raw photos. Training uses the Step 2 outputs.
 - Do not delete or reshuffle existing split manifests; the repository intentionally preserves previous assignments.
-- `step_6_a_evaluate_test.py` always uses the immutable `benchmark-v1` test manifest by default and automatically selects the newest training manifest's best checkpoint. Set `EVALUATION_CHECKPOINT_PATH` to pin a historical checkpoint. Results are stored in checkpoint- and SHA-256-specific directories under `step-6-test-evaluation/`, so evaluations from different checkpoints are preserved.
+- `step_6_a_evaluate_test.py` uses `test.csv` from the latest split snapshot by default and automatically selects the newest training manifest's best checkpoint. Set `EVALUATION_CHECKPOINT_PATH` to pin a historical checkpoint, or pass `--test-manifest` to select a test CSV. Results are stored under checkpoint- and split-manifest-specific directories in `step-6-test-evaluation/`; complete matching evaluations are reused on later runs.

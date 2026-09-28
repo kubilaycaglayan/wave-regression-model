@@ -130,7 +130,10 @@ def evaluation_output_dir(checkpoint_path: Path, test_manifest: Path) -> Path:
     if not test_manifest.is_file():
         raise FileNotFoundError(f"Test manifest not found: {test_manifest}")
     checkpoint_id = f"{checkpoint_path.stem}--sha256-{sha256_for(checkpoint_path)[:12]}"
-    manifest_id = f"{test_manifest.stem}--sha256-{sha256_for(test_manifest)[:12]}"
+    manifest_label = test_manifest.stem
+    if test_manifest.parent.parent.name == "snapshots":
+        manifest_label = f"{test_manifest.parent.name}-{manifest_label}"
+    manifest_id = f"{manifest_label}--sha256-{sha256_for(test_manifest)[:12]}"
     return Path("step-6-test-evaluation") / checkpoint_id / manifest_id
 
 
