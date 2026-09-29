@@ -1,5 +1,9 @@
 # Sea Wave Regression Model
 
+This neural network takes a photo of the **sea** and estimates water waviness as a number from **0 to 1**. A score of 0 represents very calm water; a score of 1 represents very wavy water that may be dangerous for swimming. The score describes waviness and is not, by itself, a complete swimming safety assessment.
+
+<img src="readme_files/waviness-scale.svg" alt="Waviness score scale from 0, very calm water, to 1, very wavy water that may be dangerous to swim, with guidance for fun waves and taking precautions" width="85%" />
+
 This project explores whether a photo of the sea can help answer a familiar local question: **how wavy is the water today, and is it a good day to swim?** Swimming is part of everyday life where I live, and I used to check the sea from my window each morning. I started collecting photos to see whether a computer vision model could make that daily check more consistent.
 
 The repository contains an image-processing and model-training pipeline for a local swimming application. The model estimates **water waviness from an image**; it does not yet make a complete safety judgment.
