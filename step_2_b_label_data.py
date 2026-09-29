@@ -5,22 +5,30 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import os
 import tempfile
 import threading
 import time
 from datetime import datetime, timezone
+from functools import lru_cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+
+from image_loading import load_rgb_image
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
 IMAGE_DIR = PROJECT_DIR / "step-2-final-water-data"
 LABELS_PATH = PROJECT_DIR / "labels.csv"
 DISCARDED_PATH = PROJECT_DIR / "discarded_images.csv"
+# Step 1 records which source file produced each stem; step 2 keeps that stem.
+SOURCE_MANIFEST_PATH = PROJECT_DIR / "step-1-processed-data" / ".source-manifest.json"
+PROCESSED_PREFIX = "step-2_"
+ORIGINAL_PREVIEW_MAX_SIDE = 800
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 LABELS_LOCK = threading.Lock()
 
@@ -48,6 +56,15 @@ PAGE = r'''<!doctype html>
     .toolbar label { color:var(--muted); }
     .view { display:none; } .view.active { display:block; }
     .label-card { background:white; border:1px solid var(--line); border-radius:12px; padding:18px; }
+    .image-row { display:flex; align-items:center; gap:18px; }
+    /* Height is synced to the processed box in JS so the original never makes the card taller. */
+    /* Fixed ~1/3 : 2/3 split so neither panel shifts while images load or change shape. */
+    .original-wrap { flex:0 0 calc(33% - 12px); position:relative; margin:0 6px; display:flex; justify-content:center; align-items:center; background:#10191d; border-radius:8px; overflow:hidden; }
+    .original-wrap img { display:block; height:100%; width:auto; max-width:100%; object-fit:contain; }
+    .original-wrap .caption { position:absolute; left:6px; bottom:6px; padding:2px 6px; border-radius:4px; background:#10191dcc; color:white; font-size:12px; }
+    .original-missing[hidden] { display:none; }
+    .original-missing { display:flex; align-items:center; justify-content:center; height:100%; width:100%; padding:10px; text-align:center; color:var(--muted); font-size:13px; border:1px dashed var(--line); border-radius:6px; }
+    .image-row .image-wrap { flex:1 1 0; min-width:0; }
     .image-wrap { display:flex; justify-content:center; align-items:center; min-height:220px; max-height:52vh; background:#10191d; border-radius:8px; overflow:hidden; }
     .image-wrap img { display:block; width:auto; max-width:min(100%, 420px); max-height:52vh; object-fit:contain; }
     .image-meta { display:flex; justify-content:space-between; gap:12px; margin:15px 0 8px; }
@@ -69,7 +86,7 @@ PAGE = r'''<!doctype html>
     .tile .score { margin-top:8px; font-weight:750; font-size:18px; }
     .tile .tile-name { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .empty { padding:35px; color:var(--muted); text-align:center; background:white; border:1px solid var(--line); border-radius:10px; }
-    @media (max-width:600px) { .toolbar, .image-meta { align-items:flex-start; flex-direction:column; } .image-wrap { min-height:250px; } }
+    @media (max-width:600px) { .toolbar, .image-meta { align-items:flex-start; flex-direction:column; } .image-wrap { min-height:250px; } .image-row { flex-direction:column; align-items:stretch; } .original-wrap { margin:0; flex-basis:auto; } }
   </style>
 </head>
 <body>
@@ -78,7 +95,7 @@ PAGE = r'''<!doctype html>
   <main>
     <section id="labeling" class="view active">
       <div class="toolbar"><label for="sort">Order <select id="sort"><option value="unlabeled">Unlabeled first</option><option value="high">Waviness: highest to lowest</option><option value="low">Waviness: lowest to highest</option><option value="filename">Filename</option></select></label><span id="position" class="status"></span></div>
-      <div class="label-card"><div class="image-wrap"><img id="main-image" alt="Processed sea image"></div><div class="image-meta"><span id="filename" class="filename"></span><span id="label-status" class="status"></span></div><div class="slider-row"><span class="range-label">0.00</span><input id="slider" type="range" min="0" max="1" step="0.05" value="0.50"><span id="value" class="value">0.50</span></div><div class="actions"><button id="previous">Previous</button><div class="right"><button id="skip">Skip</button><button id="discard" class="danger">Discard</button><button id="save" class="primary">Save &amp; Next</button></div></div><div class="hint">Keyboard: 1–9 = 0.10–0.90 · 0 = 1.00 · ←/→ adjust by 0.05 · Enter save &amp; next · S skip · D discard · P previous</div></div>
+      <div class="label-card"><div class="image-row"><div id="original-wrap" class="original-wrap"><img id="original-image" alt="Original photo"><div id="original-missing" class="original-missing" hidden>Original not found</div><span class="caption">Original</span></div><div class="image-wrap"><img id="main-image" alt="Processed sea image"></div></div><div class="image-meta"><span id="filename" class="filename"></span><span id="label-status" class="status"></span></div><div class="slider-row"><span class="range-label">0.00</span><input id="slider" type="range" min="0" max="1" step="0.05" value="0.50"><span id="value" class="value">0.50</span></div><div class="actions"><button id="previous">Previous</button><div class="right"><button id="skip">Skip</button><button id="discard" class="danger">Discard</button><button id="save" class="primary">Save &amp; Next</button></div></div><div class="hint">Keyboard: 1–9 = 0.10–0.90 · 0 = 1.00 · ←/→ adjust by 0.05 · Enter save &amp; next · S skip · D discard · P previous</div></div>
     </section>
     <section id="review" class="view"><div class="toolbar"><h2>Labeled images</h2><label for="review-sort">Order <select id="review-sort"><option value="high">Highest to lowest</option><option value="low">Lowest to highest</option></select></label></div><div id="gallery" class="gallery"></div></section>
   </main>
@@ -97,10 +114,15 @@ PAGE = r'''<!doctype html>
     function updateStats() { $('total').textContent=state.images.length; $('labeled').textContent=Object.keys(state.labels).filter(n=>state.images.includes(n)).length; $('remaining').textContent=state.images.length-Number($('labeled').textContent); }
     function renderMain() {
       state.ordered = orderedImages();
-      if (!state.ordered.length) { $('filename').textContent='No processed images found'; $('position').textContent=''; $('main-image').removeAttribute('src'); return; }
+      if (!state.ordered.length) { $('filename').textContent='No processed images found'; $('position').textContent=''; $('main-image').removeAttribute('src'); $('original-image').removeAttribute('src'); return; }
       state.index = Math.max(0, Math.min(state.index, state.ordered.length-1)); const name=state.ordered[state.index]; const labeled=state.labels[name] !== undefined;
-      $('main-image').src='/images/'+encodeURIComponent(name); $('main-image').alt=name; $('filename').textContent=name; $('position').textContent=`${state.index+1} of ${state.ordered.length}`;
+      $('main-image').src='/images/'+encodeURIComponent(name); $('main-image').alt=name; showOriginal(name); $('filename').textContent=name; $('position').textContent=`${state.index+1} of ${state.ordered.length}`;
       $('label-status').textContent=labeled ? 'Labeled' : 'UNLABELED'; $('label-status').className='status'+(labeled?'':' unlabeled'); $('slider').value=labeled ? state.labels[name] : 0.50; $('value').textContent=scoreText($('slider').value);
+    }
+    function showOriginal(name) {
+      $('original-image').hidden=false; $('original-missing').hidden=true; $('original-image').src='/originals/'+encodeURIComponent(name);
+      // Warm the server cache for the next image; HEIC decoding is the slow part.
+      const next=state.ordered[state.index+1]; if(next) new Image().src='/originals/'+encodeURIComponent(next);
     }
     function renderGallery() { const high=$('review-sort').value==='high'; const labeled=state.images.filter(n=>state.labels[n]!==undefined).sort((a,b)=>(high?state.labels[b]-state.labels[a]:state.labels[a]-state.labels[b])||a.localeCompare(b)); $('gallery').innerHTML=labeled.length ? labeled.map(n=>`<button class="tile" data-name="${encodeURIComponent(n)}"><img src="/images/${encodeURIComponent(n)}" alt=""><div class="score">${scoreText(state.labels[n])}</div><div class="tile-name" title="${n}">${n}</div></button>`).join('') : '<div class="empty">No labels saved yet.</div>'; document.querySelectorAll('.tile').forEach(el=>el.onclick=()=>selectForLabeling(decodeURIComponent(el.dataset.name))); }
     function selectForLabeling(name) { state.sort='filename'; $('sort').value='filename'; state.ordered=orderedImages(); state.index=state.ordered.indexOf(name); showView('labeling'); renderMain(); }
@@ -108,8 +130,10 @@ PAGE = r'''<!doctype html>
     async function reload() { const data=await fetch('/api/data').then(r=>r.json()); state.images=data.images; state.labels=data.labels; updateStats(); renderMain(); renderGallery(); }
     async function save() { const name=state.ordered[state.index]; if(!name)return; const waviness=Number($('slider').value).toFixed(2); const response=await fetch('/api/labels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:name,waviness})}); if(!response.ok){let detail='Could not save label.'; try { const body=await response.json(); if(body.error) detail=body.error; } catch (_) {} alert(detail);return;} const nextUnlabeled=state.images.find(n=>state.labels[n]===undefined && n!==name); await reload(); if(nextUnlabeled && state.sort==='unlabeled') state.index=state.ordered.indexOf(nextUnlabeled); else state.index=Math.min(state.index+1,state.ordered.length-1); renderMain(); }
     async function discard() { const name=state.ordered[state.index]; if(!name)return; if(!confirm(`Discard ${name}? It will be excluded from labeling, training, and evaluation.`))return; const reason=prompt('Optional discard reason:', ''); const response=await fetch('/api/discard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:name,reason:reason||''})}); if(!response.ok){let detail='Could not discard image.'; try { const body=await response.json(); if(body.error) detail=body.error; } catch (_) {} alert(detail);return;} await reload(); state.index=Math.min(state.index,state.ordered.length-1); renderMain(); }
+    new ResizeObserver(()=>{ $('original-wrap').style.height=$('main-image').parentElement.offsetHeight+'px'; }).observe($('main-image').parentElement);
+    $('original-image').onerror=()=>{ $('original-image').hidden=true; $('original-missing').hidden=false; };
     $('slider').oninput=()=> $('value').textContent=scoreText($('slider').value); $('sort').onchange=()=>{state.sort=$('sort').value;state.index=0;renderMain();}; $('review-sort').onchange=renderGallery; $('save').onclick=save; $('discard').onclick=discard; $('skip').onclick=()=>{state.index=Math.min(state.index+1,state.ordered.length-1);renderMain();}; $('previous').onclick=()=>{state.index=Math.max(state.index-1,0);renderMain();}; document.querySelectorAll('.tab').forEach(el=>el.onclick=()=>showView(el.dataset.view));
-    document.addEventListener('keydown', e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return; if(!document.getElementById('labeling').classList.contains('active'))return; if(/^[0-9]$/.test(e.key)){e.preventDefault();$('slider').value=e.key==='0'?1:Number(e.key)/10;$('value').textContent=scoreText($('slider').value);} else if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();$('slider').value=Math.max(0,Math.min(1,Number($('slider').value)+(e.key==='ArrowRight'?0.05:-0.05)));$('value').textContent=scoreText($('slider').value);} else if(e.key==='Enter')save(); else if(e.key.toLowerCase()==='s'){$('skip').click();} else if(e.key.toLowerCase()==='d'){$('discard').click();} else if(e.key.toLowerCase()==='p'){$('previous').click();}});
+    document.addEventListener('keydown', e=>{const focused=document.activeElement; if(['INPUT','TEXTAREA','SELECT'].includes(focused.tagName) && focused.id!=='slider')return; if(!document.getElementById('labeling').classList.contains('active'))return; if(/^[0-9]$/.test(e.key)){e.preventDefault();$('slider').value=e.key==='0'?1:Number(e.key)/10;$('value').textContent=scoreText($('slider').value);} else if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();$('slider').value=Math.max(0,Math.min(1,Number($('slider').value)+(e.key==='ArrowRight'?0.05:-0.05)));$('value').textContent=scoreText($('slider').value);} else if(e.key==='Enter')save(); else if(e.key.toLowerCase()==='s'){$('skip').click();} else if(e.key.toLowerCase()==='d'){$('discard').click();} else if(e.key.toLowerCase()==='p'){$('previous').click();}});
     reload().catch(()=>alert('Could not load labeling data.'));
   </script>
 </body>
@@ -127,6 +151,36 @@ def image_names() -> list[str]:
         and "overlay" not in path.stem.lower()
         and path.name not in discarded
     ) if IMAGE_DIR.exists() else []
+
+
+def source_for_processed(filename: str) -> Path:
+    """Map `step-2_<stem>.jpg` back to the raw source recorded by step 1."""
+    stem = Path(filename).stem
+    if not stem.startswith(PROCESSED_PREFIX):
+        raise ValueError(f"Expected a '{PROCESSED_PREFIX}<stem>' filename, got {filename!r}")
+    stem = stem.removeprefix(PROCESSED_PREFIX)
+    if not SOURCE_MANIFEST_PATH.exists():
+        raise FileNotFoundError(f"Source manifest not found: {SOURCE_MANIFEST_PATH}")
+    # Re-read on every request so sources added by a new step 1 run are found.
+    manifest = json.loads(SOURCE_MANIFEST_PATH.read_text(encoding="utf-8"))
+    sources = [Path(source) for source, mapped_stem in manifest.items() if mapped_stem == stem]
+    if not sources:
+        raise FileNotFoundError(f"No source recorded for stem {stem!r} in {SOURCE_MANIFEST_PATH}")
+    if not sources[0].exists():
+        raise FileNotFoundError(f"Recorded source no longer exists: {sources[0]}")
+    return sources[0]
+
+
+@lru_cache(maxsize=64)
+def original_preview_bytes(source: Path, modified_ns: int) -> bytes:
+    """Decode (HEIC included) and downscale an original for display only; nothing is written to disk."""
+    started = time.perf_counter()
+    image = load_rgb_image(source)
+    image.thumbnail((ORIGINAL_PREVIEW_MAX_SIDE, ORIGINAL_PREVIEW_MAX_SIDE))
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=85)
+    print(f"[{time.strftime('%H:%M:%S')}] original preview {source.name} decoded in {time.perf_counter() - started:.2f}s")
+    return buffer.getvalue()
 
 
 def read_labels() -> dict[str, float]:
@@ -247,6 +301,17 @@ class Handler(BaseHTTPRequestHandler):
             path = IMAGE_DIR / requested
             body = path.read_bytes(); content_type = "image/jpeg" if path.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
             self.send_response(HTTPStatus.OK); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body); return
+        if parsed.path.startswith("/originals/"):
+            requested = unquote(parsed.path.removeprefix("/originals/"))
+            if requested not in image_names():
+                self.send_error(HTTPStatus.NOT_FOUND); return
+            try:
+                source = source_for_processed(requested)
+                body = original_preview_bytes(source, source.stat().st_mtime_ns)
+            except (OSError, ValueError) as error:
+                print(f"[{time.strftime('%H:%M:%S')}] original preview unavailable for {requested}: {error}")
+                self.send_error(HTTPStatus.NOT_FOUND); return
+            self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "image/jpeg"); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "max-age=3600"); self.end_headers(); self.wfile.write(body); return
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
