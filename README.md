@@ -47,7 +47,7 @@ In this run, the training-mean baseline had an MAE of **0.219**, the training-me
 
 Aggregate MAE can hide individual failures. We plotted actual and predicted waviness for each validation image and reviewed prediction errors image by image. The analysis helps identify cases where the model performs well or struggles, and guides later data collection and experiments.
 
-<img src="readme_files/experiment-b-actual-vs-predicted.png" alt="Actual versus predicted waviness for the current validation run" width="40%" />
+<img src="readme_files/experiment-b-actual-vs-predicted.png" alt="Actual versus predicted waviness for the current validation run" width="80%" />
 
 *Each point represents a validation image. The diagonal indicates a perfect prediction.*
 
