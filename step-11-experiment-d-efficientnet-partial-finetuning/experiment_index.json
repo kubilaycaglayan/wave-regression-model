@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "versions": [
+    {
+      "aggregate": "v4-20260928T135609Z/aggregate_metrics.json",
+      "completed_runs": 6,
+      "report": "v4-20260928T135609Z/experiment_report.md",
+      "snapshot": "20260928T120720292607Z",
+      "status": "complete",
+      "version_id": "v4-20260928T135609Z",
+      "version_number": 4
+    }
+  ]
+}

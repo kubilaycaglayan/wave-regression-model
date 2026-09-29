@@ -26,6 +26,22 @@ Notes: steps skip existing outputs, so reruns are safe. Use `--device cpu` on th
 
 Step 7 reuses valid cached inference previews when switching checkpoints.
 
+## Experiment D: frozen vs partially fine-tuned EfficientNet-B0
+
+Read the [Experiment D protocol](step-11-experiment-d-efficientnet-partial-finetuning/EXPERIMENT-D.md)
+and [configuration audit](step-11-experiment-d-efficientnet-partial-finetuning/CONFIGURATION_AUDIT.md).
+To run all six paired seeds on the specified immutable snapshot:
+
+```bash
+python step_11_experiment_d.py
+```
+
+Each execution writes to a version directory under
+`step-11-experiment-d-efficientnet-partial-finetuning/`. Interrupted matching
+versions resume completed runs safely; use `--force-new` to start a separate
+version. Use `--dry-run` to validate the snapshot and list the six planned
+runs without training.
+
 ---
 
 The repository’s retraining flow is:

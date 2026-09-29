@@ -1,0 +1,324 @@
+{
+  "checkpoint": {
+    "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-11-experiment-d-efficientnet-partial-finetuning/v4-20260928T135609Z/runs/partial/seed-43/partial-seed-43-best-val-mae-epoch=10-val_mae=0.1537.ckpt",
+    "sha256": "ee4cbe6ea19c017e03a42182a9fb72d9b64f4a53c0387cf94a27ebc293c96bf7"
+  },
+  "completed_at_utc": "2026-09-28T14:02:04.594385Z",
+  "config": {
+    "arm": "partial",
+    "augmentations": "RandomHorizontalFlip(p=0.5) + ColorJitter(brightness=0.25, contrast=0.25, saturation=0.20, hue=0.02)",
+    "batch_size": 8,
+    "deterministic": true,
+    "early_stopping": {
+      "mode": "min",
+      "monitor": "val_mae",
+      "patience": 10
+    },
+    "image_size": [
+      224,
+      224
+    ],
+    "imagenet_mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "imagenet_std": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "learning_rates": {
+      "backbone": 0.0001,
+      "regression_head": 0.001
+    },
+    "loss": "SmoothL1Loss",
+    "max_epochs": 100,
+    "optimizer": "AdamW",
+    "pretrained_weights": "EfficientNet_B0_Weights.DEFAULT (ImageNet)",
+    "seed": 43,
+    "split_snapshot": {
+      "files": {
+        "test": {
+          "count": 16,
+          "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/test.csv",
+          "sha256": "5f575acd82911efc9294de27d052c278119a31a9285d7b9d5552d8604f68f744"
+        },
+        "train": {
+          "count": 76,
+          "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/train.csv",
+          "sha256": "a1d881b1eb5238551fb5072409dbe9e18174ee5cb70587f3d8d7c003f07fbd47"
+        },
+        "validation": {
+          "count": 17,
+          "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/validation.csv",
+          "sha256": "2d27e16c7fa1097def134488949c5ce00b109def08fc015ea68e3e2c1c66db78"
+        }
+      },
+      "manifest": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/manifest.json",
+      "manifest_sha256": "0e9b9e1419b52882b1de3e042a26b22dab7f8599128d864be86253d8bbcc58b2",
+      "name": "20260928T120720292607Z"
+    },
+    "test_evaluated": false,
+    "trainable_backbone_modules": [
+      "backbone.features.7",
+      "backbone.features.8"
+    ]
+  },
+  "epoch_metrics": [
+    {
+      "epoch": 2,
+      "train_mae": 0.20385515689849854,
+      "validation_mae": 0.19339284300804138
+    },
+    {
+      "epoch": 3,
+      "train_mae": 0.1384006291627884,
+      "validation_mae": 0.17984864115715027
+    },
+    {
+      "epoch": 4,
+      "train_mae": 0.10581488162279129,
+      "validation_mae": 0.17579157650470734
+    },
+    {
+      "epoch": 5,
+      "train_mae": 0.08694743365049362,
+      "validation_mae": 0.1638786643743515
+    },
+    {
+      "epoch": 6,
+      "train_mae": 0.08251910656690598,
+      "validation_mae": 0.1648191213607788
+    },
+    {
+      "epoch": 7,
+      "train_mae": 0.06455951929092407,
+      "validation_mae": 0.1730765998363495
+    },
+    {
+      "epoch": 8,
+      "train_mae": 0.06196857616305351,
+      "validation_mae": 0.1717097908258438
+    },
+    {
+      "epoch": 9,
+      "train_mae": 0.06666156649589539,
+      "validation_mae": 0.15781722962856293
+    },
+    {
+      "epoch": 10,
+      "train_mae": 0.04734263941645622,
+      "validation_mae": 0.17198850214481354
+    },
+    {
+      "epoch": 11,
+      "train_mae": 0.045647796243429184,
+      "validation_mae": 0.1537482887506485
+    },
+    {
+      "epoch": 12,
+      "train_mae": 0.04423316568136215,
+      "validation_mae": 0.15666644275188446
+    },
+    {
+      "epoch": 13,
+      "train_mae": 0.042678266763687134,
+      "validation_mae": 0.15880925953388214
+    },
+    {
+      "epoch": 14,
+      "train_mae": 0.0370209701359272,
+      "validation_mae": 0.15936265885829926
+    },
+    {
+      "epoch": 15,
+      "train_mae": 0.03690458461642265,
+      "validation_mae": 0.16065122187137604
+    },
+    {
+      "epoch": 16,
+      "train_mae": 0.03519105166196823,
+      "validation_mae": 0.1593577116727829
+    },
+    {
+      "epoch": 17,
+      "train_mae": 0.03200092166662216,
+      "validation_mae": 0.16642093658447266
+    },
+    {
+      "epoch": 18,
+      "train_mae": 0.03290898725390434,
+      "validation_mae": 0.1647436022758484
+    },
+    {
+      "epoch": 19,
+      "train_mae": 0.027652593329548836,
+      "validation_mae": 0.17317262291908264
+    },
+    {
+      "epoch": 20,
+      "train_mae": 0.02780154161155224,
+      "validation_mae": 0.16500172019004822
+    },
+    {
+      "epoch": 21,
+      "train_mae": 0.028832999989390373,
+      "validation_mae": 0.15840622782707214
+    }
+  ],
+  "epochs_trained": 21,
+  "metrics": {
+    "actual_range_width": 0.8999999761581421,
+    "high_end_count": 6,
+    "high_end_signed_bias": -0.15098491807778677,
+    "low_end_count": 7,
+    "low_end_signed_bias": 0.17460469848343305,
+    "mae": 0.1537482972969027,
+    "maximum_absolute_error": 0.3940192312002182,
+    "mean_signed_error": 0.04717070806552382,
+    "median_absolute_error": 0.10865312814712524,
+    "prediction_actual_range_width_ratio": 0.589881058265926,
+    "prediction_maximum": 0.8195200562477112,
+    "prediction_minimum": 0.28862711787223816,
+    "prediction_range_width": 0.530892938375473,
+    "rmse": 0.20425213643544896
+  },
+  "parameter_checks": {
+    "arm": "partial",
+    "batchnorm_all_frozen_eval": true,
+    "batchnorm_modules": 49,
+    "total_parameter_count": 4008829,
+    "trainable_backbone_modules": [
+      "backbone.features.7",
+      "backbone.features.8"
+    ],
+    "trainable_backbone_parameters": [
+      "features.7.0.block.0.0.weight",
+      "features.7.0.block.1.0.weight",
+      "features.7.0.block.2.fc1.weight",
+      "features.7.0.block.2.fc1.bias",
+      "features.7.0.block.2.fc2.weight",
+      "features.7.0.block.2.fc2.bias",
+      "features.7.0.block.3.0.weight",
+      "features.8.0.weight"
+    ],
+    "trainable_head_parameters": [
+      "0.weight",
+      "0.bias"
+    ],
+    "trainable_parameter_count": 1122865
+  },
+  "run_id": "partial-seed-43",
+  "schema_version": 1,
+  "selected_epoch": 11,
+  "status": "complete",
+  "test_evaluated": false,
+  "train_validation_mae_gap": 0.10810050105347352,
+  "training_duration_seconds": 25.756774569978006,
+  "training_mae_at_selected_epoch": 0.045647796243429184,
+  "validation_predictions": [
+    {
+      "absolute_error": 0.10865312814712524,
+      "actual": 0.699999988079071,
+      "filename": "step-2_IMG_7148.jpg",
+      "predicted": 0.5913468599319458
+    },
+    {
+      "absolute_error": 0.006700336933135986,
+      "actual": 0.75,
+      "filename": "step-2_IMG_7149.jpg",
+      "predicted": 0.743299663066864
+    },
+    {
+      "absolute_error": 0.36707526445388794,
+      "actual": 0.8999999761581421,
+      "filename": "step-2_IMG_7274.jpg",
+      "predicted": 0.5329247117042542
+    },
+    {
+      "absolute_error": 0.024621933698654175,
+      "actual": 0.30000001192092896,
+      "filename": "step-2_IMG_7305.jpg",
+      "predicted": 0.32462194561958313
+    },
+    {
+      "absolute_error": 0.25880564376711845,
+      "actual": 0.05000000074505806,
+      "filename": "step-2_IMG_7306.jpg",
+      "predicted": 0.3088056445121765
+    },
+    {
+      "absolute_error": 0.3083496391773224,
+      "actual": 0.75,
+      "filename": "step-2_IMG_7311.jpg",
+      "predicted": 0.4416503608226776
+    },
+    {
+      "absolute_error": 0.158097043633461,
+      "actual": 0.20000000298023224,
+      "filename": "step-2_IMG_7335.jpg",
+      "predicted": 0.35809704661369324
+    },
+    {
+      "absolute_error": 0.006009340286254883,
+      "actual": 0.30000001192092896,
+      "filename": "step-2_IMG_7371.jpg",
+      "predicted": 0.30600935220718384
+    },
+    {
+      "absolute_error": 0.3940192312002182,
+      "actual": 0.20000000298023224,
+      "filename": "step-2_IMG_7395.jpg",
+      "predicted": 0.5940192341804504
+    },
+    {
+      "absolute_error": 0.1368599236011505,
+      "actual": 0.4000000059604645,
+      "filename": "step-2_IMG_7411.jpg",
+      "predicted": 0.536859929561615
+    },
+    {
+      "absolute_error": 0.014844536781311035,
+      "actual": 0.4000000059604645,
+      "filename": "step-2_IMG_7415.jpg",
+      "predicted": 0.4148445427417755
+    },
+    {
+      "absolute_error": 0.3195200562477112,
+      "actual": 0.5,
+      "filename": "step-2_IMG_7418.jpg",
+      "predicted": 0.8195200562477112
+    },
+    {
+      "absolute_error": 0.014354139566421509,
+      "actual": 0.4000000059604645,
+      "filename": "step-2_IMG_7531.jpg",
+      "predicted": 0.414354145526886
+    },
+    {
+      "absolute_error": 0.06089895963668823,
+      "actual": 0.8500000238418579,
+      "filename": "step-2_IMG_7541.jpg",
+      "predicted": 0.7891010642051697
+    },
+    {
+      "absolute_error": 0.05423218011856079,
+      "actual": 0.6000000238418579,
+      "filename": "step-2_IMG_7551.jpg",
+      "predicted": 0.5457678437232971
+    },
+    {
+      "absolute_error": 0.09205257892608643,
+      "actual": 0.30000001192092896,
+      "filename": "step-2_IMG_7565.jpg",
+      "predicted": 0.3920525908470154
+    },
+    {
+      "absolute_error": 0.28862711787223816,
+      "actual": 0.0,
+      "filename": "step-2_IMG_7569.jpg",
+      "predicted": 0.28862711787223816
+    }
+  ]
+}

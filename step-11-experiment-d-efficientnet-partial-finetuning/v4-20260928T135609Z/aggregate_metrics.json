@@ -1,0 +1,246 @@
+{
+  "aggregate": {
+    "frozen": {
+      "mean_high_end_signed_bias": -0.19243448972702026,
+      "mean_low_end_signed_bias": 0.13673709208766618,
+      "mean_mae": 0.1516533369088874,
+      "mean_prediction_actual_range_width_ratio": 0.6660378983560641,
+      "mean_rmse": 0.1957294296139986,
+      "mean_train_validation_mae_gap": 0.11043626559423465,
+      "sd_high_end_signed_bias": 0.01316962078544312,
+      "sd_low_end_signed_bias": 0.01100618849499073,
+      "sd_mae": 0.0027357084955670283,
+      "sd_prediction_actual_range_width_ratio": 0.023031340162073585,
+      "sd_rmse": 0.007117020576570873,
+      "sd_train_validation_mae_gap": 0.004158783484666344
+    },
+    "partial": {
+      "mean_high_end_signed_bias": -0.1721539298693339,
+      "mean_low_end_signed_bias": 0.16441392419593676,
+      "mean_mae": 0.1561979362923725,
+      "mean_prediction_actual_range_width_ratio": 0.5923906843059332,
+      "mean_rmse": 0.20051598729226508,
+      "mean_train_validation_mae_gap": 0.12067211638478671,
+      "sd_high_end_signed_bias": 0.026582725099480415,
+      "sd_low_end_signed_bias": 0.01463785493701462,
+      "sd_mae": 0.005280705158372975,
+      "sd_prediction_actual_range_width_ratio": 0.05373789573863164,
+      "sd_rmse": 0.004064715905737507,
+      "sd_train_validation_mae_gap": 0.011545265960960624
+    }
+  },
+  "images_improved": 7,
+  "images_worsened": 10,
+  "largest_improvements": [
+    {
+      "actual": 0.8999999761581421,
+      "filename": "step-2_IMG_7274.jpg",
+      "frozen_mean_absolute_error": 0.4405522346496582,
+      "improvement": 0.050282458464304625,
+      "partial_mean_absolute_error": 0.3902697761853536
+    },
+    {
+      "actual": 0.8500000238418579,
+      "filename": "step-2_IMG_7541.jpg",
+      "frozen_mean_absolute_error": 0.12262550989786784,
+      "improvement": 0.04524173339207968,
+      "partial_mean_absolute_error": 0.07738377650578816
+    },
+    {
+      "actual": 0.699999988079071,
+      "filename": "step-2_IMG_7148.jpg",
+      "frozen_mean_absolute_error": 0.22961397965749106,
+      "improvement": 0.04129685958226523,
+      "partial_mean_absolute_error": 0.18831712007522583
+    },
+    {
+      "actual": 0.5,
+      "filename": "step-2_IMG_7418.jpg",
+      "frozen_mean_absolute_error": 0.32208041350046795,
+      "improvement": 0.031067967414855957,
+      "partial_mean_absolute_error": 0.291012446085612
+    },
+    {
+      "actual": 0.30000001192092896,
+      "filename": "step-2_IMG_7305.jpg",
+      "frozen_mean_absolute_error": 0.032150477170944214,
+      "improvement": 0.022446384032567344,
+      "partial_mean_absolute_error": 0.009704093138376871
+    }
+  ],
+  "largest_regressions": [
+    {
+      "actual": 0.0,
+      "filename": "step-2_IMG_7569.jpg",
+      "frozen_mean_absolute_error": 0.24568427602450052,
+      "improvement": -0.06251115600268045,
+      "partial_mean_absolute_error": 0.30819543202718097
+    },
+    {
+      "actual": 0.30000001192092896,
+      "filename": "step-2_IMG_7565.jpg",
+      "frozen_mean_absolute_error": 0.07352527976036072,
+      "improvement": -0.059210121631622314,
+      "partial_mean_absolute_error": 0.13273540139198303
+    },
+    {
+      "actual": 0.05000000074505806,
+      "filename": "step-2_IMG_7306.jpg",
+      "frozen_mean_absolute_error": 0.1726463201145331,
+      "improvement": -0.04670347770055136,
+      "partial_mean_absolute_error": 0.21934979781508446
+    },
+    {
+      "actual": 0.20000000298023224,
+      "filename": "step-2_IMG_7395.jpg",
+      "frozen_mean_absolute_error": 0.305103932817777,
+      "improvement": -0.04277450839678448,
+      "partial_mean_absolute_error": 0.34787844121456146
+    },
+    {
+      "actual": 0.30000001192092896,
+      "filename": "step-2_IMG_7371.jpg",
+      "frozen_mean_absolute_error": 0.012091606855392456,
+      "improvement": -0.01601014534632365,
+      "partial_mean_absolute_error": 0.028101752201716106
+    }
+  ],
+  "paired_seed_mae_differences": [
+    {
+      "mae_difference_partial_minus_frozen": 0.00399338585488937,
+      "seed": 42
+    },
+    {
+      "mae_difference_partial_minus_frozen": 0.001244993770823738,
+      "seed": 43
+    },
+    {
+      "mae_difference_partial_minus_frozen": 0.008395418524742126,
+      "seed": 44
+    }
+  ],
+  "schema_version": 1,
+  "status": "complete",
+  "test_evaluated": false,
+  "validation_per_image": [
+    {
+      "actual": 0.699999988079071,
+      "filename": "step-2_IMG_7148.jpg",
+      "frozen_mean_absolute_error": 0.22961397965749106,
+      "improvement": 0.04129685958226523,
+      "partial_mean_absolute_error": 0.18831712007522583
+    },
+    {
+      "actual": 0.75,
+      "filename": "step-2_IMG_7149.jpg",
+      "frozen_mean_absolute_error": 0.041772425174713135,
+      "improvement": 0.002667327721913658,
+      "partial_mean_absolute_error": 0.03910509745279948
+    },
+    {
+      "actual": 0.8999999761581421,
+      "filename": "step-2_IMG_7274.jpg",
+      "frozen_mean_absolute_error": 0.4405522346496582,
+      "improvement": 0.050282458464304625,
+      "partial_mean_absolute_error": 0.3902697761853536
+    },
+    {
+      "actual": 0.30000001192092896,
+      "filename": "step-2_IMG_7305.jpg",
+      "frozen_mean_absolute_error": 0.032150477170944214,
+      "improvement": 0.022446384032567344,
+      "partial_mean_absolute_error": 0.009704093138376871
+    },
+    {
+      "actual": 0.05000000074505806,
+      "filename": "step-2_IMG_7306.jpg",
+      "frozen_mean_absolute_error": 0.1726463201145331,
+      "improvement": -0.04670347770055136,
+      "partial_mean_absolute_error": 0.21934979781508446
+    },
+    {
+      "actual": 0.75,
+      "filename": "step-2_IMG_7311.jpg",
+      "frozen_mean_absolute_error": 0.24130365252494812,
+      "improvement": -0.01394741733868915,
+      "partial_mean_absolute_error": 0.25525106986363727
+    },
+    {
+      "actual": 0.20000000298023224,
+      "filename": "step-2_IMG_7335.jpg",
+      "frozen_mean_absolute_error": 0.1202240139245987,
+      "improvement": -0.015392909447352082,
+      "partial_mean_absolute_error": 0.13561692337195078
+    },
+    {
+      "actual": 0.30000001192092896,
+      "filename": "step-2_IMG_7371.jpg",
+      "frozen_mean_absolute_error": 0.012091606855392456,
+      "improvement": -0.01601014534632365,
+      "partial_mean_absolute_error": 0.028101752201716106
+    },
+    {
+      "actual": 0.20000000298023224,
+      "filename": "step-2_IMG_7395.jpg",
+      "frozen_mean_absolute_error": 0.305103932817777,
+      "improvement": -0.04277450839678448,
+      "partial_mean_absolute_error": 0.34787844121456146
+    },
+    {
+      "actual": 0.4000000059604645,
+      "filename": "step-2_IMG_7411.jpg",
+      "frozen_mean_absolute_error": 0.0700000027815501,
+      "improvement": -0.007724384466807038,
+      "partial_mean_absolute_error": 0.07772438724835713
+    },
+    {
+      "actual": 0.4000000059604645,
+      "filename": "step-2_IMG_7415.jpg",
+      "frozen_mean_absolute_error": 0.021185457706451416,
+      "improvement": 0.011281698942184448,
+      "partial_mean_absolute_error": 0.009903758764266968
+    },
+    {
+      "actual": 0.5,
+      "filename": "step-2_IMG_7418.jpg",
+      "frozen_mean_absolute_error": 0.32208041350046795,
+      "improvement": 0.031067967414855957,
+      "partial_mean_absolute_error": 0.291012446085612
+    },
+    {
+      "actual": 0.4000000059604645,
+      "filename": "step-2_IMG_7531.jpg",
+      "frozen_mean_absolute_error": 0.048808008432388306,
+      "improvement": -0.013410896062850952,
+      "partial_mean_absolute_error": 0.06221890449523926
+    },
+    {
+      "actual": 0.8500000238418579,
+      "filename": "step-2_IMG_7541.jpg",
+      "frozen_mean_absolute_error": 0.12262550989786784,
+      "improvement": 0.04524173339207968,
+      "partial_mean_absolute_error": 0.07738377650578816
+    },
+    {
+      "actual": 0.6000000238418579,
+      "filename": "step-2_IMG_7551.jpg",
+      "frozen_mean_absolute_error": 0.07873913645744324,
+      "improvement": -0.003857602675755814,
+      "partial_mean_absolute_error": 0.08259673913319905
+    },
+    {
+      "actual": 0.30000001192092896,
+      "filename": "step-2_IMG_7565.jpg",
+      "frozen_mean_absolute_error": 0.07352527976036072,
+      "improvement": -0.059210121631622314,
+      "partial_mean_absolute_error": 0.13273540139198303
+    },
+    {
+      "actual": 0.0,
+      "filename": "step-2_IMG_7569.jpg",
+      "frozen_mean_absolute_error": 0.24568427602450052,
+      "improvement": -0.06251115600268045,
+      "partial_mean_absolute_error": 0.30819543202718097
+    }
+  ]
+}

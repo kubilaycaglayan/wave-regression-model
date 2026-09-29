@@ -1,0 +1,58 @@
+{
+  "arm": "frozen",
+  "augmentations": "RandomHorizontalFlip(p=0.5) + ColorJitter(brightness=0.25, contrast=0.25, saturation=0.20, hue=0.02)",
+  "batch_size": 8,
+  "deterministic": true,
+  "early_stopping": {
+    "mode": "min",
+    "monitor": "val_mae",
+    "patience": 10
+  },
+  "image_size": [
+    224,
+    224
+  ],
+  "imagenet_mean": [
+    0.485,
+    0.456,
+    0.406
+  ],
+  "imagenet_std": [
+    0.229,
+    0.224,
+    0.225
+  ],
+  "learning_rates": {
+    "backbone": null,
+    "regression_head": 0.001
+  },
+  "loss": "SmoothL1Loss",
+  "max_epochs": 100,
+  "optimizer": "AdamW",
+  "pretrained_weights": "EfficientNet_B0_Weights.DEFAULT (ImageNet)",
+  "seed": 44,
+  "split_snapshot": {
+    "files": {
+      "test": {
+        "count": 16,
+        "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/test.csv",
+        "sha256": "5f575acd82911efc9294de27d052c278119a31a9285d7b9d5552d8604f68f744"
+      },
+      "train": {
+        "count": 76,
+        "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/train.csv",
+        "sha256": "a1d881b1eb5238551fb5072409dbe9e18174ee5cb70587f3d8d7c003f07fbd47"
+      },
+      "validation": {
+        "count": 17,
+        "path": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/validation.csv",
+        "sha256": "2d27e16c7fa1097def134488949c5ce00b109def08fc015ea68e3e2c1c66db78"
+      }
+    },
+    "manifest": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-3-dataset-splits/snapshots/20260928T120720292607Z/manifest.json",
+    "manifest_sha256": "0e9b9e1419b52882b1de3e042a26b22dab7f8599128d864be86253d8bbcc58b2",
+    "name": "20260928T120720292607Z"
+  },
+  "test_evaluated": false,
+  "trainable_backbone_modules": []
+}
