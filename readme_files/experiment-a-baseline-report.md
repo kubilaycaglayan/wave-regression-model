@@ -18,8 +18,8 @@ All reported MAEs use the same validation images.
 
 Neural-network improvement percentages: training_mean 35.43%; training_median 36.41%
 
-Matching checkpoint: `/home/ubuntu/dev/deep-learning/wave-regression-model/step-5-checkpoints/v13-mae-0.1412-efficientnet_b0/wave-regression-efficientnet_b0-v13-best-val-mae-epoch=59-val_mae=0.1412.ckpt`
-Checkpoint manifest: `/home/ubuntu/dev/deep-learning/wave-regression-model/step-5-checkpoints/v13-mae-0.1412-efficientnet_b0/training_manifest_20260928T120902093327Z.json`
+Matching checkpoint: `/step-5-checkpoints/v13-mae-0.1412-efficientnet_b0/wave-regression-efficientnet_b0-v13-best-val-mae-epoch=59-val_mae=0.1412.ckpt`
+Checkpoint manifest: `/step-5-checkpoints/v13-mae-0.1412-efficientnet_b0/training_manifest_20260928T120902093327Z.json`
 Checkpoint SHA-256: `5065015f56a3ca05c12b78bce43bed7a339fc5cb864f0be1c1d25c91d8b3fc33`
 
 Test evaluated: **no**

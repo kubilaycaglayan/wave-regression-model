@@ -14,13 +14,18 @@ The model is trained on the final, lower-water image rather than the original ph
 Photo → sea segmentation and standardization → lower-water crop → waviness label → regression model
 ```
 
-![Example of sea-focused preprocessing](readme_files/step-1-preprocessed-sea-example.jpg)
-
-*The first preprocessing stage isolates and standardizes the sea area.*
-
-![Example of the lower-water crop](readme_files/step-2-pick-lower-water-area.jpg)
-
-*The next stage retains a lower section of the sea for model input.*
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="readme_files/step-1-preprocessed-sea-example.jpg" alt="Example of sea-focused preprocessing" width="100%" />
+      <br /><em>The first preprocessing stage isolates and standardizes the sea area.</em>
+    </td>
+    <td align="center" width="50%">
+      <img src="readme_files/step-2-pick-lower-water-area.jpg" alt="Example of the lower-water crop" width="100%" />
+      <br /><em>The next stage retains a lower section of the sea for model input.</em>
+    </td>
+  </tr>
+</table>
 
 The pipeline is designed for a dataset that grows over time. It processes new images while skipping outputs that already exist, so adding a new batch does not require starting every image from scratch. Images are labeled with a waviness score from 0 to 1, and training, validation, and test splits are managed separately.
 
