@@ -1,106 +1,70 @@
-# Wave regression preprocessing
+# Wave Waviness Regression
 
-See [README_RUN.md](README_RUN.md) for the full step-by-step run and retraining guide.
+This project explores whether a photo of the sea can help answer a familiar local question: **how wavy is the water today, and is it a good day to swim?** Swimming is part of everyday life where I live, and I used to check the sea from my window each morning. I started collecting photos to see whether a computer vision model could make that daily check more consistent.
 
-## Setup
+The repository contains an image-processing and model-training pipeline for a local swimming application. The model estimates **water waviness from an image**; it does not yet make a complete safety judgment.
 
-```bash
-pip install -r requirements.txt
+## How the pipeline prepares an image
+
+Photos are taken from roughly 200–300 metres from the sea, often from a few recurring locations and angles. The preprocessing pipeline focuses on the sea, removing visual distractions such as sky, buildings, beach, and sand. It then selects a region toward the bottom of the detected sea area, where waves near the coast are most relevant to the swimming experience.
+
+The model is trained on the final, lower-water image rather than the original photo:
+
+```text
+Photo → sea segmentation and standardization → lower-water crop → waviness label → regression model
 ```
 
-## Create water-mask previews
+![Example of sea-focused preprocessing](readme_files/step-1-preprocessed-sea-example.jpg)
 
-```bash
-python step_1_a_prepare_water_masks.py
-```
+*The first preprocessing stage isolates and standardizes the sea area.*
 
-Step 1 always includes `step-0-raw-data/`. Add more raw-image directories in
-`.env` by repeating the singular `DATA_PATH` entry:
+![Example of the lower-water crop](readme_files/step-2-pick-lower-water-area.jpg)
 
-```dotenv
-DATA_PATH=/path/to/camera/archive
-DATA_PATH=/path/to/another/archive
-```
+*The next stage retains a lower section of the sea for model input.*
 
-Directories are searched recursively, including nested folders. Each
-`DATA_PATH` value may also contain multiple paths separated by the platform
-path separator.
+The pipeline is designed for a dataset that grows over time. It processes new images while skipping outputs that already exist, so adding a new batch does not require starting every image from scratch. Images are labeled with a waviness score from 0 to 1, and training, validation, and test splits are managed separately.
 
-The pipeline folders are `step-0-raw-data/`, `step-1-processed-data/`, and
-`step-2-final-water-data/`. Step outputs use namespaced filenames such as
-`step-1_<original-name>` and `step-2_<original-name>`. Preview files and gallery
-are written to `step-1-water-mask-preview/`.
+## Model development
 
-To rerun segmentation with changed settings while retaining the existing
-result for comparison, use:
+The first model versions used a ResNet backbone. An early version reached a validation mean absolute error (MAE) of about **0.10**. As we added more photographs, the dataset also gained noisier or more ambiguous examples, and the validation MAE rose across subsequent versions, reaching about **0.17**.
 
-```bash
-python step_1_a_prepare_water_masks.py --skip-cache --keep-old
-```
+That prompted a set of controlled experiments to understand model behavior and improve it. We designed experiments in a way that they can be repeated, and the repeated experiment results will be recorded in versioned directories.
+### Experiment A — Constant prediction baselines
 
-The gallery then shows the original image plus the previous and current
-processor overlays and masks side by side. Previous files use an `_old`
-suffix, and an existing comparison baseline is not overwritten on later runs.
+We compared the neural network with simple predictions that always return the training-set mean or median. On the current 17-image validation split, the training-mean baseline had an MAE of **0.219**, while the selected EfficientNet-B0 model had an MAE of **0.141**. The comparison helps check that the model learns useful image information beyond the overall average. [Read the baseline report](readme_files/experiment-a-baseline-report.md).
 
-## Create standardized model inputs
+### Experiment B — Per-image error analysis
 
-```bash
-python step_1_b_preprocess_water_inputs.py
-```
+Aggregate MAE can hide individual failures. We plotted actual and predicted waviness for each validation image and reviewed prediction errors image by image. The analysis helps identify cases where the model performs well or struggles, and guides later data collection and experiments.
 
-This runs water segmentation, removes non-water pixels, and creates RGB `224x224` inputs in `step-1-processed-data/`.
+![Actual versus predicted waviness for the current validation run](readme_files/experiment-b-actual-vs-predicted.png)
 
-To force CPU processing:
+*Each point represents a validation image. The diagonal indicates a perfect prediction.*
 
-```bash
-python step_1_b_preprocess_water_inputs.py --device cpu
-```
+### Experiment C — Frozen backbone comparison
 
-Existing complete outputs are skipped, so the command can safely be rerun after interruption. Open `step-1-processed-data/index.html` directly in a browser to inspect the source and standardized images side by side.
+We compared frozen pretrained ResNet-18, ResNet-34, and EfficientNet-B0 backbones across three random seeds, using the same recent dataset split. EfficientNet-B0 had the lowest mean validation MAE: **0.152**, compared with **0.185** for ResNet-18 and **0.188** for ResNet-34. The backbones performed similarly in some respects, but EfficientNet-B0 gave the strongest average result in this experiment and became the preferred backbone for continued work.
 
-## Reduce black water area
+![Validation MAE comparison across frozen backbones](readme_files/experiment-c-validation-mae-comparison.png)
 
-```bash
-python step_2_a_reduce_black_water_area.py
-```
+*Mean validation MAE across three seeds; lower is better. This comparison used validation data, not the held-out test set.*
 
-This reads `step-1-processed-data/`, preserves the lower-wave region, and writes aspect-preserving
-224x224 results to `step-2-final-water-data/`. Open `step-2-final-water-data/index.html` to compare the last-step
-image with the new result.
+### Experiment D — Partial fine-tuning
 
-## Predict waviness
+Next, we unfroze the final layer of the EfficientNet-B0 backbone to test whether partial fine-tuning helped. It did not improve average validation MAE: the partially fine-tuned model scored **0.156**, compared with **0.152** for the frozen model, and it performed worse across all three paired seeds. For this dataset snapshot, the results favor keeping the backbone frozen. The validation set is small, so this is evidence for the current setup rather than a general claim. [Read the Experiment D report](readme_files/experiment-d-partial-finetuning-report.md).
 
-Put HEIC, HEIF, JPEG, or PNG photos in `step-7-predict-captures-holder/`, then run `python step_7_a_predict.py`; photos are predicted one by one and previews are saved in `step-7-inference-preview/`. Each photo also gets an append-only prediction history at `step-7-predict-captures-holder/predictions/<photo-stem>.txt`, including the prediction and checkpoint fingerprint.
+## Current status
 
-Configure the validation-selected checkpoint in `.env`:
+- The pipeline supports image preprocessing, labeling, dataset splits, training, evaluation, and inference.
+- EfficientNet-B0 is the current preferred backbone based on validation experiments.
+- The latest model reported here achieved **0.141 validation MAE** on 17 images. This is a validation result, not a test-set result.
+- The first model version is available on [Hugging Face](https://huggingface.co/kubilaycaglayan/wave-regression).
+- More varied, carefully labeled data is needed to evaluate how well predictions generalize across days, weather, locations, and camera angles.
 
-```dotenv
-# Use the exact best-checkpoint path printed by train.py.
-PREDICT_CHECKPOINT_PATH=step-5-checkpoints/vN-mae-<best-mae>-<backbone>/<best-checkpoint>.ckpt
-```
+## Run the project
 
-Test evaluation automatically selects the newest training manifest's best checkpoint. To pin a
-specific checkpoint for a reproducible historical evaluation, configure it separately:
+For installation, pipeline commands, labeling, training, and prediction instructions, see the [run guide](readme_files/README_RUN.md).
 
-```dotenv
-# Optional: use the exact checkpoint path to evaluate a specific run.
-EVALUATION_CHECKPOINT_PATH=step-5-checkpoints/vN-mae-<best-mae>-<backbone>/<checkpoint>.ckpt
-```
+## About this project
 
-Each evaluation is saved under `step-6-test-evaluation/` using the checkpoint filename and a
-checkpoint SHA-256 prefix, followed by the test split snapshot ID (when applicable) and test
-manifest SHA-256 prefix. The directory contains predictions, a summary, an inspection gallery,
-and metadata including the exact checkpoint and test-manifest fingerprints. Existing complete
-evaluations for the same checkpoint and manifest are skipped; a changed checkpoint or split gets
-a separate result directory. Older root-level files in this directory may be legacy outputs.
-
-Step 7 treats `step-7-inference-preview/<photo-stem>-model-input.jpg` as the checkpoint-independent, canonical preprocessed model input. Existing previews must be detached RGB `224x224` JPEG inputs; malformed previews fail clearly and are not replaced automatically. A valid preview is reused when selecting a different checkpoint, so only regression inference runs again. A photo is skipped only when its valid preview and a matching prediction record for the selected checkpoint both exist. If the preview is missing, Steps 1 and 2 run again even when a prediction record exists; delete a preview to force regeneration.
-
-## Discard unrelated or disrupted images
-
-Run the labeling app with `python step_2_b_label_data.py`. The labeling screen
-has a **Discard** button (and the `D` keyboard shortcut). A discard is recorded
-in `discarded_images.csv` with an optional reason and timestamp. Discarded
-images are removed from the labeling queue and excluded from dataset splits,
-training, validation, and test evaluation. If an image had a label already,
-that label is removed when the image is discarded.
+This is a learning project built around a practical local question. The goal is to make each pipeline stage inspectable, preserve experiment results, and improve the model as new sea photographs and labels are collected.
