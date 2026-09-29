@@ -31,7 +31,17 @@ The first model versions used a ResNet backbone. An early version reached a vali
 That prompted a set of controlled experiments to understand model behavior and improve it. We designed experiments in a way that they can be repeated, and the repeated experiment results will be recorded in versioned directories.
 ### Experiment A — Constant prediction baselines
 
-We compared the neural network with simple predictions that always return the training-set mean or median. On the current 17-image validation split, the training-mean baseline had an MAE of **0.219**, while the selected EfficientNet-B0 model had an MAE of **0.141**. The comparison helps check that the model learns useful image information beyond the overall average. [Read the baseline report](readme_files/experiment-a-baseline-report.md).
+We compared the neural network with two simple guesses that do not use the validation photos, then measured them against the network's image-based predictions. Here is how the experiment works:
+
+1. Calculate the average waviness label from the training photos.
+2. <img src="readme_files/badge-blind-average.svg" alt="BLIND AVERAGE" height="18" style="vertical-align: middle" /> Assign that same average score as the guess for every validation photo, without looking at the photo.
+3. Compare each fixed guess with that validation photo's actual waviness label.
+4. Calculate the average error across all validation photos. This is the baseline's mean absolute error (MAE).
+5. <img src="readme_files/badge-blind-medium.svg" alt="BLIND MEDIUM" height="18" style="vertical-align: middle" /> Repeat steps 2–4 using the middle training-set score (the median) as the same fixed guess for every validation photo.
+6. <img src="readme_files/badge-actual-prediction.svg" alt="ACTUAL PREDICTION" height="18" style="vertical-align: middle" /> Load the selected neural network checkpoint and give it each validation image. The model looks at each image and predicts its waviness score.
+7. Compare the model's MAE with the two baseline MAEs, calculated on the same validation photos.
+
+In this run, the training-mean baseline had an MAE of **0.219**, the training-median baseline had an MAE of **0.222**, and the EfficientNet-B0 model had an MAE of **0.141** on 17 validation images. Lower MAE means the predictions were closer to the actual labels on average. The test set was not evaluated in this experiment. [Read the baseline report](readme_files/experiment-a-baseline-report.md).
 
 ### Experiment B — Per-image error analysis
 
@@ -63,7 +73,7 @@ Next, we unfroze the final layer of the EfficientNet-B0 backbone to test whether
 
 ## Run the project
 
-For installation, pipeline commands, labeling, training, and prediction instructions, see the [run guide](readme_files/README_RUN.md).
+For installation, pipeline commands, labeling, training, and prediction instructions, see the [run guide](README_RUN.md).
 
 ## About this project
 
