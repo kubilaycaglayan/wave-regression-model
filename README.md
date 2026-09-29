@@ -1,4 +1,4 @@
-# Wave Waviness Regression
+# Sea Wave Regression Model
 
 This project explores whether a photo of the sea can help answer a familiar local question: **how wavy is the water today, and is it a good day to swim?** Swimming is part of everyday life where I live, and I used to check the sea from my window each morning. I started collecting photos to see whether a computer vision model could make that daily check more consistent.
 
