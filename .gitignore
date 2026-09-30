@@ -19,6 +19,9 @@ step-7-inference-preview/
 *.log
 .ckpt
 
+# Generated image assets for the isolated augmentation experiment.
+step-4-experiment-augmentation/*.jpg
+
 step-1-processed-data/index.html
 step-1-water-mask-preview/index.html
 
