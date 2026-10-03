@@ -143,16 +143,11 @@ def run_overlapping_segmentation(
     tile_count = len(left_starts) * len(top_starts)
     class_count = segmentation_model.model.config.num_labels
 
-    accumulated_logits = torch.zeros(
-        (class_count, height, width),
-        dtype=torch.float32,
-        device=segmentation_model.device,
-    )
-    coverage = torch.zeros(
-        (height, width),
-        dtype=torch.float32,
-        device=segmentation_model.device,
-    )
+    # The full-resolution logit sum (150 classes x 12 MP = ~7 GB) lives in CPU
+    # RAM: it does not fit a small GPU, so only the model runs on the device.
+    # Dividing by tile coverage is skipped because a positive per-pixel scale
+    # cannot change the argmax.
+    accumulated_logits = torch.zeros((class_count, height, width), dtype=torch.float32)
 
     for top in top_starts:
         for left in left_starts:
@@ -171,11 +166,9 @@ def run_overlapping_segmentation(
                 mode="bilinear",
                 align_corners=False,
             )[0]
-            accumulated_logits[:, top:bottom, left:right] += logits
-            coverage[top:bottom, left:right] += 1.0
+            accumulated_logits[:, top:bottom, left:right] += logits.cpu()
 
-    class_map = (accumulated_logits / coverage.clamp_min(1.0)).argmax(dim=0)
-    result = class_map.to(torch.uint8).cpu()
+    result = accumulated_logits.argmax(dim=0).to(torch.uint8)
 
     if LOG_TILE_TIMING:
         elapsed = time.perf_counter() - started
