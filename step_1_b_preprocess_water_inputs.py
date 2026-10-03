@@ -19,12 +19,13 @@ from data_sources import SourceOutputNames, configured_source_directories
 
 from step_1_a_water_segmentation import (
     SegmentationModel,
+    configure_inference_device,
     extract_water_mask,
     iter_images,
-    load_model,
     load_rgb_image,
     run_segmentation,
 )
+from step_1_b_parallel_workers import run_segmentation_tasks, select_worker_count
 
 OUTPUT_SIZE = (224, 224)
 
@@ -113,12 +114,53 @@ def processed_paths(source_path: Path, output_dir: Path, names: SourceOutputName
     return output_dir / f"step-1_{stem}.jpg"
 
 
+def write_output_atomically(standardized: Image.Image, standardized_path: Path) -> None:
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=standardized_path.parent,
+            prefix=f".{standardized_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(encode_step_1_output(standardized))
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, standardized_path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def process_image(
+    model: SegmentationModel, source_path: Path, standardized_path: Path
+) -> tuple[str, float, str | None]:
+    """Process one pending image; returns (status, seconds, warning)."""
+    started = time.perf_counter()
+    try:
+        standardized = preprocess_raw_image(load_rgb_image(source_path), model)
+        if standardized is None:
+            return "skipped", time.perf_counter() - started, "no reliable water region"
+        write_output_atomically(standardized, standardized_path)
+        return "processed", time.perf_counter() - started, None
+    except Exception as error:
+        return "skipped", time.perf_counter() - started, str(error)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-dir", type=Path, action="append", help="Additional input directory; repeatable")
     parser.add_argument("--output-dir", type=Path, default=Path("step-1-processed-data"))
     parser.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")
+    parser.add_argument(
+        "--workers", type=int, default=None,
+        help="parallel worker processes, each with its own model (default: chosen from free memory)",
+    )
     args = parser.parse_args()
+    if args.workers is not None and args.workers < 1:
+        parser.error("--workers must be at least 1")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     source_dirs = configured_source_directories()
     if args.input_dir:
@@ -126,66 +168,49 @@ def main() -> None:
     image_paths = iter_images(source_dirs)
     if not image_paths:
         raise SystemExit(f"No supported images found in: {', '.join(str(path) for path in source_dirs)}")
-    model = None
     names = SourceOutputNames(
         image_paths,
         args.output_dir,
         (".jpg",),
         output_paths_for_stem=lambda stem: (args.output_dir / f"step-1_{stem}.jpg",),
     )
-    entries, skipped = [], []
-    already_present = 0
-    processing_seconds = 0.0
+    total = len(image_paths)
+    entries: dict[int, tuple[str, Path, Path]] = {}
+    skipped: list[str] = []
+    pending: list[tuple[int, Path, Path]] = []
     for index, source_path in enumerate(image_paths, 1):
-        image_started = time.perf_counter()
-        try:
-            standardized_path = processed_paths(source_path, args.output_dir, names)
-            names.save()
-            if standardized_path.exists():
-                print(f"[{index}/{len(image_paths)}] {source_path.name}: skipped (standardized input already exists)")
-                entries.append((source_path.name, source_path, standardized_path))
-                already_present += 1
-                continue
-            if model is None:
-                model = load_model(args.device)
-            image = load_rgb_image(source_path)
-            standardized = preprocess_raw_image(image, model)
-            if standardized is None:
-                print(f"[{index}/{len(image_paths)}] {source_path.name}: WARNING: no reliable water region; skipped")
-                skipped.append(source_path.name)
-                continue
-            temporary_path: Path | None = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    dir=standardized_path.parent,
-                    prefix=f".{standardized_path.name}.",
-                    suffix=".tmp",
-                    delete=False,
-                ) as temporary:
-                    temporary_path = Path(temporary.name)
-                    temporary.write(encode_step_1_output(standardized))
-                    temporary.flush()
-                    os.fsync(temporary.fileno())
-                os.replace(temporary_path, standardized_path)
-                temporary_path = None
-            finally:
-                if temporary_path is not None:
-                    temporary_path.unlink(missing_ok=True)
-            entries.append((source_path.name, source_path, standardized_path))
-            elapsed = time.perf_counter() - image_started
-            processing_seconds += elapsed
-            print(f"[{index}/{len(image_paths)}] {source_path.name}: processed ({elapsed:.3f}s)")
-        except Exception as error:
-            elapsed = time.perf_counter() - image_started
-            processing_seconds += elapsed
-            print(f"[{index}/{len(image_paths)}] {source_path.name}: WARNING: {error}; skipped ({elapsed:.3f}s)")
-            skipped.append(source_path.name)
-    write_gallery(entries, args.output_dir)
+        standardized_path = processed_paths(source_path, args.output_dir, names)
+        if standardized_path.exists():
+            print(f"[{index}/{total}] {source_path.name}: skipped (standardized input already exists)")
+            entries[index] = (source_path.name, source_path, standardized_path)
+        else:
+            pending.append((index, source_path, standardized_path))
     names.save()
+    already_present = len(entries)
+
+    processing_seconds = 0.0
+    run_started = time.perf_counter()
+    if pending:
+        device = configure_inference_device(args.device)
+        workers = select_worker_count(args.workers, device, len(pending))
+        tasks = {index: (source_path, standardized_path) for index, source_path, standardized_path in pending}
+        results = run_segmentation_tasks(process_image, tasks, str(device), workers)
+        for index, (status, elapsed, warning) in results:
+            source_path, standardized_path = tasks[index]
+            processing_seconds += elapsed
+            if status == "processed":
+                entries[index] = (source_path.name, source_path, standardized_path)
+                print(f"[{index}/{total}] {source_path.name}: processed ({elapsed:.3f}s)")
+            else:
+                skipped.append(source_path.name)
+                print(f"[{index}/{total}] {source_path.name}: WARNING: {warning}; skipped ({elapsed:.3f}s)")
+
+    write_gallery([entries[index] for index in sorted(entries)], args.output_dir)
     print(f"Processed: {len(entries) - already_present}")
     print(f"Already present: {already_present}")
     print(f"Skipped: {len(skipped)}")
-    print(f"Processing time: {processing_seconds:.3f}s")
+    print(f"Processing time: {processing_seconds:.3f}s (sum of per-image times)")
+    print(f"Wall time: {time.perf_counter() - run_started:.3f}s")
     if skipped:
         print("Skipped files:")
         for filename in skipped:
