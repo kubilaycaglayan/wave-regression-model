@@ -125,11 +125,23 @@ def run_overlapping_segmentation(
     tile_count = len(left_starts) * len(top_starts)
     class_count = segmentation_model.model.config.num_labels
 
-    # The full-resolution logit sum (150 classes x 12 MP = ~7 GB) lives in CPU
-    # RAM: it does not fit a small GPU, so only the model runs on the device.
-    # Dividing by tile coverage is skipped because a positive per-pixel scale
-    # cannot change the argmax.
-    accumulated_logits = torch.zeros((class_count, height, width), dtype=torch.float32)
+    # Keep the full-resolution accumulator on the GPU when it fits. This avoids
+    # copying every tile's logits to host RAM. Leave headroom for the model and
+    # current tile activations; small cards continue to use the CPU accumulator.
+    accumulator_device = torch.device("cpu")
+    accumulator_bytes = class_count * height * width * torch.tensor([], dtype=torch.float32).element_size()
+    if segmentation_model.device.type == "cuda":
+        free_bytes, _ = torch.cuda.mem_get_info(segmentation_model.device)
+        headroom_bytes = max(2 * 1024**3, int(free_bytes * 0.25))
+        if free_bytes - accumulator_bytes >= headroom_bytes:
+            accumulator_device = segmentation_model.device
+    accumulated_logits = torch.zeros(
+        (class_count, height, width), dtype=torch.float32, device=accumulator_device
+    )
+    print(
+        f"Logit accumulator: {accumulator_device} "
+        f"({accumulator_bytes / 1024**3:.2f} GiB); model inference: {segmentation_model.device}"
+    )
 
     for top in top_starts:
         for left in left_starts:
@@ -148,9 +160,9 @@ def run_overlapping_segmentation(
                 mode="bilinear",
                 align_corners=False,
             )[0]
-            accumulated_logits[:, top:bottom, left:right] += logits.cpu()
+            accumulated_logits[:, top:bottom, left:right] += logits.to(accumulator_device)
 
-    result = accumulated_logits.argmax(dim=0).to(torch.uint8)
+    result = accumulated_logits.argmax(dim=0).to(device="cpu", dtype=torch.uint8)
 
     if LOG_TILE_TIMING:
         elapsed = time.perf_counter() - started
