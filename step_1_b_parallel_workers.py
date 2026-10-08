@@ -49,14 +49,25 @@ def automatic_worker_count(device: torch.device, pending: int) -> tuple[int, str
         return 1, "one pending image"
     if device.type != "cuda":
         return 1, "CPU inference already uses every core"
-    gpu_gb = torch.cuda.get_device_properties(device).total_memory / 1024**3
+    # Use free device memory, not installed capacity: another process (or a
+    # prior allocation in this process) may already be using a large share.
+    # On ROCm, PyTorch exposes AMD GPUs through the same torch.cuda API; on an
+    # integrated GPU this may be shared system memory, so the RAM cap below
+    # remains an independent constraint.
+    try:
+        free_gpu_bytes, _ = torch.cuda.mem_get_info(device)
+    except (RuntimeError, AssertionError):
+        # If the backend cannot report free memory reliably, choose the safe
+        # single-worker option instead of sizing from total capacity.
+        free_gpu_bytes = 0
+    gpu_free_gb = free_gpu_bytes / 1024**3
     ram_gb = available_ram_gb()
-    by_gpu = int(gpu_gb // WORKER_GPU_MEMORY_GB)
+    by_gpu = int(gpu_free_gb // WORKER_GPU_MEMORY_GB)
     by_ram = int(ram_gb // WORKER_RAM_GB) if ram_gb is not None else 1
     workers = max(1, min(by_gpu, by_ram, pending))
     ram_text = f"{ram_gb:.1f} GB" if ram_gb is not None else "unknown"
     return workers, (
-        f"GPU {gpu_gb:.1f} GB / {WORKER_GPU_MEMORY_GB} GB -> {by_gpu}, "
+        f"free GPU memory {gpu_free_gb:.1f} GiB / {WORKER_GPU_MEMORY_GB:.1f} GiB per worker -> {by_gpu}, "
         f"available RAM {ram_text} / {WORKER_RAM_GB} GB -> {by_ram}, pending {pending}"
     )
 
