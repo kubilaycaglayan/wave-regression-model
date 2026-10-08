@@ -176,10 +176,14 @@ def read_split_csv(path: Path, samples_by_name: dict[str, Sample], discarded: se
                 raise ValueError(f"{path}:{row_number}: invalid waviness") from error
             sample = samples_by_name[filename]
             if value != sample.waviness:
-                raise ValueError(
-                    f"{path}:{row_number}: label changed for existing sample {filename}; "
-                    "existing assignments are immutable"
+                warning = (
+                    f"Label correction: {filename} remains in its existing split; "
+                    f"using current labels.csv value {sample.waviness:.2f} "
+                    f"(previous registry value {value:.2f}; {path}:{row_number})"
                 )
+                print(f"\033[91mWARNING: {warning}\033[0m")
+            # Membership remains fixed, while corrected labels flow into the next
+            # current manifest and immutable snapshot. Historical snapshots are untouched.
             samples.append(sample)
     if len({sample.filename for sample in samples}) != len(samples):
         raise ValueError(f"Duplicate filenames found in {path}")
