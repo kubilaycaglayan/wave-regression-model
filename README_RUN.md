@@ -193,7 +193,7 @@ This validates that:
 - filenames are unique and contain an image number;
 - no capture group is split across train, validation, and test.
 
-Existing assignments remain fixed. New capture groups are assigned incrementally, so previously trained data is not randomly reshuffled.
+Existing split membership remains fixed. New samples are assigned incrementally, so previously trained data is not randomly reshuffled. If you correct a label in `labels.csv`, the sample stays in its current split and the next snapshot uses the corrected value; prior snapshots remain unchanged. Images in `discarded_images.csv` are omitted from the next current manifests and snapshot.
 
 Review:
 
@@ -365,5 +365,5 @@ runs without training.
 
 - `step_1_a_prepare_water_masks.py` is an inspection step; `step_1_b_preprocess_water_inputs.py` is the actual Step 1 training-data preparation.
 - Do not train directly from raw photos. Training uses the Step 2 outputs.
-- Do not delete or reshuffle existing split manifests; the repository intentionally preserves previous assignments.
+- Existing sample split membership is preserved across updates. Label corrections and discarded samples are reflected in new snapshots; historical snapshots remain unchanged for reproducibility.
 - `step_6_a_evaluate_test.py` uses `test.csv` from the latest split snapshot by default and automatically selects the newest training manifest's best checkpoint. Set `EVALUATION_CHECKPOINT_PATH` to pin a historical checkpoint, or pass `--test-manifest` to select a test CSV. Results are stored under checkpoint- and split-manifest-specific directories in `step-6-test-evaluation/`; complete matching evaluations are reused on later runs.
