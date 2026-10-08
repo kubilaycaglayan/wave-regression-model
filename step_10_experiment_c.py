@@ -21,7 +21,7 @@ from typing import Any, Iterable
 import torch
 from torch import nn
 
-# Install the repository's torchvision compatibility definition first.
+# Import the shared dataset and transform definitions before model setup.
 from step_4_a_wave_dataset import (  # noqa: F401
     IMAGE_SIZE,
     IMAGENET_MEAN,

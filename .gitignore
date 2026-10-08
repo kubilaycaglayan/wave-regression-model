@@ -9,9 +9,13 @@ step-7-predict-captures-holder/*
 **/.source-manifest.json
 
 # Local Python bytecode.
+.venv/
 __pycache__/
 __pycache__/*
 *.py[cod]
+
+# Machine-specific GPU runtime pins.
+/requirements-rocm-*.txt
 
 # Local training and inference artifacts.
 step-4-data-preview/

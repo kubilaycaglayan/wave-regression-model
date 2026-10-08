@@ -1,25 +1,8 @@
-# Run guide
+# Pipeline run guide
 
-Use Python 3.14 on this machine and run commands from the repository root.
-Create an isolated environment, then install the ROCm-enabled runtime dependency
-list for its AMD Radeon 8060S GPU:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
-
-For a machine without a supported GPU runtime, use
-`python -m pip install -r requirements-cpu.txt` instead. AMD's ROCm runtime and
-GPU driver must already be installed by the system administrator; Python
-requirements provide the ROCm-enabled PyTorch libraries.
-
-The training, evaluation, and prediction scripts may download pretrained
-weights the first time they run, so those commands need network access on their
-first run. Put the input photos in `step-0-raw-data/` before starting the
-preprocessing pipeline below.
+Set up Python and install dependencies as described in the main
+[README](README.md#run-the-project). Then return here to follow the pipeline
+steps. Put the input photos in `step-0-raw-data/` before starting.
 
 ```bash
 python step_1_b_preprocess_water_inputs.py
