@@ -10,9 +10,9 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Install the repository's torchvision compatibility definition before
-# Lightning imports torchmetrics (which imports torchvision transitively).
-import step_4_a_wave_dataset  # noqa: F401
+from torchvision_compat import ensure_torchvision_operator_schemas
+
+ensure_torchvision_operator_schemas()
 
 import lightning.pytorch as pl
 import torch

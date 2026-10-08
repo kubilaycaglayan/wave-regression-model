@@ -7,10 +7,9 @@ from typing import Any
 
 import torch
 from torch import nn
+from torchvision_compat import ensure_torchvision_operator_schemas
 
-# Import first so the repository's torchvision compatibility definition is
-# installed before torchvision is imported by Lightning/torchmetrics.
-import step_4_a_wave_dataset  # noqa: F401
+ensure_torchvision_operator_schemas()
 
 import lightning.pytorch as pl
 from torchvision.models import (
