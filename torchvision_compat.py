@@ -27,12 +27,16 @@ def _load_native_torchvision_extension() -> None:
     if not candidates:
         return
 
-    try:
-        torch.ops.load_library(str(candidates[0]))
-    except (OSError, RuntimeError):
-        # A missing dependency or an incompatible binary is the case the
-        # schema fallback below is intended to handle.
-        return
+    # Newer TorchVision wheels may split operators across _C and _C_stable.
+    # Load each one before probing schemas so the fallback cannot shadow a
+    # schema that the stable extension registers.
+    for candidate in candidates:
+        try:
+            torch.ops.load_library(str(candidate))
+        except (ImportError, OSError, RuntimeError):
+            # A missing dependency or incompatible binary is the case the
+            # schema fallback below is intended to handle.
+            continue
 
 
 def ensure_torchvision_operator_schemas() -> bool:
