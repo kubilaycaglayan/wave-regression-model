@@ -1,7 +1,27 @@
 # Run guide
 
+Use Python 3.14 on this machine and run commands from the repository root.
+Create an isolated environment, then install the ROCm-enabled runtime dependency
+list for its AMD Radeon 8060S GPU:
+
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+For a machine without a supported GPU runtime, use
+`python -m pip install -r requirements-cpu.txt` instead. AMD's ROCm runtime and
+GPU driver must already be installed by the system administrator; Python
+requirements provide the ROCm-enabled PyTorch libraries.
+
+The training, evaluation, and prediction scripts may download pretrained
+weights the first time they run, so those commands need network access on their
+first run. Put the input photos in `step-0-raw-data/` before starting the
+preprocessing pipeline below.
+
+```bash
 python step_1_b_preprocess_water_inputs.py
 python step_2_a_reduce_black_water_area.py
 python step_2_b_label_data.py        # labeling UI at http://localhost:8055, saves labels.csv
@@ -25,24 +45,6 @@ python step_7_a_predict.py
 Notes: steps skip existing outputs, so reruns are safe. Use `--device cpu` on the step 1/2 scripts to force CPU.
 
 Step 7 reuses valid cached inference previews when switching checkpoints.
-
-## Experiment D: frozen vs partially fine-tuned EfficientNet-B0
-
-Read the [Experiment D protocol](step-11-experiment-d-efficientnet-partial-finetuning/EXPERIMENT-D.md)
-and [configuration audit](step-11-experiment-d-efficientnet-partial-finetuning/CONFIGURATION_AUDIT.md).
-To run all six paired seeds on the specified immutable snapshot:
-
-```bash
-python step_11_experiment_d.py
-```
-
-Each execution writes to a version directory under
-`step-11-experiment-d-efficientnet-partial-finetuning/`. Interrupted matching
-versions resume completed runs safely; use `--force-new` to start a separate
-version. Use `--dry-run` to validate the snapshot and list the six planned
-runs without training.
-
----
 
 The repository’s retraining flow is:
 
@@ -359,6 +361,22 @@ python step_10_experiment_c.py
 ```
 
 Step 10 compares three frozen ImageNet backbones across three seeds using the newest valid dataset split by default. Results are kept in a versioned folder under `step-10-experiment-c-frozen-backbone-comparison/`. Pass `--dry-run` to check the selected split and planned runs without training.
+
+## Step 11: Experiment D — frozen vs partially fine-tuned EfficientNet-B0
+
+Read the [Experiment D protocol](step-11-experiment-d-efficientnet-partial-finetuning/EXPERIMENT-D.md)
+and [configuration audit](step-11-experiment-d-efficientnet-partial-finetuning/CONFIGURATION_AUDIT.md).
+To run all six paired seeds on the specified immutable snapshot:
+
+```bash
+python step_11_experiment_d.py
+```
+
+Each execution writes to a version directory under
+`step-11-experiment-d-efficientnet-partial-finetuning/`. Interrupted matching
+versions resume completed runs safely; use `--force-new` to start a separate
+version. Use `--dry-run` to validate the snapshot and list the six planned
+runs without training.
 
 ## Important notes
 
