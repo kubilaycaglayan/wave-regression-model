@@ -1,0 +1,7 @@
+lightning
+torchmetrics
+transformers>=4.30,<5
+pillow
+pillow-heif
+numpy
+matplotlib
