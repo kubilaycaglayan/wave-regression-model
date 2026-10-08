@@ -21,7 +21,10 @@ import torch
 
 from step_1_a_water_segmentation import MODEL_NAME, SegmentationModel, load_model
 
-WORKER_GPU_MEMORY_GB = 1.6
+# A 12 MP, 150-class float32 logit accumulator needs about 6.7 GiB when it
+# fits on CUDA, in addition to model weights and tile activations. Keep worker
+# sizing conservative; smaller GPUs use the CPU accumulator automatically.
+WORKER_GPU_MEMORY_GB = 9.0
 WORKER_RAM_GB = 9.0
 
 # A task function receives the worker's model followed by the task arguments.
