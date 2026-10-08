@@ -82,7 +82,30 @@ Next, we unfroze the final layer of the EfficientNet-B0 backbone to test whether
 
 ## Run the project
 
-For installation, pipeline commands, labeling, training, and prediction instructions, see the [run guide](README_RUN.md).
+### Set up the environment
+
+Run commands from the repository root. Use Python 3.14 on this machine and
+create an isolated environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+```
+
+This machine uses AMD gfx1151 with ROCm 10.1, so install its local runtime
+requirements with `python -m pip install -r requirements-rocm-gfx1151.txt`.
+That machine-specific file is ignored by Git. On a standard machine, install
+the default dependencies with `python -m pip install -r requirements.txt`; on a
+CPU-only machine, use `python -m pip install -r requirements-cpu.txt` instead.
+The AMD ROCm runtime and GPU driver must already be installed by the system
+administrator.
+
+Training, evaluation, and prediction may download pretrained weights on their
+first run, so those commands need network access then.
+
+After setup, follow the [pipeline run guide](README_RUN.md) for preprocessing,
+labeling, training, evaluation, and prediction steps.
 
 ## About this project
 
