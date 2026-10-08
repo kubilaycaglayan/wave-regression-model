@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Callable, Mapping
 
 import torch
+from torchvision_compat import ensure_torchvision_operator_schemas
+
+ensure_torchvision_operator_schemas()
+
 from PIL import Image
 from transformers.utils import logging as transformers_logging
 

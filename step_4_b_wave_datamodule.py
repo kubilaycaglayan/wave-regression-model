@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Import the dataset module first: it installs a small torchvision compatibility
-# definition before Lightning imports torchmetrics/torchvision transitively.
+# Import the dataset module first so its transforms and conditional TorchVision
+# compatibility fallback load before Lightning imports TorchVision indirectly.
 from step_4_a_wave_dataset import WaveDataset, build_evaluation_transform, build_training_transform
 
 import lightning.pytorch as pl

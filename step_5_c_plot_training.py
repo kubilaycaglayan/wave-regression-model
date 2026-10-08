@@ -7,6 +7,10 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
+from torchvision_compat import ensure_torchvision_operator_schemas
+
+ensure_torchvision_operator_schemas()
+
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import Callback
 

@@ -9,30 +9,9 @@ from typing import Callable
 import torch
 
 from image_loading import load_rgb_image
+from torchvision_compat import ensure_torchvision_operator_schemas
 
-
-# Some environments have a torchvision wheel whose optional C++ operators do
-# not match the installed torch wheel. Defining the operator before importing
-# torchvision keeps the ordinary transforms usable in that situation.
-_TORCHVISION_COMPAT_LIBRARY = None
-
-
-def _register_torchvision_compat_ops() -> None:
-    global _TORCHVISION_COMPAT_LIBRARY
-    try:
-        _TORCHVISION_COMPAT_LIBRARY = torch.library.Library("torchvision", "DEF")
-        for operator in ("nms", "qnms"):
-            try:
-                _TORCHVISION_COMPAT_LIBRARY.define(
-                    f"{operator}(Tensor boxes, Tensor scores, float iou_threshold) -> Tensor"
-                )
-            except RuntimeError:
-                pass
-    except RuntimeError:
-        pass
-
-
-_register_torchvision_compat_ops()
+ensure_torchvision_operator_schemas()
 
 from torchvision import transforms  # noqa: E402
 

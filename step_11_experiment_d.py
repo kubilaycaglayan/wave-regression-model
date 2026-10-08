@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import step_4_a_wave_dataset  # register torchvision compatibility ops first
+import step_4_a_wave_dataset  # load transforms and conditional TorchVision fallback first
 import lightning.pytorch as pl
 import torch
 from torch import nn

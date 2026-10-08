@@ -13,27 +13,9 @@ from PIL import Image
 
 from image_loading import load_rgb_image
 from data_sources import iter_images
+from torchvision_compat import ensure_torchvision_operator_schemas
 
-_TORCHVISION_COMPAT_LIBRARY = None
-
-
-def register_torchvision_compat_ops() -> None:
-    """Allow Transformers to import with a mismatched TorchVision wheel."""
-    global _TORCHVISION_COMPAT_LIBRARY
-    try:
-        _TORCHVISION_COMPAT_LIBRARY = torch.library.Library("torchvision", "DEF")
-        for operator in ("nms", "qnms"):
-            try:
-                _TORCHVISION_COMPAT_LIBRARY.define(
-                    f"{operator}(Tensor boxes, Tensor scores, float iou_threshold) -> Tensor"
-                )
-            except RuntimeError:
-                pass
-    except RuntimeError:
-        pass
-
-
-register_torchvision_compat_ops()
+ensure_torchvision_operator_schemas()
 
 from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
 
