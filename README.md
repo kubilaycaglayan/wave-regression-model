@@ -1,5 +1,7 @@
 # Sea Wave Regression Model
 
+[![neural-networks](https://img.shields.io/static/v1?message=neural-networks&color=2f6feb&style=flat-square)](https://github.com/topics/neural-networks) [![regression-model](https://img.shields.io/static/v1?message=regression-model&color=2f6feb&style=flat-square)](https://github.com/topics/regression-model) [![python](https://img.shields.io/static/v1?message=python&color=2f6feb&style=flat-square)](https://github.com/topics/python)
+
 This neural network takes a photo of the **sea** and estimates water waviness as a number from **0 to 1**. A score of 0 represents very calm water; a score of 1 represents very wavy water that may be dangerous for swimming. The score describes waviness and is not, by itself, a complete swimming safety assessment.
 
 <img src="readme_files/waviness-scale.svg" alt="Waviness score scale from 0, very calm water, to 1, very wavy water that may be dangerous to swim, with guidance for fun waves and taking precautions" width="85%" />
