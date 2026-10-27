@@ -153,7 +153,7 @@ PAGE = r'''<!doctype html>
     function orderedImages() {
       const list = [...state.images];
       const score = (name) => state.labels[name];
-      if (state.sort === 'unlabeled') return list.sort((a,b) => (score(a) === undefined) - (score(b) === undefined) || a.localeCompare(b));
+      if (state.sort === 'unlabeled') return list.sort((a,b) => (score(b) === undefined) - (score(a) === undefined) || a.localeCompare(b));
       if (state.sort === 'high') return list.sort((a,b) => (score(b) ?? -1) - (score(a) ?? -1) || a.localeCompare(b));
       if (state.sort === 'low') return list.sort((a,b) => (score(a) ?? 2) - (score(b) ?? 2) || a.localeCompare(b));
       return list.sort((a,b) => a.localeCompare(b));
