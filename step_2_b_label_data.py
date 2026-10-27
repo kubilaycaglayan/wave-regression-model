@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from PIL import Image
 
 from image_loading import load_rgb_image
+from step_1_c_preprocessing_profiles import get_profile
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -744,11 +745,19 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the local sea-waviness labeling app")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), default="fast-v1")
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--port", type=int, default=8055)
     args = parser.parse_args()
+    profile = get_profile(args.profile)
+    global IMAGE_DIR, SOURCE_MANIFEST_PATH, SPLIT_OUTPUT_DIR, SPLIT_SNAPSHOT_DIR
+    IMAGE_DIR = PROJECT_DIR / profile.step2_dir
+    SOURCE_MANIFEST_PATH = PROJECT_DIR / profile.step1_dir / ".source-manifest.json"
+    SPLIT_OUTPUT_DIR = PROJECT_DIR / profile.split_dir
+    SPLIT_SNAPSHOT_DIR = SPLIT_OUTPUT_DIR / "snapshots"
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Labeling app: http://{args.host}:{args.port}")
+    print(f"Preprocessing profile: {profile.name}")
     print(f"Images: {IMAGE_DIR}")
     print("Press Ctrl+C to stop.")
     try:

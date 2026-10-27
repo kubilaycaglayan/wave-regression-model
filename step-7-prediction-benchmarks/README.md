@@ -4,7 +4,7 @@ This is the canonical record for the Step 7 prediction performance experiment: i
 
 ## Experiment question
 
-Can Step 7 produce a waviness prediction quickly enough for incoming photos while retaining useful water masks and wave detail? The normal prediction path remains the default. The faster path is experimental and must be paired with the checkpoint trained for its preprocessing settings.
+Can Step 7 produce a waviness prediction quickly enough for incoming photos while retaining useful water masks and wave detail? Prediction selects preprocessing from the chosen checkpoint: baseline checkpoints keep the baseline path, and `fast-v1` checkpoints use the shared fast path described below.
 
 ## Current fast configuration
 
@@ -17,7 +17,11 @@ Can Step 7 produce a waviness prediction quickly enough for incoming photos whil
 | Regression model | Selected v16 EfficientNet-B0 checkpoint | Separate adapted head checkpoint; backbone frozen |
 | Model input | 224 × 224 Step 2 crop | 224 × 224 Step 2 crop |
 
-The fast settings alter masks and selected crops, so existing original-path previews must not be reused. Experimental previews and prediction records are stored in a separate settings-and-code-specific namespace. The checkpoint contract checks preprocessing values, model revision, device type, PyTorch version, and relevant code hashes before allowing inference.
+The fast settings alter masks and selected crops, so existing original-path previews must not be reused. Prediction previews and records are stored in a separate settings-and-code-specific namespace. The checkpoint contract checks preprocessing values, model revision, device type, PyTorch version, and relevant code hashes before allowing inference.
+
+## Shared training and prediction profile
+
+The fast settings are now exposed as the shared `fast-v1` preprocessing profile. Step 1 and Step 2 write into `step-1-processed-data/` and `step-2-final-water-data/`, beside their `archive/` directories. Step 3 records each profile in a new timestamped snapshot under `step-3-dataset-splits/snapshots/`; it retains the existing split registry and versioned snapshot structure. Step 5 saves another numbered checkpoint under `step-5-checkpoints/`, with `-fast` appended after the backbone name. Training checkpoints record the Step 2 preprocessing contract; one-shot prediction and the watcher select that profile from the checkpoint, while Step 6 evaluates against the matching Step 2 images and split snapshot. The batch Step 1 and Step 2 commands require CUDA for `fast-v1`; select `baseline-v16` for CPU preprocessing.
 
 ## Findings so far
 

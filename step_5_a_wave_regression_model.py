@@ -116,6 +116,12 @@ class WaveRegressionModel(pl.LightningModule):
         self.train_mae = MeanAbsoluteError()
         self.val_mae = MeanAbsoluteError()
         self.val_rmse = MeanSquaredError(squared=False)
+        self.fast_preprocessing_experiment: dict[str, Any] | None = None
+
+    def on_save_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        """Bind fast-profile training checkpoints to their preprocessing contract."""
+        if self.fast_preprocessing_experiment is not None:
+            checkpoint["fast_preprocessing_experiment"] = self.fast_preprocessing_experiment
 
     def _head(self) -> nn.Module:
         return self.backbone.fc if self.backbone_name == "resnet18" else self.regression_head

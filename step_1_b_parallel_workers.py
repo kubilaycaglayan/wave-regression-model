@@ -19,6 +19,7 @@ from typing import Any
 
 import torch
 
+import step_1_a_water_segmentation as segmentation
 from step_1_a_water_segmentation import MODEL_NAME, SegmentationModel, load_model
 
 # A 12 MP, 150-class float32 logit accumulator needs about 6.7 GiB when it
@@ -86,9 +87,13 @@ def select_worker_count(requested: int | None, device: torch.device, pending: in
 _worker_model: SegmentationModel | None = None
 
 
-def _initialize_worker(device: str | None, torch_threads: int) -> None:
+def _initialize_worker(
+    device: str | None, torch_threads: int, segmentation_settings: Mapping[str, Any] | None = None
+) -> None:
     global _worker_model
     torch.set_num_threads(torch_threads)
+    for name, value in (segmentation_settings or {}).items():
+        setattr(segmentation, name, value)
     _worker_model = load_model(device, verbose=False)
 
 
@@ -101,6 +106,7 @@ def run_segmentation_tasks(
     tasks: Mapping[Hashable, tuple[Any, ...]],
     device: str | None,
     workers: int,
+    segmentation_settings: Mapping[str, Any] | None = None,
 ) -> Iterator[tuple[Hashable, Any]]:
     """Yield (task key, result) as tasks finish; order follows completion with workers > 1."""
     if workers == 1:
@@ -115,7 +121,7 @@ def run_segmentation_tasks(
         workers,
         mp_context=multiprocessing.get_context("spawn"),
         initializer=_initialize_worker,
-        initargs=(device, torch_threads),
+        initargs=(device, torch_threads, segmentation_settings),
     ) as pool:
         futures = {
             pool.submit(_run_in_worker, task_function, *task_args): key

@@ -33,6 +33,7 @@ from step_1_b_preprocess_water_inputs import (
     preprocess_raw_image_with_projected_mask,
 )
 from step_2_a_reduce_black_water_area import encode_step_2_output, preprocess_step_1_image
+from step_1_c_preprocessing_profiles import configure_prediction_profile, configure_segmentation, get_profile
 from step_4_a_wave_dataset import IMAGE_SIZE, build_evaluation_transform
 from step_5_a_wave_regression_model import WaveRegressionModel
 from step_7_g_checkpoint_contract import validate_checkpoint_preprocessing, validate_segmentation_revision
@@ -77,6 +78,7 @@ def print_timing(label: str, started: float) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--threads", type=int, help="PyTorch CPU threads; benchmark for your hardware")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), help="preprocessing profile; defaults from the checkpoint")
     args = parser.parse_args()
     if args.threads is not None and args.threads < 1:
         parser.error("--threads must be positive")
@@ -341,9 +343,17 @@ def main() -> None:
         print_timing("Fingerprint checkpoint", checkpoint_started)
 
         device = configure_inference_device(verbose=True)
+        checkpoint_payload = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+        checkpoint_contract = checkpoint_payload.get("fast_preprocessing_experiment") or {}
+        profile_name = args.profile or checkpoint_contract.get("profile") or "baseline-v16"
+        profile = get_profile(profile_name)
+        configure_segmentation(profile, segmentation)
+        if profile.name != "baseline-v16":
+            namespace = configure_prediction_profile(profile, segmentation, sys.modules[__name__], str(device))
+            print(f"Preprocessing profile {profile.name}; output namespace {namespace}", flush=True)
         contract = validate_checkpoint_preprocessing(
             checkpoint_path, segmentation=segmentation, device=device,
-            step2_resolution=segmentation.SEGMENTATION_RESOLUTION, reuse_step1_mask=False,
+            step2_resolution=profile.step2_resolution, reuse_step1_mask=False,
             project_dir=PROJECT_DIR, sha256_for=sha256_for,
         )
         preview_inputs: dict[Path, Image.Image] = {}

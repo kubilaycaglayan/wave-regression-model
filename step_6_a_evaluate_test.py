@@ -20,11 +20,11 @@ from torch.utils.data import DataLoader
 
 from step_4_a_wave_dataset import WaveDataset, build_evaluation_transform
 from step_5_a_wave_regression_model import WaveRegressionModel
+from step_1_c_preprocessing_profiles import get_profile, require_profile_directory
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-CHECKPOINT_DIR = PROJECT_DIR / "step-5-checkpoints"
-SPLIT_SNAPSHOT_DIR = Path("step-3-dataset-splits/snapshots")
+CHECKPOINT_DIRS = (PROJECT_DIR / "step-5-checkpoints",)
 
 
 def _dotenv_value(key: str) -> str | None:
@@ -71,14 +71,15 @@ def _checkpoint_from_manifest(manifest_path: Path) -> Path:
 
 
 def checkpoint_from_latest_manifest(
-    checkpoint_dir: Path = CHECKPOINT_DIR,
+    checkpoint_dirs: tuple[Path, ...] = CHECKPOINT_DIRS,
 ) -> tuple[Path, Path]:
     manifests = sorted(
-        checkpoint_dir.rglob("training_manifest_*.json"),
-        key=lambda path: path.name,
+        (path for directory in checkpoint_dirs if directory.is_dir()
+         for path in directory.rglob("training_manifest_*.json")),
+        key=lambda path: (path.stat().st_mtime_ns, str(path)),
     )
     if not manifests:
-        raise FileNotFoundError(f"No training manifests found in {checkpoint_dir}")
+        raise FileNotFoundError(f"No training manifests found in {', '.join(map(str, checkpoint_dirs))}")
     manifest_path = manifests[-1]
     return _checkpoint_from_manifest(manifest_path), manifest_path
 
@@ -96,6 +97,14 @@ def checkpoint_path_from_env() -> tuple[Path, Path | None]:
 
 CHECKPOINT_PATH, CHECKPOINT_MANIFEST_PATH = checkpoint_path_from_env()
 CHECKPOINT_SHA256 = sha256_for(CHECKPOINT_PATH) if CHECKPOINT_PATH.is_file() else None
+if not CHECKPOINT_PATH.is_file():
+    raise FileNotFoundError(f"Selected checkpoint not found: {CHECKPOINT_PATH}")
+_checkpoint_payload = torch.load(CHECKPOINT_PATH, map_location="cpu", weights_only=True)
+_checkpoint_preprocessing = _checkpoint_payload.get("fast_preprocessing_experiment", {})
+_profile_name = _checkpoint_preprocessing.get("profile", "baseline-v16")
+PROFILE = get_profile(_profile_name)
+require_profile_directory(PROFILE, PROJECT_DIR / PROFILE.step2_dir)
+SPLIT_SNAPSHOT_DIR = PROFILE.split_dir / "snapshots"
 _MODEL_NAME_MATCH = re.fullmatch(r"(.+?)-best-val-mae-epoch=\d+-val_mae=[\d.]+\.ckpt", CHECKPOINT_PATH.name)
 if _MODEL_NAME_MATCH is None:
     raise ValueError(f"Cannot derive model name from checkpoint filename: {CHECKPOINT_PATH.name}")
@@ -104,22 +113,35 @@ _MODEL_VERSION_MATCH = re.search(r"(?:^|-)v(\d+)(?:-|$)", MODEL_NAME)
 if _MODEL_VERSION_MATCH is None:
     raise ValueError(f"Checkpoint filename does not contain a model version: {CHECKPOINT_PATH.name}")
 MODEL_VERSION = f"v{_MODEL_VERSION_MATCH.group(1)}"
-IMAGE_DIR = Path("step-2-final-water-data")
-def latest_test_manifest(snapshot_dir: Path = SPLIT_SNAPSHOT_DIR) -> Path:
-    """Select the test manifest from the newest dataset split snapshot."""
+IMAGE_DIR = PROFILE.step2_dir
+def latest_test_manifest(
+    snapshot_dir: Path = SPLIT_SNAPSHOT_DIR,
+    preprocessing_profile: str = PROFILE.name,
+) -> Path:
+    """Select the latest test manifest matching the checkpoint's preprocessing profile."""
     snapshots = sorted(path for path in snapshot_dir.iterdir() if path.is_dir()) if snapshot_dir.is_dir() else []
-    if not snapshots:
+    matching = []
+    for snapshot in snapshots:
+        metadata_path = snapshot / "manifest.json"
+        if not metadata_path.is_file():
+            continue
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        snapshot_profile = metadata.get("preprocessing_profile", "baseline-v16")
+        if snapshot_profile == preprocessing_profile:
+            matching.append(snapshot)
+    if not matching:
         raise FileNotFoundError(
-            f"No split snapshots found in {snapshot_dir}; run step_3_a_prepare_dataset_split.py first"
+            f"No {preprocessing_profile} split snapshots found in {snapshot_dir}; "
+            f"run step_3_a_prepare_dataset_split.py --profile {preprocessing_profile} first"
         )
-    test_manifest = snapshots[-1] / "test.csv"
+    test_manifest = matching[-1] / "test.csv"
     if not test_manifest.is_file():
         raise FileNotFoundError(f"Latest split snapshot has no test manifest: {test_manifest}")
     return test_manifest
 
 
-TEST_CSV = latest_test_manifest()
-TRAIN_CSV = Path("step-3-dataset-splits/train.csv")
+TEST_CSV = latest_test_manifest(preprocessing_profile=PROFILE.name)
+TRAIN_CSV = PROFILE.split_dir / "train.csv"
 DISCARDED_PATH = Path("discarded_images.csv")
 
 

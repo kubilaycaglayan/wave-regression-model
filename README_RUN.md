@@ -27,7 +27,7 @@ python step_7_a_predict.py --threads 4
 # prediction histories -> step-7-predict-captures-holder/predictions/
 ```
 
-Notes: steps skip existing outputs, so reruns are safe. Use `--device cpu` on the step 1/2 scripts to force CPU.
+The standard training and prediction flow uses `fast-v1` and requires a CUDA GPU for image preprocessing. CPU preprocessing requires `--profile baseline-v16 --device cpu`; Step 1 and Step 2 directories are locked to one active profile at a time, so archive the current outputs before switching profiles. Step 1 and Step 2 outputs live in their existing directories beside `archive/`; Step 3 adds a profile-tagged timestamped snapshot to the existing split history; Step 5 adds a versioned checkpoint directory with `-fast` after the backbone name. Labels remain in the shared `labels.csv`.
 
 Step 7 reuses valid cached inference previews when switching checkpoints.
 
@@ -83,16 +83,16 @@ Inspect the original, mask, and overlay images. The generated `original` and `ov
 
 ![Step 1 standardized water-only input](readme_files/step-1-preprocessed-sea-example.jpg)
 
-Run:
+Run the shared fast-v1 preprocessing flow used by prediction:
 
 ```bash
 python step_1_b_preprocess_water_inputs.py
 ```
 
-For CPU-only processing:
+The fast-v1 profile requires a CUDA GPU. To use CPU, select the baseline profile explicitly:
 
 ```bash
-python step_1_b_preprocess_water_inputs.py --device cpu
+python step_1_b_preprocess_water_inputs.py --profile baseline-v16 --device cpu
 ```
 
 This reads from:
@@ -130,7 +130,7 @@ python step_2_a_reduce_black_water_area.py
 For CPU-only processing:
 
 ```bash
-python step_2_a_reduce_black_water_area.py --device cpu
+python step_2_a_reduce_black_water_area.py --profile baseline-v16 --device cpu
 ```
 
 This reads the Step 1 outputs and writes:
@@ -254,7 +254,7 @@ The training script:
 New checkpoints will be created in:
 
 ```text
-step-5-checkpoints/vN-mae-<best-mae>-<backbone>/
+step-5-checkpoints/vN-mae-<best-mae>-<backbone>-fast/
 ```
 
 Each training version directory contains its checkpoint, manifest, summary,
@@ -295,7 +295,7 @@ Configure the prediction checkpoint in `.env` (or the environment) using:
 
 ```text
 # Use the exact best-checkpoint path printed by train.py.
-PREDICT_CHECKPOINT_PATH=step-5-checkpoints/vN-mae-<best-mae>-<backbone>/<best-checkpoint>.ckpt
+PREDICT_CHECKPOINT_PATH=step-5-checkpoints/vN-mae-<best-mae>-<backbone>-fast/<best-checkpoint>.ckpt
 ```
 
 After training, update `PREDICT_CHECKPOINT_PATH` to the new checkpoint path printed by `train.py`.

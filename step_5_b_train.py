@@ -32,6 +32,7 @@ from step_5_c_plot_training import (
     plot_training_history,
     write_training_history,
 )
+from step_1_c_preprocessing_profiles import get_profile, require_profile_directory
 
 
 RANDOM_SEED = 42
@@ -66,20 +67,33 @@ def next_run_version(directory: Path) -> str:
     return f"v{max(versions, default=0) + 1}"
 
 
-def version_directory_name(run_version: str, best_mae: float, backbone_name: str) -> str:
+def version_directory_name(
+    run_version: str, best_mae: float, backbone_name: str, *, preprocessing_profile: str = "baseline-v16"
+) -> str:
     """Return the stable directory name for a completed training run."""
     if not math.isfinite(best_mae) or not 0.0 <= best_mae <= 1.0:
         raise ValueError(f"Best validation MAE must be finite and within [0, 1], got {best_mae!r}")
-    return f"{run_version}-mae-{best_mae:.4f}-{canonical_backbone_name(backbone_name)}"
+    profile_suffix = "-fast" if preprocessing_profile == "fast-v1" else ""
+    return f"{run_version}-mae-{best_mae:.4f}-{canonical_backbone_name(backbone_name)}{profile_suffix}"
 
 
-def latest_split_snapshot() -> Path:
+def latest_split_snapshot(preprocessing_profile: str) -> Path:
     snapshots = sorted(path for path in SPLIT_SNAPSHOT_DIR.iterdir() if path.is_dir()) if SPLIT_SNAPSHOT_DIR.is_dir() else []
-    if not snapshots:
+    matching = []
+    for snapshot in snapshots:
+        manifest_path = snapshot / "manifest.json"
+        if not manifest_path.is_file():
+            continue
+        metadata = json.loads(manifest_path.read_text(encoding="utf-8"))
+        snapshot_profile = metadata.get("preprocessing_profile", "baseline-v16")
+        if snapshot_profile == preprocessing_profile:
+            matching.append(snapshot)
+    if not matching:
         raise FileNotFoundError(
-            f"No split snapshots found in {SPLIT_SNAPSHOT_DIR}; run step_3_a_prepare_dataset_split.py first"
+            f"No {preprocessing_profile} split snapshot found in {SPLIT_SNAPSHOT_DIR}; "
+            f"run step_3_a_prepare_dataset_split.py --profile {preprocessing_profile} first"
         )
-    return snapshots[-1]
+    return matching[-1]
 
 
 def make_cuda_usable_if_needed() -> None:
@@ -111,6 +125,7 @@ def write_summary(
     labeled_sample_count: int,
     output_dir: Path,
     best_checkpoint_path: Path,
+    preprocessing_profile: str,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     best_mae = best_metrics["val_mae"]
@@ -133,6 +148,7 @@ def write_summary(
                 f"early stopping: monitor=val_mae, mode=min, patience={EARLY_STOPPING_PATIENCE}",
                 f"random seed: {seed if seed is not None else 'system randomness'}",
                 f"split snapshot: {split_snapshot}",
+                f"preprocessing profile: {preprocessing_profile}",
                 f"best validation MAE: {float(best_mae) if best_mae is not None else 'unavailable'}",
                 f"best validation RMSE: {float(best_rmse) if best_rmse is not None else 'unavailable'}",
                 f"best checkpoint path: {best_checkpoint_path}",
@@ -167,6 +183,7 @@ def write_summary(
                 "backbone_name": model.backbone_name,
                 "weights_name": model.weights_name,
                 "split_snapshot": str(split_snapshot),
+                "preprocessing_profile": preprocessing_profile,
                 "best_checkpoint_path": str(best_checkpoint_path),
                 "best_validation_mae": float(best_mae) if best_mae is not None else None,
                 "best_validation_rmse": float(best_rmse) if best_rmse is not None else None,
@@ -188,28 +205,49 @@ def write_summary(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backbone", choices=SUPPORTED_BACKBONES, default=DEFAULT_BACKBONE)
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), default="fast-v1")
     args = parser.parse_args()
+    profile = get_profile(args.profile)
+    global SPLIT_SNAPSHOT_DIR
+    SPLIT_SNAPSHOT_DIR = Path(profile.split_dir) / "snapshots"
     backbone_name = canonical_backbone_name(args.backbone)
     started = time.perf_counter()
     print(f"Random seed: {RANDOM_SEED}")
     pl.seed_everything(RANDOM_SEED, workers=True)
+    split_snapshot = latest_split_snapshot(profile.name)
+    print(f"Split snapshot: {split_snapshot}")
+    data = WaveDataModule(
+        batch_size=BATCH_SIZE,
+        num_workers=0,
+        image_dir=profile.step2_dir,
+        split_dir=profile.split_dir,
+    )
+    require_profile_directory(profile, Path(profile.step2_dir))
+    preprocessing_contract = None
+    if profile.name != "baseline-v16":
+        contract_path = Path(profile.step2_dir) / "preprocessing-contract.json"
+        if not contract_path.is_file():
+            raise FileNotFoundError(
+                f"Missing {profile.name} preprocessing contract: run Step 2 with --profile {profile.name} first"
+            )
+        preprocessing_contract = json.loads(contract_path.read_text(encoding="utf-8"))
+        if preprocessing_contract.get("profile") != profile.name:
+            raise RuntimeError(f"Preprocessing contract has the wrong profile: {contract_path}")
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     run_version = next_run_version(CHECKPOINT_DIR)
-    run_directory = CHECKPOINT_DIR / f"{run_version}-pending-{backbone_name}"
+    pending_suffix = "-fast" if profile.name == "fast-v1" else ""
+    run_directory = CHECKPOINT_DIR / f"{run_version}-pending-{backbone_name}{pending_suffix}"
     run_directory.mkdir(parents=True, exist_ok=False)
     print(f"Run version: {run_version}")
-    split_snapshot = latest_split_snapshot()
-    print(f"Split snapshot: {split_snapshot}")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using accelerator: {device}")
     make_cuda_usable_if_needed()
-
-    data = WaveDataModule(batch_size=BATCH_SIZE, num_workers=0)
     model = WaveRegressionModel(
         learning_rate=LEARNING_RATE,
         backbone_name=backbone_name,
         pretrained=True,
     )
+    model.fast_preprocessing_experiment = preprocessing_contract
     total, trainable, frozen = parameter_counts(model)
     print(f"Parameters: total={total:,}, trainable={trainable:,}, frozen={frozen:,}")
     if trainable == 0 or frozen == 0:
@@ -290,7 +328,9 @@ def main() -> None:
     best_model = WaveRegressionModel.load_from_checkpoint(checkpoint.best_model_path, pretrained=False)
     best_metrics = trainer.validate(best_model, datamodule=data, verbose=False)[0]
     best_mae = float(best_metrics["val_mae"])
-    completed_directory = CHECKPOINT_DIR / version_directory_name(run_version, best_mae, backbone_name)
+    completed_directory = CHECKPOINT_DIR / version_directory_name(
+        run_version, best_mae, backbone_name, preprocessing_profile=profile.name
+    )
     if completed_directory.exists():
         raise FileExistsError(f"Completed run directory already exists: {completed_directory}")
     run_directory.rename(completed_directory)
@@ -313,6 +353,7 @@ def main() -> None:
         labeled_sample_count,
         completed_directory,
         best_checkpoint_path,
+        profile.name,
     )
     print(f"Best validation MAE: {best_metrics['val_mae']:.6f}")
     print(f"Best validation RMSE: {best_metrics['val_rmse']:.6f}")

@@ -27,6 +27,12 @@ from step_1_a_water_segmentation import (
     run_segmentation,
 )
 from step_1_b_parallel_workers import run_segmentation_tasks, select_worker_count
+from step_1_c_preprocessing_profiles import (
+    configure_segmentation,
+    ensure_profile_directory,
+    get_profile,
+)
+import step_1_a_water_segmentation as segmentation
 
 OUTPUT_SIZE = (224, 224)
 
@@ -186,17 +192,22 @@ def process_image(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), default="fast-v1")
     parser.add_argument("--input-dir", type=Path, action="append", help="Additional input directory; repeatable")
-    parser.add_argument("--output-dir", type=Path, default=Path("step-1-processed-data"))
+    parser.add_argument("--output-dir", type=Path, help="Output directory; defaults to the selected profile")
     parser.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")
     parser.add_argument(
         "--workers", type=int, default=None,
         help="parallel worker processes, each with its own model (default: chosen from free memory)",
     )
     args = parser.parse_args()
+    profile = get_profile(args.profile)
+    output_dir = args.output_dir or profile.step1_dir
+    configure_segmentation(profile, segmentation)
     if args.workers is not None and args.workers < 1:
         parser.error("--workers must be at least 1")
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    ensure_profile_directory(profile, output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     source_dirs = configured_source_directories()
     if args.input_dir:
         source_dirs.extend(args.input_dir)
@@ -205,16 +216,16 @@ def main() -> None:
         raise SystemExit(f"No supported images found in: {', '.join(str(path) for path in source_dirs)}")
     names = SourceOutputNames(
         image_paths,
-        args.output_dir,
+        output_dir,
         (".jpg",),
-        output_paths_for_stem=lambda stem: (args.output_dir / f"step-1_{stem}.jpg",),
+        output_paths_for_stem=lambda stem: (output_dir / f"step-1_{stem}.jpg",),
     )
     total = len(image_paths)
     entries: dict[int, tuple[str, Path, Path]] = {}
     skipped: list[str] = []
     pending: list[tuple[int, Path, Path]] = []
     for index, source_path in enumerate(image_paths, 1):
-        standardized_path = processed_paths(source_path, args.output_dir, names)
+        standardized_path = processed_paths(source_path, output_dir, names)
         if standardized_path.exists():
             print(f"[{index}/{total}] {source_path.name}: skipped (standardized input already exists)")
             entries[index] = (source_path.name, source_path, standardized_path)
@@ -227,9 +238,19 @@ def main() -> None:
     run_started = time.perf_counter()
     if pending:
         device = configure_inference_device(args.device)
+        if profile.name == "fast-v1" and device.type != "cuda":
+            raise RuntimeError("The fast-v1 profile requires GPU segmentation with float16 precision")
         workers = select_worker_count(args.workers, device, len(pending))
         tasks = {index: (source_path, standardized_path) for index, source_path, standardized_path in pending}
-        results = run_segmentation_tasks(process_image, tasks, str(device), workers)
+        settings = {
+            "SEGMENTATION_RESOLUTION": profile.step1_resolution,
+            "USE_OVERLAPPING_TILES": profile.overlapping_tiles,
+            "TILE_SIZE": profile.tile_size,
+            "TILE_OVERLAP": profile.tile_overlap,
+            "SINGLE_IMAGE_LOGITS_RESOLUTION": profile.logits_resolution,
+            "INFERENCE_PRECISION": profile.precision,
+        }
+        results = run_segmentation_tasks(process_image, tasks, str(device), workers, settings)
         for index, (status, elapsed, warning) in results:
             source_path, standardized_path = tasks[index]
             processing_seconds += elapsed
@@ -240,7 +261,7 @@ def main() -> None:
                 skipped.append(source_path.name)
                 print(f"[{index}/{total}] {source_path.name}: WARNING: {warning}; skipped ({elapsed:.3f}s)")
 
-    write_gallery([entries[index] for index in sorted(entries)], args.output_dir)
+    write_gallery([entries[index] for index in sorted(entries)], output_dir)
     print(f"Processed: {len(entries) - already_present}")
     print(f"Already present: {already_present}")
     print(f"Skipped: {len(skipped)}")
@@ -250,7 +271,8 @@ def main() -> None:
         print("Skipped files:")
         for filename in skipped:
             print(f"- {filename}")
-    print(f"Gallery written to {args.output_dir / 'index.html'}")
+    print(f"Preprocessing profile: {profile.name}")
+    print(f"Gallery written to {output_dir / 'index.html'}")
 
 
 if __name__ == "__main__":

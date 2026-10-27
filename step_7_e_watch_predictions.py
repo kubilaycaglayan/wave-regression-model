@@ -20,6 +20,11 @@ from PIL import Image
 import step_7_a_predict as prediction
 import step_1_a_water_segmentation as segmentation
 from step_1_a_water_segmentation import SEGMENTATION_RESOLUTION, configure_inference_device, load_model, run_segmentation
+from step_1_c_preprocessing_profiles import (
+    configure_prediction_profile,
+    configure_segmentation,
+    get_profile,
+)
 
 
 class FileNotifications:
@@ -158,6 +163,7 @@ def main():
     parser.add_argument("--poll-seconds", type=float, default=1.0)
     parser.add_argument("--watch-mode", choices=("auto", "event", "poll"), default="auto",
                         help="Linux close-write/move notifications, or portable stability polling")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), help="preprocessing profile; defaults from the checkpoint")
     parser.add_argument("--experimental-single-resolution", type=int, help="opt in to single-image segmentation at this resolution")
     parser.add_argument("--experimental-logits-resolution", type=int, help="interpolate single-image class scores to this size before argmax")
     parser.add_argument("--experimental-reuse-step1-mask", action="store_true", help="project the Step 1 mask instead of running Step 2 segmentation")
@@ -179,20 +185,36 @@ def main():
     checkpoint = prediction.checkpoint_path_from_env()
     digest = prediction.sha256_for(checkpoint)
     device = configure_inference_device(verbose=True)
-    if args.experimental_single_resolution is not None:
+    checkpoint_payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    checkpoint_contract = checkpoint_payload.get("fast_preprocessing_experiment") or {}
+    profile_name = args.profile or checkpoint_contract.get("profile")
+    profile = get_profile(profile_name) if profile_name else None
+    if profile is not None and profile.name == "fast-v1":
+        if any((args.experimental_single_resolution is not None, args.experimental_logits_resolution is not None,
+                args.experimental_reuse_step1_mask, args.experimental_step2_resolution is not None,
+                args.experimental_precision != "float32")):
+            parser.error("--profile fast-v1 cannot be combined with custom --experimental-* settings")
+        namespace = configure_prediction_profile(profile, segmentation, prediction, str(device))
+        print(f"Preprocessing profile {profile.name}; output namespace {namespace}", flush=True)
+    elif args.experimental_single_resolution is not None:
         configure_experimental(args.experimental_single_resolution, args.experimental_logits_resolution,
                                args.experimental_reuse_step1_mask, step2_resolution=args.experimental_step2_resolution,
                                precision=args.experimental_precision, device=device)
+    step2_resolution = (
+        profile.step2_resolution if profile is not None
+        else args.experimental_step2_resolution or segmentation.SEGMENTATION_RESOLUTION
+    )
+    reuse_step1_mask = args.experimental_reuse_step1_mask if profile is None else False
     contract = prediction.validate_checkpoint_preprocessing(
         checkpoint, segmentation=segmentation, device=device,
-        step2_resolution=args.experimental_step2_resolution or segmentation.SEGMENTATION_RESOLUTION,
-        reuse_step1_mask=args.experimental_reuse_step1_mask,
+        step2_resolution=step2_resolution,
+        reuse_step1_mask=reuse_step1_mask,
         project_dir=prediction.PROJECT_DIR, sha256_for=prediction.sha256_for,
     )
     started = time.perf_counter()
     segmenter = load_model(str(device), verbose=False)
     prediction.validate_segmentation_revision(contract, segmenter)
-    expected_segmentation_device = device if args.experimental_single_resolution is not None else None
+    expected_segmentation_device = device if profile is not None and profile.name == "fast-v1" or args.experimental_single_resolution is not None else None
     model = prediction.WaveRegressionModel.load_from_checkpoint(checkpoint, map_location=device, pretrained=False)
     model.to(device).eval()
     transform = prediction.build_evaluation_transform()
@@ -201,10 +223,10 @@ def main():
     started = time.perf_counter()
     # Warm the model input shapes used by both stages; no source photo is stored.
     run_segmentation(Image.new("RGB", (SEGMENTATION_RESOLUTION, SEGMENTATION_RESOLUTION)), segmenter)
-    if not args.experimental_reuse_step1_mask:
+    if not reuse_step1_mask:
         previous = segmenter.processor.size
-        if args.experimental_step2_resolution is not None:
-            segmenter.processor.size = {"height": args.experimental_step2_resolution, "width": args.experimental_step2_resolution}
+        if profile is not None or args.experimental_step2_resolution is not None:
+            segmenter.processor.size = {"height": step2_resolution, "width": step2_resolution}
         try:
             run_segmentation(Image.new("RGB", prediction.IMAGE_SIZE), segmenter)
         finally:
@@ -255,7 +277,7 @@ def main():
         startup_candidates.discard(photo)
         try:
             device = process_photo(photo, checkpoint, digest, device, model, transform, segmenter,
-                                   reuse_step1_mask=args.experimental_reuse_step1_mask,
+                                   reuse_step1_mask=reuse_step1_mask,
                                    expected_segmentation_device=expected_segmentation_device)
         except Exception as error:
             print(f"{photo.name}: failed: {type(error).__name__}: {error}", file=sys.stderr, flush=True)

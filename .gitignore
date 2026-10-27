@@ -41,8 +41,17 @@ discarded_images.csv
 labels.csv
 
 # Locally generated pipeline outputs.
+step-1-processed-data/archive/
+step-1-processed-data/preprocessing-profile.json
+step-2-final-water-data/preprocessing-profile.json
+step-2-final-water-data/preprocessing-contract.json
 step-2-final-water-data/index.html
+step-2-final-water-data/archive/
 step-3-dataset-splits/*.csv
+# Legacy fast-v1 directories from the earlier, separate-output layout.
+step-1-fast-v1-processed-data/
+step-2-fast-v1-final-water-data/
+step-3-fast-v1-dataset-splits/
 step-6-test-evaluation/*
 
 # Locally generated training artifacts.
@@ -50,6 +59,8 @@ step-6-test-evaluation/*
 step-5-checkpoints/training_manifest_*.json
 step-5-checkpoints/training_summary_*.txt
 step-5-checkpoints/*
+# Legacy fast-v1 checkpoint directory from the earlier layout.
+step-5-fast-v1-checkpoints/
 
 # Locally generated Experiment A report history.
 step-8-experiment-a-baseline/

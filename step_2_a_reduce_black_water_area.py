@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import io
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -13,6 +15,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import numpy as np
+import torch
 from PIL import Image
 
 from step_1_a_water_segmentation import (
@@ -22,6 +25,15 @@ from step_1_a_water_segmentation import (
     load_model,
     load_rgb_image,
     run_segmentation,
+)
+import step_1_a_water_segmentation as segmentation
+from step_1_c_preprocessing_profiles import (
+    configure_segmentation,
+    ensure_profile_directory,
+    get_profile,
+    profile_contract,
+    require_profile_directory,
+    step2_processor_size,
 )
 
 OUTPUT_SIZE = (224, 224)
@@ -227,6 +239,38 @@ def save_result(image: Image.Image, path: Path) -> None:
         image.save(path)
 
 
+def write_preprocessing_contract(profile, model: SegmentationModel, output_dir: Path) -> None:
+    if profile.name == "baseline-v16":
+        return
+    project_dir = Path(__file__).resolve().parent
+    names = (
+        "step_1_a_water_segmentation.py",
+        "step_1_b_preprocess_water_inputs.py",
+        "step_1_c_preprocessing_profiles.py",
+        "step_2_a_reduce_black_water_area.py",
+        "step_4_a_wave_dataset.py",
+        "step_5_a_wave_regression_model.py",
+        "step_7_a_predict.py",
+    )
+    hashes = {
+        name: hashlib.sha256((project_dir / name).read_bytes()).hexdigest()
+        for name in names
+    }
+    contract = profile_contract(
+        profile,
+        segmentation_model_revision=getattr(model.model.config, "_commit_hash", None),
+        device=str(model.device),
+        torch_version=str(torch.__version__),
+        code_sha256=hashes,
+    )
+    path = output_dir / "preprocessing-contract.json"
+    encoded = json.dumps(contract, indent=2, sort_keys=True) + "\n"
+    if path.exists() and path.read_text(encoding="utf-8") != encoded:
+        raise RuntimeError(f"Existing preprocessing contract differs from this run: {path}")
+    if not path.exists():
+        path.write_text(encoded, encoding="utf-8")
+
+
 def write_gallery(entries: list[tuple[str, Path]], input_dir: Path, output_dir: Path) -> None:
     cards = []
     for filename, result_path in sorted(entries, key=lambda entry: entry[0].lower()):
@@ -266,31 +310,46 @@ def diagnostic_line(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input-dir", type=Path, default=Path("step-1-processed-data"))
-    parser.add_argument("--output-dir", type=Path, default=Path("step-2-final-water-data"))
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), default="fast-v1")
+    parser.add_argument("--input-dir", type=Path, help="Step 1 directory; defaults to the selected profile")
+    parser.add_argument("--output-dir", type=Path, help="Output directory; defaults to the selected profile")
     parser.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")
     args = parser.parse_args()
-
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    profile = get_profile(args.profile)
+    input_dir = args.input_dir or profile.step1_dir
+    output_dir = args.output_dir or profile.step2_dir
+    configure_segmentation(profile, segmentation)
+    require_profile_directory(profile, input_dir)
+    ensure_profile_directory(profile, output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     # Ignore source copies left by older pipeline runs; only the last step's
     # standardized image is a valid input to this step.
-    image_paths = [p for p in iter_images(args.input_dir) if not p.stem.lower().endswith("_original")]
+    image_paths = [
+        p for p in iter_images(input_dir)
+        if "archive" not in p.relative_to(input_dir).parts
+        and not p.stem.lower().endswith("_original")
+    ]
     namespaced = [p for p in image_paths if p.stem.lower().startswith("step-1_")]
     if namespaced:
         image_paths = namespaced
     if not image_paths:
-        raise SystemExit(f"No supported images found in {args.input_dir}")
+        raise SystemExit(f"No supported images found in {input_dir}")
 
     model = None
     entries: list[tuple[str, Path]] = []
     processed = 0
     skipped = 0
     total_started = time.perf_counter()
+    if profile.name != "baseline-v16" and image_paths:
+        model = load_model(args.device)
+        if model.device.type != "cuda":
+            raise RuntimeError("The fast-v1 profile requires GPU segmentation with float16 precision")
+        write_preprocessing_contract(profile, model, output_dir)
     for index, source_path in enumerate(image_paths, 1):
         item_started = time.perf_counter()
         logical_stem = source_path.stem.removeprefix("step-1_")
         logical_name = f"{logical_stem}{source_path.suffix.lower()}"
-        result_path = args.output_dir / f"step-2_{logical_name}"
+        result_path = output_dir / f"step-2_{logical_name}"
         if result_path.exists():
             skipped += 1
             entries.append((logical_name, result_path))
@@ -304,7 +363,8 @@ def main() -> None:
             if model is None:
                 model = load_model(args.device)
             image = load_rgb_image(source_path)
-            processed_output = preprocess_step_1_image(image, model)
+            with step2_processor_size(profile, model):
+                processed_output = preprocess_step_1_image(image, model)
             if processed_output is None:
                 skipped += 1
                 reason = f"{CONSOLE_RED}no reliable lower-water crop{CONSOLE_RESET}"
@@ -344,11 +404,12 @@ def main() -> None:
                 f"skipped: {error}",
             ) + f" | time={elapsed:.3f}s")
 
-    write_gallery(entries, args.input_dir, args.output_dir)
+    write_gallery(entries, input_dir, output_dir)
     print(f"Processed: {processed}")
     print(f"Skipped: {skipped}")
     print(f"Total time: {time.perf_counter() - total_started:.3f}s")
-    print(f"Gallery: {args.output_dir / 'index.html'}")
+    print(f"Preprocessing profile: {profile.name}")
+    print(f"Gallery: {output_dir / 'index.html'}")
 
 
 if __name__ == "__main__":

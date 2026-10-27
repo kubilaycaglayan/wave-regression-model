@@ -13,13 +13,20 @@ from torch.utils.data import DataLoader
 
 
 class WaveDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: str | Path = ".", batch_size: int = 8, num_workers: int = 0) -> None:
+    def __init__(
+        self,
+        data_dir: str | Path = ".",
+        batch_size: int = 8,
+        num_workers: int = 0,
+        image_dir: str | Path | None = None,
+        split_dir: str | Path | None = None,
+    ) -> None:
         super().__init__()
         self.data_dir = Path(data_dir)
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.image_dir = self.data_dir / "step-2-final-water-data"
-        self.split_dir = self.data_dir / "step-3-dataset-splits"
+        self.image_dir = Path(image_dir) if image_dir is not None else self.data_dir / "step-2-final-water-data"
+        self.split_dir = Path(split_dir) if split_dir is not None else self.data_dir / "step-3-dataset-splits"
         self.train_dataset: WaveDataset | None = None
         self.val_dataset: WaveDataset | None = None
         self.test_dataset: WaveDataset | None = None

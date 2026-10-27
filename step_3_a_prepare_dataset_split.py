@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from step_1_c_preprocessing_profiles import get_profile, require_profile_directory
 
 
 LABELS_PATH = Path("labels.csv")
@@ -25,6 +26,7 @@ SPLIT_NAMES = ("train", "validation", "test")
 TARGET_FRACTIONS = {"train": 0.70, "validation": 0.15, "test": 0.15}
 BIN_NAMES = ("0.00-0.19", "0.20-0.39", "0.40-0.59", "0.60-0.79", "0.80-1.00")
 DEFAULT_SEED = 42
+ACTIVE_PROFILE = "baseline-v16"
 
 
 @dataclass(frozen=True)
@@ -292,6 +294,7 @@ def write_snapshot(splits: dict[str, list[Sample]], seed: int, incremental: bool
         "created_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "seed": seed,
         "mode": "append-existing" if incremental else "initial",
+        "preprocessing_profile": ACTIVE_PROFILE,
         "labels_sha256": file_sha256(LABELS_PATH),
         "files": files,
     }
@@ -341,6 +344,7 @@ def summary_text(splits: dict[str, list[Sample]], groups: list[list[Sample]], to
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), default="fast-v1")
     parser.add_argument(
         "--seed",
         type=int,
@@ -348,10 +352,19 @@ def main() -> int:
         help=f"seed for repeatable split generation (default: {DEFAULT_SEED})",
     )
     args = parser.parse_args()
+    profile = get_profile(args.profile)
+    global IMAGE_DIR, OUTPUT_DIR, SNAPSHOT_DIR, BENCHMARK_DIR, BENCHMARK_TEST_PATH, ACTIVE_PROFILE
+    ACTIVE_PROFILE = profile.name
+    IMAGE_DIR = Path(profile.step2_dir)
+    OUTPUT_DIR = Path(profile.split_dir)
+    SNAPSHOT_DIR = OUTPUT_DIR / "snapshots"
+    BENCHMARK_DIR = OUTPUT_DIR / "benchmarks"
+    BENCHMARK_TEST_PATH = BENCHMARK_DIR / "benchmark-v1-test.csv"
     try:
         samples = read_labels()
         if not IMAGE_DIR.is_dir():
             raise FileNotFoundError(f"processed image directory not found: {IMAGE_DIR}")
+        require_profile_directory(profile, IMAGE_DIR)
         validate_images(samples)
         samples_by_name = {sample.filename: sample for sample in samples}
         existing_test = OUTPUT_DIR / "test.csv"

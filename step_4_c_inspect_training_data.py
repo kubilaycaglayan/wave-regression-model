@@ -12,6 +12,7 @@ from PIL import Image
 
 from step_4_a_wave_dataset import WaveDataset, denormalize_image, build_training_transform
 from step_4_b_wave_datamodule import WaveDataModule
+from step_1_c_preprocessing_profiles import get_profile, require_profile_directory
 from torchvision.transforms.functional import to_tensor
 
 
@@ -63,14 +64,23 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=Path("step-4-data-preview"))
     parser.add_argument("--variants", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), default="fast-v1")
     args = parser.parse_args()
     started = time.perf_counter()
-    module = WaveDataModule(args.data_dir, batch_size=args.batch_size)
+    profile = get_profile(args.profile)
+    require_profile_directory(profile, profile.step2_dir)
+    module = WaveDataModule(
+        args.data_dir,
+        batch_size=args.batch_size,
+        image_dir=profile.step2_dir,
+        split_dir=profile.split_dir,
+    )
     module.setup()
     print(f"train samples: {len(module.train_dataset)}")
     print(f"validation samples: {len(module.val_dataset)}")
     print(f"test samples: {len(module.test_dataset)}")
     print(f"batch size: {args.batch_size}")
+    print(f"preprocessing profile: {profile.name}")
     batch_images, batch_targets = next(iter(module.train_dataloader()))
     print(f"images: {list(batch_images.shape)}")
     print(f"targets: {list(batch_targets.shape)}")

@@ -55,8 +55,12 @@ def validate_checkpoint_preprocessing(checkpoint: Path, *, segmentation, device:
     if device.type != "cuda" and actual["precision"] != "float32":
         mismatches.append("requested reduced-precision segmentation is unavailable on CPU")
     recorded_hashes = contract.get("code_sha256", {})
-    for name in ("step_1_a_water_segmentation.py", "step_1_b_preprocess_water_inputs.py",
-                 "step_2_a_reduce_black_water_area.py", "step_4_a_wave_dataset.py", "step_5_a_wave_regression_model.py"):
+    required_code = ["step_1_a_water_segmentation.py", "step_1_b_preprocess_water_inputs.py",
+                     "step_2_a_reduce_black_water_area.py", "step_4_a_wave_dataset.py",
+                     "step_5_a_wave_regression_model.py"]
+    if contract.get("profile") is not None:
+        required_code.append("step_1_c_preprocessing_profiles.py")
+    for name in required_code:
         if recorded_hashes.get(name) != sha256_for(project_dir / name):
             mismatches.append(f"preprocessing/model code changed: {name}")
     runner = project_dir / "step_7_a_predict.py"
