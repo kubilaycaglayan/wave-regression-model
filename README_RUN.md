@@ -330,6 +330,14 @@ python step_7_b_benchmark_prediction.py --device cpu --repeat 3 /path/to/photo.H
 
 The benchmark measures cold and warm predictions using an existing preview when available, without changing prediction outputs. Each run saves timing and system details as JSON and Markdown in a timestamped folder under `step-7-prediction-benchmarks/`.
 
+### Profile prediction operators
+
+```bash
+python step_7_c_profile_prediction.py --device cpu /path/to/photo.HEIC
+```
+
+This separate profiling run captures both segmentation passes and the regression forward pass; its timings include profiler overhead and are not latency benchmarks. Reports and Chrome/Perfetto traces are saved under `step-7-prediction-profiles/`.
+
 ## Step 8: Run the baseline experiment
 
 ```bash

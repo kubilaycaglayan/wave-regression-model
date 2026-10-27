@@ -56,3 +56,6 @@ step-8-experiment-a-baseline/
 
 # Local prediction timing reports.
 step-7-prediction-benchmarks/
+
+# Local PyTorch profiler traces.
+step-7-prediction-profiles/
