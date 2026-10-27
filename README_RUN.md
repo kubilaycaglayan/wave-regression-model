@@ -319,6 +319,17 @@ step-7-predict-captures-holder/predictions/
 
 The prediction directory contains one append-only `.txt` history per input photo. Each record includes the waviness prediction, selected checkpoint path, checkpoint SHA-256, timestamp, device, and elapsed processing time. A valid `step-7-inference-preview/<photo-stem>-model-input.jpg` is the checkpoint-independent cached model input, so changing checkpoints reuses the preview and reruns only regression inference. A photo is skipped only when both its valid preview and a record for the same checkpoint are present. Missing previews trigger Steps 1 and 2; malformed previews fail clearly rather than being silently replaced. Delete a preview to force regeneration.
 
+### Benchmark prediction latency
+
+```bash
+# Default: photos in the prediction holder, three independent processes.
+python step_7_b_benchmark_prediction.py --repeat 3
+# Or select photos and a device explicitly.
+python step_7_b_benchmark_prediction.py --device cpu --repeat 3 /path/to/photo.HEIC /path/to/photo.jpg
+```
+
+The benchmark measures cold and warm predictions using an existing preview when available, without changing prediction outputs. Each run saves timing and system details as JSON and Markdown in a timestamped folder under `step-7-prediction-benchmarks/`.
+
 ## Step 8: Run the baseline experiment
 
 ```bash

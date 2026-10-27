@@ -53,3 +53,6 @@ step-5-checkpoints/*
 
 # Locally generated Experiment A report history.
 step-8-experiment-a-baseline/
+
+# Local prediction timing reports.
+step-7-prediction-benchmarks/

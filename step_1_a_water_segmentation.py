@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import time
+from contextlib import nullcontext
 from typing import Iterable
 
 import numpy as np
@@ -39,6 +40,9 @@ TILE_OVERLAP = 0.25
 # Useful while comparing resolutions and tile settings. Disable for quieter
 # logs after choosing a stable configuration.
 LOG_TILE_TIMING = True
+
+# Optional benchmark observer; normal pipeline execution has no synchronization overhead.
+BENCHMARK_OBSERVER = None
 
 MODEL_NAME = "nvidia/segformer-b2-finetuned-ade-512-512"
 WATER_CLASS_NAMES = {"water", "sea", "river", "lake"}
@@ -143,26 +147,31 @@ def run_overlapping_segmentation(
         f"({accumulator_bytes / 1024**3:.2f} GiB); model inference: {segmentation_model.device}"
     )
 
+    observer = BENCHMARK_OBSERVER
+    if observer is not None:
+        observer.segmentation_metadata(width, height, tile_count, str(accumulator_device), str(segmentation_model.device))
+
+    def measure(name):
+        return observer.measure(name, segmentation_model.device) if observer else nullcontext()
+
     for top in top_starts:
         for left in left_starts:
             right = min(width, left + TILE_SIZE)
             bottom = min(height, top + TILE_SIZE)
-            tile = image.crop((left, top, right, bottom))
-            inputs = segmentation_model.processor(images=tile, return_tensors="pt")
-            inputs = {
-                name: value.to(segmentation_model.device)
-                for name, value in inputs.items()
-            }
-            logits = segmentation_model.model(**inputs).logits
-            logits = torch.nn.functional.interpolate(
-                logits,
-                size=(bottom - top, right - left),
-                mode="bilinear",
-                align_corners=False,
-            )[0]
-            accumulated_logits[:, top:bottom, left:right] += logits.to(accumulator_device)
+            with measure("tile_prepare"):
+                tile = image.crop((left, top, right, bottom))
+                inputs = segmentation_model.processor(images=tile, return_tensors="pt")
+                inputs = {name: value.to(segmentation_model.device) for name, value in inputs.items()}
+            with measure("tile_model"):
+                logits = segmentation_model.model(**inputs).logits
+            with measure("tile_accumulate"):
+                logits = torch.nn.functional.interpolate(
+                    logits, size=(bottom - top, right - left), mode="bilinear", align_corners=False,
+                )[0]
+                accumulated_logits[:, top:bottom, left:right] += logits.to(accumulator_device)
 
-    result = accumulated_logits.argmax(dim=0).to(device="cpu", dtype=torch.uint8)
+    with measure("mask_finalize"):
+        result = accumulated_logits.argmax(dim=0).to(device="cpu", dtype=torch.uint8)
 
     if LOG_TILE_TIMING:
         elapsed = time.perf_counter() - started
