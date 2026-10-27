@@ -79,7 +79,8 @@ def test_markdown_reports_individual_failed_traces_and_summary(tmp_path):
     markdown = markdown_path.read_text()
     assert "sea\\|photo.jpg" in markdown
     assert "no water" in markdown
-    assert "| step1.segmentation | 2.000000 |" in markdown
+    assert "↳ Segmentation | 2.000000 |" in markdown
+    assert "Step 1: water preprocessing (total not recorded)" in markdown
     assert "No successful runs" in markdown
     assert "CPU" in markdown
     assert markdown == report_markdown(report)
@@ -164,3 +165,24 @@ def test_worker_predicts_once_per_pass_using_existing_preview(tmp_path, monkeypa
     assert [run["input_path_type"] for run in result["runs"]] == ["cached" if cached else "fresh"] * 2
     assert all("prediction_seconds" in run and "cached_prediction" not in run for run in result["runs"])
     assert not (tmp_path / "existing-predictions").exists()
+
+
+def test_process_breakdown_places_traces_under_their_parents():
+    run = {"kind": "cold", "photo": "sea.jpg", "status": "ok", "input_path_type": "fresh",
+           "prediction_seconds": 10, "timings": {"step1.total": 6, "step1.segmentation": 5,
+           "step1.tile_model": 4, "step2.total": 2, "fresh.regression": 1, "fresh.model_forward": 0.8}}
+    report = {"report_version": 3, "processes": [{"process_wall_seconds": 12,
+              "startup": {"imports_seconds": 1}, "runs": [run]}], "summary": []}
+    text = report_markdown(report)
+    process = text.index("Process wall time: 12.000000")
+    startup = text.index("#### Startup")
+    prediction = text.index("**Fresh prediction total**")
+    step1 = text.index("↳ Step 1: water preprocessing")
+    segmentation = text.index("↳ Segmentation", step1)
+    tile = text.index("↳ Run tile model", segmentation)
+    step2 = text.index("↳ Step 2: lower-water preprocessing", tile)
+    regression = text.index("↳ Regression prediction", step2)
+    forward = text.index("↳ Model forward pass", regression)
+    assert process < startup < prediction < step1 < segmentation < tile < step2 < regression < forward
+    assert "&nbsp;" * 12 + "↳ Run tile model" in text
+    assert "## Detailed timing summary" not in text

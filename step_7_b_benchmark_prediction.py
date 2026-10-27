@@ -327,7 +327,7 @@ def summary_tables(entries, heading):
 def report_markdown(report):
     """Render totals first, followed by timing details and configuration."""
     lines = ["# Prediction benchmark", "", f"Created (UTC): {markdown_cell(report.get('created_utc'))}",
-             "", "Durations are in seconds. Nested measurements overlap and must not be added together.",
+             "", "Durations are in seconds. Parent timings include their child measurements.",
              "Cold is the first photo in a new process; warm runs reuse loaded models.", ""]
     processes = report.get("processes", [])
     summary = report.get("summary", [])
@@ -348,29 +348,24 @@ def report_markdown(report):
         lines += summary_tables(entries, "Measurement")
     else:
         lines.append("No successful runs were available for the summary.")
-    lines += ["", "### Process and startup timings", "",
-              "Wall time is the elapsed time for the entire benchmark process, including predictions and report metadata collection.", "",
-              "| Process | Measurement | Duration (s) |", "| --- | --- | ---: |"]
+    lines += ["", "## Process breakdown", "",
+              "Each process wall time covers startup, all predictions in that process, and other work such as report metadata collection. Startup occurs before the predictions and is not included in their totals.", "",
+              "Each prediction table shows measured parent and child timings. Children may omit unmeasured work, and parent timings include their children; do not add every row together."]
     startup_labels = {"imports_seconds": "Python imports", "checkpoint_fingerprint": "Checkpoint fingerprint",
                       "device_setup": "Device setup", "load_segmentation_model": "Load segmentation model",
                       "load_regression_checkpoint": "Load regression checkpoint"}
     for index, process in enumerate(processes, 1):
+        lines += ["", f"### Process {index}", ""]
         if "process_wall_seconds" in process:
-            lines.append(f"| {index} | Process wall time | {process['process_wall_seconds']:.6f} |")
+            lines += [f"**Process wall time: {process['process_wall_seconds']:.6f} s**", ""]
+        lines += ["#### Startup (before predictions)", "",
+                  "These are individual startup measurements; other startup work is not separately timed.", "",
+                  "| Measurement | Duration (s) |", "| --- | ---: |"]
         for name, seconds in process.get("startup", {}).items():
-            lines.append(f"| {index} | {markdown_cell(startup_labels.get(name, name))} | {seconds:.6f} |")
-
-    lines += ["", "## Detailed timing summary", ""]
-    if summary:
-        lines += summary_tables([(item, item["stage"]) for item in summary], "Trace")
-    else:
-        lines.append("No successful runs were available for the summary.")
-
-    lines += ["", "## Individual traces"]
-    for index, process in enumerate(processes, 1):
-        lines += ["", f"### Process {index}"]
+            lines.append(f"| {markdown_cell(startup_labels.get(name, name))} | {seconds:.6f} |")
+        lines += ["", "#### Predictions"]
         for run_index, run in enumerate(process.get("runs", []), 1):
-            lines += ["", f"#### Trace {run_index}: {markdown_cell(run_label(run.get('kind')))} — {markdown_cell(run.get('photo'))}", "",
+            lines += ["", f"##### Prediction {run_index}: {markdown_cell(run_label(run.get('kind')))} — {markdown_cell(run.get('photo'))}", "",
                       f"Status: **{markdown_cell(run.get('status'))}**", ""]
             for name in ("error", "input_path_type", "segmentation_device", "regression_device", "prediction", "cached_prediction"):
                 if name in run:
@@ -379,13 +374,69 @@ def report_markdown(report):
                 lines.append(f"- Event: {markdown_cell(event)}")
             if run.get("segmentations"):
                 lines.append(f"- Segmentation details: {markdown_cell(run['segmentations'])}")
-            lines += ["", "| Trace | Duration (s) |", "| --- | ---: |"]
-            for name in ("startup_to_first_photo_seconds", "prediction_seconds", "fresh_seconds", "cached_seconds", "elapsed_seconds"):
-                if name in run:
-                    lines.append(f"| {name} | {run[name]:.6f} |")
-            for name, seconds in run.get("timings", {}).items():
-                lines.append(f"| {markdown_cell(name)} | {seconds:.6f} |")
-
+            if "startup_to_first_photo_seconds" in run:
+                lines += ["", f"Startup through this prediction: {run['startup_to_first_photo_seconds']:.6f} s (measured inside the worker; excludes process launch)."]
+            lines += ["", "| Measurement | Duration (s) |", "| --- | ---: |"]
+            timings = run.get("timings", {})
+            used = set()
+            def timing(key, label, depth=0):
+                if key in timings:
+                    used.add(key)
+                    prefix = "&nbsp;" * (depth * 4) + ("↳ " if depth else "")
+                    lines.append(f"| {prefix}{markdown_cell(label)} | {timings[key]:.6f} |")
+            def total(key, label):
+                if key in run:
+                    lines.append(f"| **{label}** | **{run[key]:.6f}** |")
+            def preprocessing(phase, label):
+                phase_keys = [key for key in timings if key.startswith(phase + ".")]
+                if phase_keys and f"{phase}.total" not in timings:
+                    lines.append(f"| &nbsp;&nbsp;&nbsp;&nbsp;↳ {label} (total not recorded) | — |")
+                timing(f"{phase}.total", label, 1)
+                segmentation_parts = ("tile_prepare", "tile_model", "tile_accumulate", "mask_finalize")
+                if any(f"{phase}.{part}" in timings for part in segmentation_parts) and f"{phase}.segmentation" not in timings:
+                    lines.append("| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↳ Segmentation (total not recorded) | — |")
+                timing(f"{phase}.segmentation", "Segmentation", 2)
+                for part, name in (("tile_prepare", "Prepare tiles"), ("tile_model", "Run tile model"),
+                                   ("tile_accumulate", "Resize and accumulate tiles"), ("mask_finalize", "Finalize mask")):
+                    timing(f"{phase}.{part}", name, 3)
+                if phase == "step1":
+                    timing("step1.standardize", "Mask and standardize", 2)
+                else:
+                    timing("step2.crop_selection", "Select lower-water crop", 2)
+                    timing("step2.crop_fit", "Fit crop to model input", 2)
+            def regression(phase):
+                timing(f"{phase}.regression", "Regression prediction", 1)
+                timing(f"{phase}.transform", "Transform input", 2)
+                timing(f"{phase}.model_forward", "Model forward pass", 2)
+            path = run.get("input_path_type", "fresh")
+            if "prediction_seconds" in run:
+                total("prediction_seconds", f"{path.capitalize()} prediction total")
+            elif "fresh_seconds" in run:
+                total("fresh_seconds", "Fresh prediction total")
+            elif "elapsed_seconds" in run:
+                total("elapsed_seconds", "Elapsed before failure")
+            timing("fresh.decode_input", "Decode input photo", 1)
+            preprocessing("step1", "Step 1: water preprocessing")
+            timing("fresh.step1_jpeg_encode", "Encode Step 1 JPEG", 1)
+            preprocessing("step2", "Step 2: lower-water preprocessing")
+            timing("fresh.step2_jpeg_encode", "Encode Step 2 JPEG", 1)
+            timing("fresh.jpeg_decode", "Decode JPEGs (both steps combined)", 1)
+            timing("fresh.save_preview", "Save preview", 1)
+            if path == "cached" and "prediction_seconds" in run:
+                timing("cached.load_preview", "Load existing preview", 1)
+                regression("cached")
+            else:
+                regression("fresh")
+            timing("fresh.write_prediction", "Write prediction record", 1)
+            timing("cached.write_prediction", "Write prediction record", 1)
+            # Older reports measured an additional cached prediction after the fresh one.
+            if "cached_seconds" in run:
+                total("cached_seconds", "Separate cached prediction total (historical benchmark)")
+                timing("cached.load_preview", "Load existing preview", 1)
+                regression("cached")
+            for key, seconds in timings.items():
+                if key not in used:
+                    lines.append(f"| ↳ Other measured trace: {markdown_cell(key)} | {seconds:.6f} |")
     lines += ["", "## Configuration and specifications", ""]
     if report.get("configuration"):
         lines += [f"Run configuration: {markdown_cell(report['configuration'])}", ""]
