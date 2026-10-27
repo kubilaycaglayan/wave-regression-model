@@ -55,7 +55,8 @@ step-5-checkpoints/*
 step-8-experiment-a-baseline/
 
 # Local prediction timing reports.
-step-7-prediction-benchmarks/
+/step-7-prediction-benchmarks/*
+!/step-7-prediction-benchmarks/README.md
 
 # Local PyTorch profiler traces.
 step-7-prediction-profiles/
