@@ -16,17 +16,25 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("photo", type=Path, help="One raw HEIC, HEIF, JPEG, or PNG photo")
     parser.add_argument("--device", default=None, help="PyTorch device, e.g. cpu or cuda")
+    parser.add_argument("--warmup", type=int, default=1, help="unprofiled repetitions per operation")
+    parser.add_argument("--repeat", type=int, default=1, help="profiled repetitions per operation")
+    parser.add_argument("--shapes", action="store_true", help="record operator input shapes")
+    parser.add_argument("--memory", action="store_true", help="record profiler memory activity")
+    parser.add_argument("--threads", type=int, help="PyTorch CPU threads")
     parser.add_argument("--output-dir", type=Path, default=PROFILE_DIR)
     return parser.parse_args()
 
 
-def operator_rows(profiler):
+def operator_rows(profiler, *, record_shapes=False):
     """Return self times in microseconds; CPU and device time can overlap."""
     rows = []
-    for event in profiler.key_averages():
+    for event in profiler.key_averages(group_by_input_shape=record_shapes):
         rows.append({"operator": event.key, "calls": event.count,
                      "self_cpu_time_us": event.self_cpu_time_total,
-                     "self_device_time_us": getattr(event, "self_device_time_total", None)})
+                     "self_device_time_us": getattr(event, "self_device_time_total", None),
+                     "input_shapes": event.input_shapes if record_shapes else None,
+                     "self_cpu_memory_bytes": getattr(event, "self_cpu_memory_usage", None),
+                     "self_device_memory_bytes": getattr(event, "self_device_memory_usage", None)})
     return sorted(rows, key=lambda row: row["self_cpu_time_us"], reverse=True)
 
 
@@ -41,7 +49,7 @@ def trace_has_device_kernels(path):
         return False
 
 
-def capture_pass(name, output_dir, torch, operation, device):
+def capture_pass(name, output_dir, torch, operation, device, *, record_shapes=False, profile_memory=False):
     """Profile one canonical operation and export even if it fails."""
     activities = [torch.profiler.ProfilerActivity.CPU]
     requested_device = torch.device(device).type == "cuda"
@@ -58,8 +66,8 @@ def capture_pass(name, output_dir, torch, operation, device):
     profiler = None
     error = None
     try:
-        with torch.profiler.profile(activities=activities, record_shapes=False,
-                                    profile_memory=False, with_stack=False) as profiler:
+        with torch.profiler.profile(activities=activities, record_shapes=record_shapes,
+                                    profile_memory=profile_memory, with_stack=False) as profiler:
             with torch.profiler.record_function(name):
                 result = operation()
     except Exception as exc:
@@ -70,7 +78,7 @@ def capture_pass(name, output_dir, torch, operation, device):
             profiler.export_chrome_trace(str(trace_path))
             capture["trace"] = trace_path.name
             capture["accelerator_kernels_in_trace"] = trace_has_device_kernels(trace_path) if requested_device else None
-            capture["operators"] = operator_rows(profiler)
+            capture["operators"] = operator_rows(profiler, record_shapes=record_shapes)
         except Exception as exc:
             capture["export_error"] = f"{type(exc).__name__}: {exc}"
             capture["status"] = "failed"
@@ -129,7 +137,11 @@ def render_report(report):
 
 def main():
     args = parse_args()
+    if args.warmup < 0 or args.repeat < 1 or (args.threads is not None and args.threads < 1):
+        raise ValueError("warmup must be nonnegative; repeat and threads must be positive")
     import torch
+    if args.threads is not None:
+        torch.set_num_threads(args.threads)
     import step_7_a_predict as prediction
     import step_1_a_water_segmentation as segmentation
     import step_1_b_preprocess_water_inputs as step1
@@ -152,14 +164,21 @@ def main():
     try:
         device = segmentation.configure_inference_device(args.device)
         report["requested_device"] = str(device)
+        contract = prediction.validate_checkpoint_preprocessing(
+            checkpoint, segmentation=segmentation, device=device,
+            step2_resolution=segmentation.SEGMENTATION_RESOLUTION, reuse_step1_mask=False,
+            project_dir=prediction.PROJECT_DIR, sha256_for=prediction.sha256_for,
+        )
         seg_model = segmentation.load_model(str(device), verbose=False)
+        prediction.validate_segmentation_revision(contract, seg_model)
         model = prediction.WaveRegressionModel.load_from_checkpoint(checkpoint, map_location=device, pretrained=False)
         model.to(device).eval()
         report["regression_backbone"] = model.backbone_name
         report["settings"] = {"resolution": segmentation.SEGMENTATION_RESOLUTION,
                               "overlapping_tiles": segmentation.USE_OVERLAPPING_TILES,
                               "tile_size": segmentation.TILE_SIZE, "tile_overlap": segmentation.TILE_OVERLAP,
-                              "record_shapes": False, "profile_memory": False, "with_stack": False}
+                              "record_shapes": args.shapes, "profile_memory": args.memory, "with_stack": False,
+                              "warmup": args.warmup, "repeat": args.repeat}
         # Wrapping the canonical functions ensures both full segmentation passes are captured.
         class Observer:
             def __init__(self): self.metadata = []
@@ -173,25 +192,34 @@ def main():
         def wrap_segmentation(module, name):
             original = module.run_segmentation
             def profiled(image, segmenter):
+                for _ in range(args.warmup):
+                    original(image, segmenter)
                 before = len(observer.metadata)
-                capture, result, error = capture_pass(name, output_dir, torch, lambda: original(image, segmenter), segmenter.device)
-                capture["device_at_end"] = str(segmenter.device)
-                capture["segmentation"] = observer.metadata[before:]
-                report["passes"].append(capture)
-                if error:
-                    raise error
+                for _ in range(args.repeat):
+                    capture, result, error = capture_pass(name, output_dir, torch, lambda: original(image, segmenter), segmenter.device,
+                                                          record_shapes=args.shapes, profile_memory=args.memory)
+                    capture["device_at_end"] = str(segmenter.device)
+                    capture["segmentation"] = observer.metadata[before:]
+                    before = len(observer.metadata)
+                    report["passes"].append(capture)
+                    if error:
+                        raise error
                 return result
             module.run_segmentation = profiled
         wrap_segmentation(step1, "step1_segmentation")
         wrap_segmentation(step2, "step2_segmentation")
         original_forward = model.forward
         def profiled_forward(*values, **kwargs):
-            capture, result, error = capture_pass("regression_forward", output_dir, torch,
-                                                  lambda: original_forward(*values, **kwargs), device)
-            capture["device_at_end"] = str(device)
-            report["passes"].append(capture)
-            if error:
-                raise error
+            for _ in range(args.warmup):
+                original_forward(*values, **kwargs)
+            for _ in range(args.repeat):
+                capture, result, error = capture_pass("regression_forward", output_dir, torch,
+                                                      lambda: original_forward(*values, **kwargs), device,
+                                                      record_shapes=args.shapes, profile_memory=args.memory)
+                capture["device_at_end"] = str(device)
+                report["passes"].append(capture)
+                if error:
+                    raise error
             return result
         model.forward = profiled_forward
         model_input, _ = prediction.preprocess_photo(photo, seg_model)

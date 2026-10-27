@@ -93,9 +93,9 @@ def test_markdown_distinguishes_single_and_multiple_samples():
     ]}
     markdown = report_markdown(report)
     assert "| ❄️ cold | Fresh prediction total | 3.000000 |" in markdown
-    assert "| 🔥 warm | Fresh prediction total | 4.000000 | 3.000000 | 5.000000 | 2 |" in markdown
+    assert "| 🔥 warm | Fresh prediction total | 4.000000 | 5.000000 | 3.000000 | 5.000000 | 2 |" in markdown
     assert "| Run | Measurement | Duration (s) |" in markdown
-    assert "| Run | Measurement | Median (s) | Min (s) | Max (s) | Samples |" in markdown
+    assert "| Run | Measurement | Median (s) | p95 (s) | Min (s) | Max (s) | Samples |" in markdown
 
 
 def test_major_timings_show_separate_prediction_trees():
@@ -135,6 +135,7 @@ def test_worker_predicts_once_per_pass_using_existing_preview(tmp_path, monkeypa
     monkeypatch.setattr(prediction, "PREVIEW_DIR", preview_dir)
     monkeypatch.setattr(prediction, "PREDICTIONS_DIR", tmp_path / "existing-predictions")
     monkeypatch.setattr(prediction, "checkpoint_path_from_env", lambda: checkpoint)
+    monkeypatch.setattr(prediction, "validate_checkpoint_preprocessing", lambda *args, **kwargs: None)
     monkeypatch.setattr(segmentation, "BENCHMARK_OBSERVER", None)
     monkeypatch.setattr(segmentation, "configure_inference_device", lambda *args: torch.device("cpu"))
     calls = []
@@ -186,3 +187,14 @@ def test_process_breakdown_places_traces_under_their_parents():
     assert process < startup < prediction < step1 < segmentation < tile < step2 < regression < forward
     assert "&nbsp;" * 12 + "↳ Run tile model" in text
     assert "## Detailed timing summary" not in text
+
+
+def test_warm_percentile_uses_nearest_rank_and_excludes_failures():
+    from step_7_b_benchmark_prediction import summarize
+    runs = [{"kind": "warm", "status": "ok", "input_path_type": "fresh",
+             "prediction_seconds": float(i), "timings": {}} for i in range(1, 21)]
+    runs.append({"kind": "warm", "status": "failed"})
+    item = summarize(runs)[0]
+    assert item["samples"] == 20
+    assert item["median_seconds"] == 10.5
+    assert item["p95_seconds"] == 19

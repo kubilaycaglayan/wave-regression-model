@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import platform
 import statistics
@@ -31,6 +32,17 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("photos", nargs="*", type=Path, help="HEIC, HEIF, JPEG or PNG files; defaults to the prediction holder")
     parser.add_argument("--repeat", type=positive_int, default=3, help="independent cold processes and warm runs (default: 3)")
+    parser.add_argument("--warm-runs", type=positive_int, default=1, help="warm predictions per photo per process")
+    parser.add_argument("--fresh", action="store_true", help="always preprocess raw photos even if a preview exists")
+    parser.add_argument("--threads", type=positive_int, help="PyTorch CPU thread count")
+    parser.add_argument("--resolution", type=positive_int, help="experimental Step 1 segmentation resolution")
+    parser.add_argument("--precision", choices=("float32", "float16", "bfloat16"), default="float32", help="experimental GPU segmentation precision")
+    parser.add_argument("--step2-resolution", type=positive_int, help="experimental Step 2 segmentation resolution")
+    parser.add_argument("--no-tiles", action="store_true", help="experiment with single-image segmentation")
+    parser.add_argument("--logits-resolution", type=positive_int, help="experimental interpolation size before single-image argmax")
+    parser.add_argument("--max-segmentation-side", type=positive_int, help="experimental size cap before tiled segmentation")
+    parser.add_argument("--tile-size", type=positive_int, help="experimental source tile size")
+    parser.add_argument("--reuse-step1-mask", action="store_true", help="experiment with projecting the Step 1 mask into Step 2")
     parser.add_argument("--device", default=None, help="PyTorch device, e.g. cpu or cuda")
     parser.add_argument("--output-dir", type=Path, default=REPORT_DIR)
     parser.add_argument("--worker-output", type=Path, help=argparse.SUPPRESS)
@@ -157,6 +169,24 @@ def worker(args, worker_started):
     import step_1_b_preprocess_water_inputs as step1
     import step_2_a_reduce_black_water_area as step2
 
+    if getattr(args, "threads", None):
+        torch.set_num_threads(args.threads)
+    if getattr(args, "resolution", None):
+        segmentation.SEGMENTATION_RESOLUTION = args.resolution
+    segmentation.INFERENCE_PRECISION = getattr(args, "precision", "float32")
+    if getattr(args, "no_tiles", False):
+        segmentation.USE_OVERLAPPING_TILES = False
+    if getattr(args, "logits_resolution", None):
+        if not getattr(args, "no_tiles", False):
+            raise ValueError("--logits-resolution requires --no-tiles")
+        segmentation.SINGLE_IMAGE_LOGITS_RESOLUTION = args.logits_resolution
+    if getattr(args, "max_segmentation_side", None):
+        if getattr(args, "no_tiles", False):
+            raise ValueError("--max-segmentation-side requires tiled segmentation")
+        segmentation.MAX_SEGMENTATION_SIDE = args.max_segmentation_side
+    if getattr(args, "tile_size", None):
+        segmentation.TILE_SIZE = args.tile_size
+
     imported = time.perf_counter()
     recorder = Recorder(torch)
     segmentation.BENCHMARK_OBSERVER = recorder
@@ -173,11 +203,20 @@ def worker(args, worker_started):
     with recorder.measure("device_setup"):
         device = segmentation.configure_inference_device(args.device)
     requested_device = str(device)
+    contract = prediction.validate_checkpoint_preprocessing(
+        checkpoint, segmentation=segmentation, device=device,
+        step2_resolution=getattr(args, "step2_resolution", None) or segmentation.SEGMENTATION_RESOLUTION,
+        reuse_step1_mask=getattr(args, "reuse_step1_mask", False),
+        project_dir=prediction.PROJECT_DIR, sha256_for=prediction.sha256_for,
+    )
     preview_paths = {photo: prediction.preview_path_for(photo) for photo in photos}
+    if contract is not None and not getattr(args, "fresh", False) and any(path.is_file() for path in preview_paths.values()):
+        raise RuntimeError("Experimental checkpoint cannot use baseline previews; pass --fresh")
     seg_model = None
-    if any(not path.is_file() for path in preview_paths.values()):
+    if getattr(args, "fresh", False) or any(not path.is_file() for path in preview_paths.values()):
         with recorder.measure("load_segmentation_model", device):
             seg_model = segmentation.load_model(str(device), verbose=False)
+            prediction.validate_segmentation_revision(contract, seg_model)
     with recorder.measure("load_regression_checkpoint", device):
         model = prediction.WaveRegressionModel.load_from_checkpoint(checkpoint, map_location=device, pretrained=False)
         model.to(device).eval()
@@ -200,7 +239,19 @@ def worker(args, worker_started):
                 recorder.phase = previous
         setattr(prediction, name, measured)
     wrap_phase("preprocess_raw_image", "step1")
+    if getattr(args, "reuse_step1_mask", False):
+        wrap_phase("preprocess_raw_image_with_projected_mask", "step1")
     wrap_phase("preprocess_step_1_image", "step2")
+    if getattr(args, "step2_resolution", None):
+        original_step2 = prediction.preprocess_step_1_image
+        def experimental_step2(image, segmenter):
+            previous = segmenter.processor.size
+            segmenter.processor.size = {"height": args.step2_resolution, "width": args.step2_resolution}
+            try:
+                return original_step2(image, segmenter)
+            finally:
+                segmenter.processor.size = previous
+        prediction.preprocess_step_1_image = experimental_step2
     wrap(prediction, "encode_step_1_output", recorder, "step1_jpeg_encode")
     wrap(prediction, "encode_step_2_output", recorder, "step2_jpeg_encode")
     wrap(prediction, "decode_rgb_bytes", recorder, "jpeg_decode")
@@ -214,7 +265,7 @@ def worker(args, worker_started):
     with tempfile.TemporaryDirectory(prefix="wave-prediction-benchmark-") as tmp:
         prediction.PREVIEW_DIR = Path(tmp) / "previews"
         prediction.PREDICTIONS_DIR = Path(tmp) / "predictions"
-        for iteration in ("cold", "warm"):
+        for iteration in ("cold", *(["warm"] * getattr(args, "warm_runs", 1))):
             for photo_index, photo in enumerate(photos):
                 prediction.PREVIEW_DIR = Path(tmp) / f"photo-{photo_index}" / "previews"
                 prediction.PREDICTIONS_DIR = Path(tmp) / f"photo-{photo_index}" / "predictions"
@@ -225,14 +276,17 @@ def worker(args, worker_started):
                 entry = {"kind": "batch" if iteration == "cold" and photo_index else iteration, "photo": str(photo), "status": "ok", "events": []}
                 try:
                     preview_path = preview_paths[photo]
-                    reused_preview = preview_path.is_file()
+                    reused_preview = preview_path.is_file() and not getattr(args, "fresh", False)
                     entry["input_path_type"] = "cached" if reused_preview else "fresh"
                     recorder.phase = entry["input_path_type"]
                     if reused_preview:
                         with recorder.measure("load_preview"):
                             model_input = prediction.load_preview(preview_path)
                     else:
-                        model_input, encoded = prediction.preprocess_photo(photo, seg_model)
+                        if getattr(args, "reuse_step1_mask", False):
+                            model_input, encoded = prediction.preprocess_photo(photo, seg_model, reuse_step1_mask=True)
+                        else:
+                            model_input, encoded = prediction.preprocess_photo(photo, seg_model)
                         with recorder.measure("save_preview"):
                             prediction.save_preview(photo, encoded)
                     with recorder.measure("regression", device):
@@ -267,7 +321,13 @@ def worker(args, worker_started):
               "regression_backbone": model.backbone_name, "checkpoint_size_bytes": checkpoint.stat().st_size,
               "environment": collect_environment(torch), "input_photos": collect_photo_specs(photos, prediction),
               "settings": {"resolution": segmentation.SEGMENTATION_RESOLUTION, "overlapping_tiles": segmentation.USE_OVERLAPPING_TILES,
-                           "tile_size": segmentation.TILE_SIZE, "tile_overlap": segmentation.TILE_OVERLAP}, "runs": runs}
+                           "tile_size": segmentation.TILE_SIZE, "tile_overlap": segmentation.TILE_OVERLAP,
+                           "step2_resolution": getattr(args, "step2_resolution", None) or segmentation.SEGMENTATION_RESOLUTION,
+                           "reuse_step1_mask": getattr(args, "reuse_step1_mask", False),
+                           "logits_resolution": segmentation.SINGLE_IMAGE_LOGITS_RESOLUTION,
+                           "max_segmentation_side": segmentation.MAX_SEGMENTATION_SIDE,
+                           "precision": segmentation.INFERENCE_PRECISION,
+                           "force_fresh": getattr(args, "fresh", False)}, "runs": runs}
     args.worker_output.write_text(json.dumps(result), encoding="utf-8")
 
 
@@ -283,6 +343,7 @@ def summarize(runs):
         for name, value in {**totals, **run["timings"]}.items():
             groups.setdefault((run["kind"], name), []).append(value)
     return [{"kind": kind, "stage": name, "samples": len(values), "median_seconds": statistics.median(values),
+             "p95_seconds": sorted(values)[math.ceil(len(values) * 0.95) - 1],
              "min_seconds": min(values), "max_seconds": max(values)}
             for (kind, name), values in sorted(groups.items())]
 
@@ -311,14 +372,14 @@ def summary_tables(entries, heading):
         if lines:
             lines.append("")
         if repeated:
-            lines += [f"| Run | {heading} | Median (s) | Min (s) | Max (s) | Samples |",
-                      "| --- | --- | ---: | ---: | ---: | ---: |"]
+            lines += [f"| Run | {heading} | Median (s) | p95 (s) | Min (s) | Max (s) | Samples |",
+                      "| --- | --- | ---: | ---: | ---: | ---: | ---: |"]
         else:
             lines += [f"| Run | {heading} | Duration (s) |", "| --- | --- | ---: |"]
         for item, label in rows:
             prefix = f"| {markdown_cell(run_label(item['kind']))} | {markdown_cell(label)} |"
             if repeated:
-                lines.append(f"{prefix} {item['median_seconds']:.6f} | {item['min_seconds']:.6f} | {item['max_seconds']:.6f} | {item['samples']} |")
+                lines.append(f"{prefix} {item['median_seconds']:.6f} | {item.get('p95_seconds', item['max_seconds']):.6f} | {item['min_seconds']:.6f} | {item['max_seconds']:.6f} | {item['samples']} |")
             else:
                 lines.append(f"{prefix} {item['median_seconds']:.6f} |")
     return lines
@@ -328,7 +389,8 @@ def report_markdown(report):
     """Render totals first, followed by timing details and configuration."""
     lines = ["# Prediction benchmark", "", f"Created (UTC): {markdown_cell(report.get('created_utc'))}",
              "", "Durations are in seconds. Parent timings include their child measurements.",
-             "Cold is the first photo in a new process; warm runs reuse loaded models.", ""]
+             "Cold is the first photo in a new process; warm runs reuse loaded models.",
+             "p95 uses the nearest-rank method on successful runs; failed runs are listed below and must be assessed separately.", ""]
     processes = report.get("processes", [])
     summary = report.get("summary", [])
     major_stages = (
@@ -475,6 +537,14 @@ def main():
             command = [sys.executable, str(Path(__file__).resolve()), "--worker-output", str(output)]
             if args.device:
                 command += ["--device", args.device]
+            command += ["--precision", args.precision]
+            for option in ("warm_runs", "threads", "resolution", "step2_resolution", "logits_resolution", "max_segmentation_side", "tile_size"):
+                value = getattr(args, option)
+                if value is not None:
+                    command += ["--" + option.replace("_", "-"), str(value)]
+            for option in ("fresh", "no_tiles", "reuse_step1_mask"):
+                if getattr(args, option):
+                    command.append("--" + option.replace("_", "-"))
             command += [str(photo.resolve()) for photo in args.photos]
             print(f"Benchmark process {index + 1}/{args.repeat}", flush=True)
             process_started = time.perf_counter()
@@ -492,7 +562,13 @@ def main():
     report_dir = args.output_dir / timestamp.strftime("%Y%m%dT%H%M%S%fZ")
     report_dir.mkdir(exist_ok=False)
     report_path = report_dir / "benchmark.json"
-    report = {"report_version": 3, "created_utc": timestamp.isoformat(), "configuration": {"repeat": args.repeat, "device_argument": args.device, "photos_argument": [str(path.resolve()) for path in args.photos]}, "processes": results, "summary": summary}
+    report = {"report_version": 3, "created_utc": timestamp.isoformat(), "configuration": {
+        "repeat": args.repeat, "warm_runs": args.warm_runs, "fresh": args.fresh,
+        "threads": args.threads, "resolution": args.resolution, "step2_resolution": args.step2_resolution,
+        "no_tiles": args.no_tiles, "reuse_step1_mask": args.reuse_step1_mask, "logits_resolution": args.logits_resolution, "device_argument": args.device,
+        "max_segmentation_side": args.max_segmentation_side, "tile_size": args.tile_size,
+        "precision": args.precision,
+        "photos_argument": [str(path.resolve()) for path in args.photos]}, "processes": results, "summary": summary}
     markdown_path = write_report_pair(report, report_path)
     print("\nStartup median times (seconds):")
     for key in results[0]["startup"]:

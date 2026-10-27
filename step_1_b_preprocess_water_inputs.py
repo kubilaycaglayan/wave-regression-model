@@ -13,7 +13,8 @@ from pathlib import Path
 from urllib.parse import quote
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image
+from scipy.ndimage import minimum_filter
 
 from data_sources import SourceOutputNames, configured_source_directories
 
@@ -38,14 +39,14 @@ def erosion_radius(image_size: tuple[int, int]) -> int:
 
 def erode_water_mask(mask: np.ndarray, image_size: tuple[int, int]) -> np.ndarray:
     radius = erosion_radius(image_size)
-    eroded = Image.fromarray((mask.astype(bool) * 255).astype(np.uint8), mode="L").filter(
-        ImageFilter.MinFilter(radius * 2 + 1)
-    )
-    return (np.asarray(eroded) > 0).astype(np.uint8)
+    # The separable minimum filter has the same edge replication as Pillow's
+    # MinFilter, without its quadratic cost at full camera resolution.
+    return minimum_filter(mask.astype(bool), size=radius * 2 + 1, mode="nearest").astype(np.uint8)
 
 
 def water_bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
-    ys, xs = np.where(mask.astype(bool))
+    ys = np.flatnonzero(np.any(mask, axis=1))
+    xs = np.flatnonzero(np.any(mask, axis=0))
     if not len(xs):
         return None
     return int(xs.min()), int(ys.min()), int(xs.max() + 1), int(ys.max() + 1)
@@ -53,21 +54,43 @@ def water_bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
 
 def standardized_model_input(image: Image.Image, water_mask: np.ndarray) -> Image.Image | None:
     """Mask original RGB pixels, crop valid water, then fit inside black 224 square."""
-    mask = erode_water_mask(water_mask, image.size)
+    return _standardize_eroded_mask(image, erode_water_mask(water_mask, image.size))
+
+
+def _standardize_eroded_mask(image: Image.Image, mask: np.ndarray) -> Image.Image | None:
     bbox = water_bbox(mask)
     minimum_pixels = max(32, round(image.width * image.height * 0.0005))
     if bbox is None or int(mask.sum()) < minimum_pixels:
         return None
     left, top, right, bottom = bbox
-    rgb = np.asarray(image.convert("RGB"), dtype=np.uint8).copy()
-    rgb[mask == 0] = 0
-    cropped = Image.fromarray(rgb[top:bottom, left:right], mode="RGB")
+    rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)[top:bottom, left:right].copy()
+    rgb[mask[top:bottom, left:right] == 0] = 0
+    cropped = Image.fromarray(rgb, mode="RGB")
     scale = min(OUTPUT_SIZE[0] / cropped.width, OUTPUT_SIZE[1] / cropped.height)
     resized_size = (max(1, round(cropped.width * scale)), max(1, round(cropped.height * scale)))
     resized = cropped.resize(resized_size, Image.Resampling.LANCZOS)
     output = Image.new("RGB", OUTPUT_SIZE, (0, 0, 0))
     output.paste(resized, ((OUTPUT_SIZE[0] - resized.width) // 2, (OUTPUT_SIZE[1] - resized.height) // 2))
     return output
+
+
+def project_standardized_mask(image: Image.Image, water_mask: np.ndarray) -> np.ndarray:
+    """Project the eroded Step 1 mask into the standardized image coordinates."""
+    return _project_eroded_mask(image, erode_water_mask(water_mask, image.size))
+
+
+def _project_eroded_mask(image: Image.Image, mask: np.ndarray) -> np.ndarray:
+    bbox = water_bbox(mask)
+    if bbox is None or int(mask.sum()) < max(32, round(image.width * image.height * 0.0005)):
+        raise ValueError("Water cannot be reliably detected during Step 1 preprocessing")
+    left, top, right, bottom = bbox
+    width, height = right - left, bottom - top
+    scale = min(OUTPUT_SIZE[0] / width, OUTPUT_SIZE[1] / height)
+    size = (max(1, round(width * scale)), max(1, round(height * scale)))
+    resized = Image.fromarray(mask[top:bottom, left:right] * 255).resize(size, Image.Resampling.NEAREST)
+    output = Image.new("L", OUTPUT_SIZE)
+    output.paste(resized, ((OUTPUT_SIZE[0] - size[0]) // 2, (OUTPUT_SIZE[1] - size[1]) // 2))
+    return np.asarray(output) > 0
 
 
 def preprocess_raw_image(
@@ -78,6 +101,18 @@ def preprocess_raw_image(
         run_segmentation(image, segmentation_model), segmentation_model.water_class_ids
     )
     return standardized_model_input(image, water_mask)
+
+
+def preprocess_raw_image_with_projected_mask(
+    image: Image.Image, segmentation_model: SegmentationModel
+) -> tuple[Image.Image | None, np.ndarray | None]:
+    """Experimental single-pass mask reuse; Step 2 still receives Step 1 pixels."""
+    water_mask = extract_water_mask(run_segmentation(image, segmentation_model), segmentation_model.water_class_ids)
+    eroded = erode_water_mask(water_mask, image.size)
+    standardized = _standardize_eroded_mask(image, eroded)
+    if standardized is None:
+        return None, None
+    return standardized, _project_eroded_mask(image, eroded)
 
 
 def encode_step_1_output(image: Image.Image) -> bytes:

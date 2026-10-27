@@ -110,60 +110,57 @@ def select_crop(water_mask: np.ndarray, black_mask: np.ndarray) -> CropMetrics |
     black_table = summed_area(black_mask)
     lower_table = summed_area(lower_mask)
     minimum_crop_area = max(256, round(bbox_width * bbox_height * 0.10))
-    candidates: list[CropMetrics] = []
+    best: CropMetrics | None = None
+    best_key = None
 
     # The bottom is fixed at the lowest detected water row. Tops cannot enter the
     # lower-water band, so every accepted crop includes that band geometrically.
     for left_index, left in enumerate(boundaries[:-1]):
-        for right in boundaries[left_index + 1:]:
-            width = right - left
-            if width < 8:
-                continue
-            for top in tops:
-                height = bbox_bottom - top
-                crop_area = width * height
-                if height < 8 or crop_area < minimum_crop_area:
-                    continue
-                box = (left, top, right, bbox_bottom)
-                lower_in_field_of_view = rectangle_sum(
-                    lower_table, (left, lower_top, right, bbox_bottom)
-                )
-                if lower_in_field_of_view < minimum_water_pixels:
-                    continue
-                lower_retention = rectangle_sum(lower_table, box) / lower_in_field_of_view
-                if lower_retention + 1e-12 < MINIMUM_LOWER_RETENTION:
-                    continue
-                water_pixels = rectangle_sum(water_table, box)
-                black_pixels = rectangle_sum(black_table, box)
-                water_ratio = projected_ratio(water_pixels, crop_area, width, height)
-                black_ratio = 1.0 - projected_ratio(crop_area - black_pixels, crop_area, width, height)
-                shape_penalty = abs(np.log(width / height))
-                candidates.append(
-                    CropMetrics(box, water_ratio, black_ratio, lower_retention, water_pixels, shape_penalty)
-                )
-
-    if not candidates:
-        return None
-
-    def priority(candidate: CropMetrics) -> tuple[int, int, int, float, float, tuple[int, int, int, int]]:
-        # Retention tiers dominate. Within a tier, 0.5-point black-ratio bands
-        # prevent tiny cleanliness gains from discarding a large useful region.
-        retention_tier = (
-            3 if candidate.lower_water_retention >= 0.995
-            else 2 if candidate.lower_water_retention >= 0.98
-            else 1
-        )
-        black_bucket = round(candidate.black_ratio / BLACK_RATIO_BUCKET)
-        return (
-            -retention_tier,
-            black_bucket,
-            -candidate.water_pixels,
-            -candidate.water_ratio,
-            candidate.shape_penalty,
-            candidate.box,
-        )
-
-    return min(candidates, key=priority)
+        rights = np.asarray(boundaries[left_index + 1:], dtype=np.int64)
+        lower_counts = (lower_table[bbox_bottom, rights] - lower_table[lower_top, rights]
+                        - lower_table[bbox_bottom, left] + lower_table[lower_top, left])
+        viable = ((rights - left) >= 8) & (lower_counts >= minimum_water_pixels)
+        rights, lower_counts = rights[viable], lower_counts[viable]
+        if not len(rights):
+            continue
+        right_grid = rights[:, None]
+        top_grid = np.asarray(tops, dtype=np.int64)[None, :]
+        width_grid = right_grid - left
+        height_grid = bbox_bottom - top_grid
+        area_grid = width_grid * height_grid
+        def sums(table):
+            return (table[bbox_bottom, right_grid] - table[top_grid, right_grid]
+                    - table[bbox_bottom, left] + table[top_grid, left])
+        retention_grid = sums(lower_table) / lower_counts[:, None]
+        valid = ((height_grid >= 8) & (area_grid >= minimum_crop_area)
+                 & (retention_grid + 1e-12 >= MINIMUM_LOWER_RETENTION))
+        row, col = np.nonzero(valid)
+        if not len(row):
+            continue
+        right = rights[row]
+        top_values = top_grid[0, col]
+        width = right - left
+        heights = bbox_bottom - top_values
+        areas = width * heights
+        retention = retention_grid[row, col]
+        water_pixels, black_pixels = sums(water_table)[row, col], sums(black_table)[row, col]
+        scale = np.minimum(OUTPUT_SIZE[0] / width, OUTPUT_SIZE[1] / heights)
+        occupied = (np.maximum(1, np.rint(width * scale)) * np.maximum(1, np.rint(heights * scale))
+                    / (OUTPUT_SIZE[0] * OUTPUT_SIZE[1]))
+        water_ratio = water_pixels / areas * occupied
+        black_ratio = 1.0 - (areas - black_pixels) / areas * occupied
+        penalty = np.abs(np.log(width / heights))
+        tiers = np.where(retention >= 0.995, 3, np.where(retention >= 0.98, 2, 1))
+        buckets = np.rint(black_ratio / BLACK_RATIO_BUCKET).astype(np.int64)
+        index = np.lexsort((right, top_values, penalty, -water_ratio, -water_pixels, buckets, -tiers))[0]
+        box = (left, int(top_values[index]), int(right[index]), bbox_bottom)
+        key = (-int(tiers[index]), int(buckets[index]), -int(water_pixels[index]),
+               -float(water_ratio[index]), float(penalty[index]), box)
+        if best_key is None or key < best_key:
+            best_key = key
+            best = CropMetrics(box, float(water_ratio[index]), float(black_ratio[index]),
+                               float(retention[index]), int(water_pixels[index]), float(penalty[index]))
+    return best
 
 
 def fit_in_square(image: Image.Image, box: tuple[int, int, int, int]) -> Image.Image:
@@ -176,14 +173,19 @@ def fit_in_square(image: Image.Image, box: tuple[int, int, int, int]) -> Image.I
 
 
 def preprocess_step_1_image(
-    image: Image.Image, segmentation_model: SegmentationModel
+    image: Image.Image, segmentation_model: SegmentationModel, *, projected_mask: np.ndarray | None = None
 ) -> Step2PreprocessingResult | None:
     """Run the canonical Step 2 lower-water crop on a Step 1 image."""
     rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
     source_black_mask = np.all(rgb <= BLACK_THRESHOLD, axis=2)
-    segmentation_mask = extract_water_mask(
-        run_segmentation(image, segmentation_model), segmentation_model.water_class_ids
-    ).astype(bool)
+    if projected_mask is None:
+        segmentation_mask = extract_water_mask(
+            run_segmentation(image, segmentation_model), segmentation_model.water_class_ids
+        ).astype(bool)
+    else:
+        if projected_mask.shape != source_black_mask.shape:
+            raise ValueError("Projected water mask must match the Step 1 image dimensions")
+        segmentation_mask = projected_mask.astype(bool)
     water_mask = segmentation_mask & ~source_black_mask
     crop = select_crop(water_mask, source_black_mask)
     if crop is None:

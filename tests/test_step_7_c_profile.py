@@ -34,3 +34,11 @@ def test_trace_detection_and_report_marks_unavailable_device(tmp_path):
     assert "No accelerator kernel events" in rendered
     assert "Not available" in rendered
     assert "not prediction latency measurements" in rendered
+
+
+def test_capture_optionally_records_shapes_and_memory(tmp_path):
+    capture, _, error = capture_pass("shapes", tmp_path, torch, lambda: torch.ones((2, 3)).square(), "cpu",
+                                     record_shapes=True, profile_memory=True)
+    assert error is None
+    row = next(row for row in capture["operators"] if row["operator"] == "aten::square")
+    assert row["input_shapes"] and row["self_cpu_memory_bytes"] is not None

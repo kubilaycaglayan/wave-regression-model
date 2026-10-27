@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable, Mapping
 
 import torch
+import step_1_a_water_segmentation as segmentation
 from torchvision_compat import ensure_torchvision_operator_schemas
 
 ensure_torchvision_operator_schemas()
@@ -29,10 +30,12 @@ from step_1_b_preprocess_water_inputs import (
     decode_rgb_bytes,
     encode_step_1_output,
     preprocess_raw_image,
+    preprocess_raw_image_with_projected_mask,
 )
 from step_2_a_reduce_black_water_area import encode_step_2_output, preprocess_step_1_image
 from step_4_a_wave_dataset import IMAGE_SIZE, build_evaluation_transform
 from step_5_a_wave_regression_model import WaveRegressionModel
+from step_7_g_checkpoint_contract import validate_checkpoint_preprocessing, validate_segmentation_revision
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -72,7 +75,12 @@ def print_timing(label: str, started: float) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    return argparse.ArgumentParser(description=__doc__).parse_args()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--threads", type=int, help="PyTorch CPU threads; benchmark for your hardware")
+    args = parser.parse_args()
+    if args.threads is not None and args.threads < 1:
+        parser.error("--threads must be positive")
+    return args
 
 
 def find_input_photos() -> list[Path]:
@@ -95,7 +103,7 @@ def find_input_photos() -> list[Path]:
 
 
 def preprocess_photo(
-    path: Path, segmentation_model: SegmentationModel
+    path: Path, segmentation_model: SegmentationModel, *, reuse_step1_mask: bool = False
 ) -> tuple[Image.Image, bytes]:
     """Reproduce the persisted Step 1 -> Step 2 training pipeline in memory."""
     started = time.perf_counter()
@@ -107,7 +115,11 @@ def preprocess_photo(
     print_timing("Decode input", started)
 
     started = time.perf_counter()
-    step_1_image = preprocess_raw_image(raw_image, segmentation_model)
+    projected_mask = None
+    if reuse_step1_mask:
+        step_1_image, projected_mask = preprocess_raw_image_with_projected_mask(raw_image, segmentation_model)
+    else:
+        step_1_image = preprocess_raw_image(raw_image, segmentation_model)
     if step_1_image is None:
         raise RuntimeError("Water cannot be reliably detected during Step 1 preprocessing")
     print_timing("Step 1 segmentation and standardization", started)
@@ -118,7 +130,10 @@ def preprocess_photo(
     print_timing("Step 1 JPEG round trip", started)
 
     started = time.perf_counter()
-    step_2_output = preprocess_step_1_image(persisted_step_1, segmentation_model)
+    if reuse_step1_mask:
+        step_2_output = preprocess_step_1_image(persisted_step_1, segmentation_model, projected_mask=projected_mask)
+    else:
+        step_2_output = preprocess_step_1_image(persisted_step_1, segmentation_model)
     if step_2_output is None:
         raise RuntimeError("Water cannot be reliably detected for the lower-water Step 2 crop")
     step_2_image = step_2_output.image
@@ -311,7 +326,9 @@ def predict(
 
 
 def main() -> None:
-    parse_args()
+    args = parse_args()
+    if args.threads is not None:
+        torch.set_num_threads(args.threads)
     try:
         total_started = time.perf_counter()
         transformers_logging.disable_progress_bar()
@@ -324,6 +341,11 @@ def main() -> None:
         print_timing("Fingerprint checkpoint", checkpoint_started)
 
         device = configure_inference_device(verbose=True)
+        contract = validate_checkpoint_preprocessing(
+            checkpoint_path, segmentation=segmentation, device=device,
+            step2_resolution=segmentation.SEGMENTATION_RESOLUTION, reuse_step1_mask=False,
+            project_dir=PROJECT_DIR, sha256_for=sha256_for,
+        )
         preview_inputs: dict[Path, Image.Image] = {}
         for photo in photos:
             preview_path = preview_path_for(photo)
@@ -354,6 +376,7 @@ def main() -> None:
         if any(photo not in preview_inputs for photo in pending_photos):
             started = time.perf_counter()
             segmentation_model = load_segmentation_model(str(device), verbose=False)
+            validate_segmentation_revision(contract, segmentation_model)
             print_timing("Load segmentation model", started)
 
         started = time.perf_counter()

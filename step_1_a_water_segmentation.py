@@ -37,6 +37,17 @@ USE_OVERLAPPING_TILES = True
 TILE_SIZE = 768
 TILE_OVERLAP = 0.25
 
+# Optional experimental single-image class-score interpolation size. None keeps
+# the historical single-image behavior (argmax before nearest-neighbor resize).
+SINGLE_IMAGE_LOGITS_RESOLUTION = None
+
+# Experimental cap on the source dimensions used for segmentation only.
+# The returned class map is projected back to the original photo dimensions.
+MAX_SEGMENTATION_SIDE = None
+
+# Experimental autocast is opt-in; CPU fallback always uses full precision.
+INFERENCE_PRECISION = "float32"
+
 # Useful while comparing resolutions and tile settings. Disable for quieter
 # logs after choosing a stable configuration.
 LOG_TILE_TIMING = True
@@ -54,6 +65,18 @@ class SegmentationModel:
     processor: SegformerImageProcessor
     water_class_ids: tuple[int, ...]
     device: torch.device
+
+
+def model_logits(segmentation_model: SegmentationModel, inputs: dict[str, torch.Tensor]) -> torch.Tensor:
+    """Run the segmenter with optional accelerator-only autocasting."""
+    types = {"float32": None, "float16": torch.float16, "bfloat16": torch.bfloat16}
+    if INFERENCE_PRECISION not in types:
+        raise ValueError(f"Unsupported segmentation precision: {INFERENCE_PRECISION}")
+    dtype = types[INFERENCE_PRECISION]
+    context = (torch.autocast(device_type="cuda", dtype=dtype)
+               if dtype is not None and segmentation_model.device.type == "cuda" else nullcontext())
+    with context:
+        return segmentation_model.model(**inputs).logits
 
 
 def configure_inference_device(device: str | None = None, *, verbose: bool = True) -> torch.device:
@@ -163,7 +186,7 @@ def run_overlapping_segmentation(
                 inputs = segmentation_model.processor(images=tile, return_tensors="pt")
                 inputs = {name: value.to(segmentation_model.device) for name, value in inputs.items()}
             with measure("tile_model"):
-                logits = segmentation_model.model(**inputs).logits
+                logits = model_logits(segmentation_model, inputs)
             with measure("tile_accumulate"):
                 logits = torch.nn.functional.interpolate(
                     logits, size=(bottom - top, right - left), mode="bilinear", align_corners=False,
@@ -186,12 +209,34 @@ def run_overlapping_segmentation(
 def run_segmentation(image: Image.Image, segmentation_model: SegmentationModel) -> torch.Tensor:
     """Return a source-resolution predicted class-ID map."""
     try:
+        if MAX_SEGMENTATION_SIDE is not None and USE_OVERLAPPING_TILES:
+            if MAX_SEGMENTATION_SIDE < 1:
+                raise ValueError("MAX_SEGMENTATION_SIDE must be positive")
+            longest = max(image.size)
+            if longest > MAX_SEGMENTATION_SIDE:
+                scale = MAX_SEGMENTATION_SIDE / longest
+                reduced = image.resize((max(1, round(image.width * scale)),
+                                        max(1, round(image.height * scale))), Image.Resampling.LANCZOS)
+                class_map = run_overlapping_segmentation(reduced, segmentation_model)
+                resized = Image.fromarray(class_map.numpy(), mode="L").resize(image.size, Image.Resampling.NEAREST)
+                return torch.from_numpy(np.asarray(resized, dtype=np.uint8).copy())
         if USE_OVERLAPPING_TILES:
             return run_overlapping_segmentation(image, segmentation_model)
 
+        if BENCHMARK_OBSERVER is not None:
+            BENCHMARK_OBSERVER.segmentation_metadata(image.width, image.height, 1, "none", str(segmentation_model.device))
         inputs = segmentation_model.processor(images=image.convert("RGB"), return_tensors="pt")
         inputs = {name: value.to(segmentation_model.device) for name, value in inputs.items()}
-        logits = segmentation_model.model(**inputs).logits
+        logits = model_logits(segmentation_model, inputs)
+        if SINGLE_IMAGE_LOGITS_RESOLUTION is not None:
+            if SINGLE_IMAGE_LOGITS_RESOLUTION < 1:
+                raise ValueError("SINGLE_IMAGE_LOGITS_RESOLUTION must be positive")
+            target = ((image.height, image.width) if max(image.size) <= SINGLE_IMAGE_LOGITS_RESOLUTION
+                      else (SINGLE_IMAGE_LOGITS_RESOLUTION, SINGLE_IMAGE_LOGITS_RESOLUTION))
+            logits = torch.nn.functional.interpolate(
+                logits, size=target,
+                mode="bilinear", align_corners=False,
+            )
         class_map = logits.argmax(dim=1)[0].to(torch.uint8).cpu().numpy()
         resized = Image.fromarray(class_map, mode="L").resize(image.size, Image.Resampling.NEAREST)
         return torch.from_numpy(np.asarray(resized, dtype=np.uint8).copy())
