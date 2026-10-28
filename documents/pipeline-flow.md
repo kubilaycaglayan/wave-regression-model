@@ -5,6 +5,8 @@ Two views of the same system:
 1. **One incoming photo** — the inference path from a raw sea photo to a waviness score.
 2. **Full lifecycle** — capture, preprocessing, labeling, splitting, training, deployment, the public website, and the retraining loop.
 
+The technical training stack is a separate document: [training-stack.md](training-stack.md).
+
 ## Context
 
 - This is a localized project for **Samsun, Turkey**. Photos come from a fixed location and camera, with 3–4 recurring angles, usually 2–10 photos per day.

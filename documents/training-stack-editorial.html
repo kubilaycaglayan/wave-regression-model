@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>From raw photo to checkpoint · Training stack</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --paper: #f5f5f5;
+      --paper-2: #ececec;
+      --ink: #2d3142;
+      --muted: #4f5d75;
+      --soft: #5a6580;
+      --accent: #bf4520;
+      --rule: rgba(45, 49, 66, 0.12);
+      --font-sans: 'Geist', system-ui, sans-serif;
+      --font-serif: 'Instrument Serif', serif;
+      --font-mono: 'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--paper);
+      color: var(--ink);
+      min-height: 100vh;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1520px; margin: 0 auto; min-width: 0; }
+    .eyebrow {
+      font: 500 0.66rem var(--font-mono);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+    h1 {
+      font: 400 clamp(1.75rem, 2.4vw + 1rem, 2.5rem)/1.15 var(--font-serif);
+      letter-spacing: -0.02em;
+      margin-bottom: 0.75rem;
+    }
+    .subtitle {
+      max-width: 920px;
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.5;
+      margin-bottom: 2rem;
+    }
+    .subtitle strong { font-weight: 600; color: var(--ink); }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    svg { width: 100%; min-width: 1440px; display: block; }
+    .note {
+      max-width: 980px;
+      margin-top: 1.25rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.55;
+    }
+    code { font-family: var(--font-mono); font-size: 0.84em; }
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-top: 2rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--rule);
+      color: var(--muted);
+      font: 400 0.7rem var(--font-mono);
+      letter-spacing: 0.04em;
+    }
+    footer a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--rule); }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">TRAINING STACK · DIAGRAM DESIGN</p>
+    <h1>From raw photo to checkpoint</h1>
+    <p class="subtitle">Four semantic pools for the current <strong>fast-v1</strong> training path. EfficientNet-B0 stays frozen; only the regression head is trained.</p>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1440 980" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="training-stack-editorial-title training-stack-editorial-desc">
+        <title id="training-stack-editorial-title">From raw photo to checkpoint</title>
+        <desc id="training-stack-editorial-desc">Training stack diagram grouped into four semantic pools: data preparation, labels and dataset, model and training, and checkpoint and consumers.</desc>
+
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+          </marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#bf4520"/>
+          </marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/>
+          </marker>
+          <style>
+            .pool { fill: #ececec; stroke: rgba(45, 49, 66, 0.12); stroke-width: 0.8; }
+            .pool-label { fill: #4f5d75; font: 500 8px 'Geist Mono', ui-monospace, monospace; letter-spacing: 0.14em; }
+            .node-mask { fill: #ececec; }
+            .node-input { fill: rgba(79, 93, 117, 0.10); stroke: #5a6580; stroke-width: 1; }
+            .node-backend { fill: #ffffff; stroke: #2d3142; stroke-width: 1; }
+            .node-store { fill: rgba(45, 49, 66, 0.05); stroke: #4f5d75; stroke-width: 1; }
+            .node-frozen { fill: rgba(45, 49, 66, 0.03); stroke: rgba(45, 49, 66, 0.30); stroke-width: 1; }
+            .node-focal { fill: rgba(191, 69, 32, 0.08); stroke: #bf4520; stroke-width: 1.2; }
+            .node-external { fill: rgba(45, 49, 66, 0.03); stroke: rgba(45, 49, 66, 0.30); stroke-width: 1; }
+            .tag-box { fill: none; stroke: rgba(45, 49, 66, 0.25); stroke-width: 0.8; }
+            .focal-tag { stroke: rgba(191, 69, 32, 0.50); }
+            .tag-text { fill: rgba(45, 49, 66, 0.80); font: 500 7px 'Geist Mono', ui-monospace, monospace; letter-spacing: 0.08em; text-anchor: middle; }
+            .focal-tag-text { fill: #2d3142; }
+            .node-title { fill: #2d3142; font: 600 12px 'Geist', system-ui, sans-serif; text-anchor: middle; }
+            .node-sub { fill: #4f5d75; font: 400 8.5px 'Geist Mono', ui-monospace, monospace; text-anchor: middle; }
+            .arrow { stroke: #4f5d75; stroke-width: 1; fill: none; }
+            .arrow-accent { stroke: #bf4520; stroke-width: 1.2; fill: none; }
+            .arrow-label { fill: #4f5d75; font: 8px 'Geist Mono', ui-monospace, monospace; letter-spacing: 0.06em; text-anchor: middle; }
+            .legend-key { fill: #4f5d75; font: 500 8px 'Geist Mono', ui-monospace, monospace; letter-spacing: 0.14em; }
+            .legend-text { fill: #4f5d75; font: 8.5px 'Geist', system-ui, sans-serif; }
+          </style>
+        </defs>
+
+        <rect width="1440" height="980" fill="#f5f5f5"/>
+
+        <g id="pools">
+          <rect class="pool" x="40" y="40" width="1360" height="180" rx="8"/>
+          <rect class="pool" x="40" y="240" width="1360" height="180" rx="8"/>
+          <rect class="pool" x="40" y="440" width="1360" height="180" rx="8"/>
+          <rect class="pool" x="40" y="640" width="1360" height="280" rx="8"/>
+          <text class="pool-label" x="60" y="62">01 · DATA PREPARATION</text>
+          <text class="pool-label" x="60" y="262">02 · LABELS &amp; DATASET</text>
+          <text class="pool-label" x="60" y="462">03 · MODEL &amp; TRAINING</text>
+          <text class="pool-label" x="60" y="662">04 · CHECKPOINT &amp; CONSUMERS</text>
+        </g>
+
+        <g id="connectors">
+          <line class="arrow" x1="280" y1="130" x2="340" y2="130" marker-end="url(#arrow)"/>
+          <line class="arrow" x1="540" y1="130" x2="600" y2="130" marker-end="url(#arrow)"/>
+          <line class="arrow" x1="800" y1="130" x2="860" y2="130" marker-end="url(#arrow)"/>
+          <line class="arrow" x1="960" y1="176" x2="960" y2="284" marker-end="url(#arrow)"/>
+          <line class="arrow" x1="860" y1="330" x2="800" y2="330" marker-end="url(#arrow)"/>
+          <line class="arrow" x1="600" y1="330" x2="540" y2="330" marker-end="url(#arrow)"/>
+          <line class="arrow" x1="440" y1="376" x2="440" y2="484" marker-end="url(#arrow)"/>
+          <line class="arrow" x1="540" y1="530" x2="600" y2="530" marker-end="url(#arrow)"/>
+          <line class="arrow" x1="800" y1="530" x2="860" y2="530" marker-end="url(#arrow)"/>
+          <line class="arrow" x1="1060" y1="530" x2="1120" y2="530" marker-end="url(#arrow)"/>
+          <line class="arrow" x1="1220" y1="576" x2="1220" y2="684" marker-end="url(#arrow)"/>
+          <line class="arrow" x1="1120" y1="730" x2="1060" y2="730" marker-end="url(#arrow)"/>
+          <line class="arrow" x1="1220" y1="776" x2="1220" y2="804" marker-end="url(#arrow)"/>
+          <line class="arrow" x1="960" y1="776" x2="960" y2="804" marker-end="url(#arrow)"/>
+        </g>
+
+        <g id="arrow-labels">
+          <rect x="1228" y="616" width="88" height="12" rx="2" fill="#ececec"/>
+          <text class="arrow-label" x="1272" y="625">BEST VAL_MAE</text>
+        </g>
+
+        <g id="nodes">
+          <g id="node-raw">
+            <rect class="node-mask" x="80" y="84" width="200" height="92" rx="6"/>
+            <rect class="node-input" x="80" y="84" width="200" height="92" rx="6"/>
+            <rect class="tag-box" x="88" y="92" width="36" height="12" rx="2"/>
+            <text class="tag-text" x="106" y="101">IO</text>
+            <text class="node-title" x="180" y="126">Raw sea photo</text>
+            <text class="node-sub" x="180" y="144">Pillow + pillow-heif</text>
+            <text class="node-sub" x="180" y="158">EXIF orientation</text>
+          </g>
+
+          <g id="node-seg1">
+            <rect class="node-mask" x="340" y="84" width="200" height="92" rx="6"/>
+            <rect class="node-backend" x="340" y="84" width="200" height="92" rx="6"/>
+            <rect class="tag-box" x="348" y="92" width="36" height="12" rx="2"/>
+            <text class="tag-text" x="366" y="101">SEG</text>
+            <text class="node-title" x="440" y="126">Step 1 · sea segmentation</text>
+            <text class="node-sub" x="440" y="144">Transformers · SegFormer-B2</text>
+            <text class="node-sub" x="440" y="158">448 px · single pass · FP16</text>
+          </g>
+
+          <g id="node-mask">
+            <rect class="node-mask" x="600" y="84" width="200" height="92" rx="6"/>
+            <rect class="node-backend" x="600" y="84" width="200" height="92" rx="6"/>
+            <rect class="tag-box" x="608" y="92" width="36" height="12" rx="2"/>
+            <text class="tag-text" x="626" y="101">IMG</text>
+            <text class="node-title" x="700" y="126">Mask &amp; standardize</text>
+            <text class="node-sub" x="700" y="144">SciPy erosion · NumPy crop</text>
+            <text class="node-sub" x="700" y="158">Pillow · 224×224 JPEG q95</text>
+          </g>
+
+          <g id="node-seg2">
+            <rect class="node-mask" x="860" y="84" width="200" height="92" rx="6"/>
+            <rect class="node-backend" x="860" y="84" width="200" height="92" rx="6"/>
+            <rect class="tag-box" x="868" y="92" width="36" height="12" rx="2"/>
+            <text class="tag-text" x="886" y="101">SEG</text>
+            <text class="node-title" x="960" y="126">Step 2 · lower-water crop</text>
+            <text class="node-sub" x="960" y="144">same SegFormer-B2 at 384 px</text>
+            <text class="node-sub" x="960" y="158">NumPy summed-area search</text>
+          </g>
+
+          <g id="node-label">
+            <rect class="node-mask" x="860" y="284" width="200" height="92" rx="6"/>
+            <rect class="node-store" x="860" y="284" width="200" height="92" rx="6"/>
+            <rect class="tag-box" x="868" y="292" width="36" height="12" rx="2"/>
+            <text class="tag-text" x="886" y="301">CSV</text>
+            <text class="node-title" x="960" y="326">Manual waviness labels</text>
+            <text class="node-sub" x="960" y="344">Python HTTP server</text>
+            <text class="node-sub" x="960" y="358">0.00–1.00 in 0.05 steps</text>
+          </g>
+
+          <g id="node-split">
+            <rect class="node-mask" x="600" y="284" width="200" height="92" rx="6"/>
+            <rect class="node-store" x="600" y="284" width="200" height="92" rx="6"/>
+            <rect class="tag-box" x="608" y="292" width="36" height="12" rx="2"/>
+            <text class="tag-text" x="626" y="301">CSV</text>
+            <text class="node-title" x="700" y="326">Dataset split</text>
+            <text class="node-sub" x="700" y="344">stdlib csv · hashlib · json</text>
+            <text class="node-sub" x="700" y="358">train / validation / test</text>
+          </g>
+
+          <g id="node-dataset">
+            <rect class="node-mask" x="340" y="284" width="200" height="92" rx="6"/>
+            <rect class="node-store" x="340" y="284" width="200" height="92" rx="6"/>
+            <rect class="tag-box" x="348" y="292" width="36" height="12" rx="2"/>
+            <text class="tag-text" x="366" y="301">DS</text>
+            <text class="node-title" x="440" y="326">PyTorch Dataset</text>
+            <text class="node-sub" x="440" y="344">+ LightningDataModule</text>
+            <text class="node-sub" x="440" y="358">flip · color jitter · normalize</text>
+          </g>
+
+          <g id="node-backbone">
+            <rect class="node-mask" x="340" y="484" width="200" height="92" rx="6"/>
+            <rect class="node-frozen" x="340" y="484" width="200" height="92" rx="6"/>
+            <rect class="tag-box" x="348" y="492" width="36" height="12" rx="2"/>
+            <text class="tag-text" x="366" y="501">BB</text>
+            <text class="node-title" x="440" y="526">EfficientNet-B0</text>
+            <text class="node-sub" x="440" y="544">torchvision · ImageNet</text>
+            <text class="node-sub" x="440" y="558">FROZEN · 4,007,548 params</text>
+          </g>
+
+          <g id="node-head">
+            <rect class="node-mask" x="600" y="484" width="200" height="92" rx="6"/>
+            <rect class="node-focal" x="600" y="484" width="200" height="92" rx="6"/>
+            <rect class="tag-box focal-tag" x="608" y="492" width="36" height="12" rx="2"/>
+            <text class="tag-text focal-tag-text" x="626" y="501">HEAD</text>
+            <text class="node-title" x="700" y="526">Linear(1280→1) + Sigmoid</text>
+            <text class="node-sub" x="700" y="544">TRAINABLE · 1,281 params</text>
+            <text class="node-sub" x="700" y="558">4,008,829 total</text>
+          </g>
+
+          <g id="node-trainer">
+            <rect class="node-mask" x="860" y="484" width="200" height="92" rx="6"/>
+            <rect class="node-backend" x="860" y="484" width="200" height="92" rx="6"/>
+            <rect class="tag-box" x="868" y="492" width="36" height="12" rx="2"/>
+            <text class="tag-text" x="886" y="501">TRAIN</text>
+            <text class="node-title" x="960" y="526">PyTorch Lightning Trainer</text>
+            <text class="node-sub" x="960" y="544">SmoothL1Loss · AdamW 1e-3</text>
+            <text class="node-sub" x="960" y="558">100 epochs · batch 8 · seed 42</text>
+          </g>
+
+          <g id="node-select">
+            <rect class="node-mask" x="1120" y="484" width="200" height="92" rx="6"/>
+            <rect class="node-backend" x="1120" y="484" width="200" height="92" rx="6"/>
+            <rect class="tag-box" x="1128" y="492" width="36" height="12" rx="2"/>
+            <text class="tag-text" x="1146" y="501">VAL</text>
+            <text class="node-title" x="1220" y="526">Checkpoint + early stop</text>
+            <text class="node-sub" x="1220" y="544">ModelCheckpoint · EarlyStopping</text>
+            <text class="node-sub" x="1220" y="558">monitor val_mae · patience 10</text>
+          </g>
+
+          <g id="node-run">
+            <rect class="node-mask" x="860" y="684" width="200" height="92" rx="6"/>
+            <rect class="node-store" x="860" y="684" width="200" height="92" rx="6"/>
+            <rect class="tag-box" x="868" y="692" width="36" height="12" rx="2"/>
+            <text class="tag-text" x="886" y="701">RUN</text>
+            <text class="node-title" x="960" y="726">Finalized run directory</text>
+            <text class="node-sub" x="960" y="744">vN-mae-{mae}-…-fast</text>
+            <text class="node-sub" x="960" y="758">summary · manifest · history · plot</text>
+          </g>
+
+          <g id="node-ckpt">
+            <rect class="node-mask" x="1120" y="684" width="200" height="92" rx="6"/>
+            <rect class="node-focal" x="1120" y="684" width="200" height="92" rx="6"/>
+            <rect class="tag-box focal-tag" x="1128" y="692" width="36" height="12" rx="2"/>
+            <text class="tag-text focal-tag-text" x="1146" y="701">CKPT</text>
+            <text class="node-title" x="1220" y="726">Best .ckpt</text>
+            <text class="node-sub" x="1220" y="744">state_dict + hyperparameters</text>
+            <text class="node-sub" x="1220" y="758">+ fast-v1 contract</text>
+          </g>
+
+          <g id="node-step6">
+            <rect class="node-mask" x="860" y="804" width="200" height="92" rx="6"/>
+            <rect class="node-external" x="860" y="804" width="200" height="92" rx="6"/>
+            <rect class="tag-box" x="868" y="812" width="36" height="12" rx="2"/>
+            <text class="tag-text" x="886" y="821">EVAL</text>
+            <text class="node-title" x="960" y="846">Step 6 · test evaluation</text>
+            <text class="node-sub" x="960" y="864">latest manifest + test snapshot</text>
+            <text class="node-sub" x="960" y="878">MAE / RMSE + gallery</text>
+          </g>
+
+          <g id="node-step7">
+            <rect class="node-mask" x="1120" y="804" width="200" height="92" rx="6"/>
+            <rect class="node-external" x="1120" y="804" width="200" height="92" rx="6"/>
+            <rect class="tag-box" x="1128" y="812" width="36" height="12" rx="2"/>
+            <text class="tag-text" x="1146" y="821">PRED</text>
+            <text class="node-title" x="1220" y="846">Step 7 · prediction</text>
+            <text class="node-sub" x="1220" y="864">raw photo → waviness score</text>
+            <text class="node-sub" x="1220" y="878">configured checkpoint</text>
+          </g>
+        </g>
+
+        <g id="legend">
+          <line x1="40" y1="948" x2="1400" y2="948" stroke="rgba(45, 49, 66, 0.12)" stroke-width="0.8"/>
+          <text class="legend-key" x="60" y="966">LEGEND</text>
+          <rect x="140" y="956" width="20" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <text class="legend-text" x="168" y="966">PROCESSING</text>
+          <rect x="300" y="956" width="20" height="12" rx="2" fill="rgba(45, 49, 66, 0.03)" stroke="rgba(45, 49, 66, 0.30)" stroke-width="1"/>
+          <text class="legend-text" x="328" y="966">FROZEN</text>
+          <rect x="420" y="956" width="20" height="12" rx="2" fill="rgba(45, 49, 66, 0.05)" stroke="#4f5d75" stroke-width="1"/>
+          <text class="legend-text" x="448" y="966">DATA / METADATA</text>
+          <rect x="620" y="956" width="20" height="12" rx="2" fill="rgba(191, 69, 32, 0.08)" stroke="#bf4520" stroke-width="1.2"/>
+          <text class="legend-text" x="648" y="966">TRAINABLE / ARTIFACT</text>
+          <line x1="860" y1="962" x2="888" y2="962" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+          <text class="legend-text" x="896" y="966">FLOW</text>
+        </g>
+      </svg>
+    </div>
+
+    <p class="note">The accent marks the only trainable layer and the checkpoint it produces. The four pools keep the technical detail legible without changing the pipeline: data preparation, labels and dataset, model and training, and checkpoint and consumers. Training logs torchmetrics MAE/RMSE; checkpointing and early stopping both monitor <code>val_mae</code>.</p>
+
+    <footer>
+      <span>Source: <a href="training-stack.md">training-stack.md</a></span>
+      <span>fast-v1 · shipped default skin</span>
+    </footer>
+  </div>
+</body>
+</html>
