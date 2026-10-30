@@ -18,6 +18,7 @@ import platform
 import statistics
 import sys
 import time
+from types import ModuleType
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,9 +31,10 @@ sys.path.insert(0, str(ROOT))
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--splits", nargs="+", choices=("validation", "test", "train"),
-                        default=("validation", "test"),
-                        help="fixed repository dataset splits (default: validation test)")
+    parser.add_argument("--experiment-id", default="v000_baseline",
+                        help="version directory under experiment-versions/ (default: v000_baseline)")
+    parser.add_argument("--final-test", action="store_true",
+                        help="run the reserved test split for final checks; validation is the default")
     parser.add_argument("--output-dir", type=Path, default=HERE / "runs")
     parser.add_argument("--compare-reference", type=Path,
                         help="prior report JSON; compares predictions on matched photos")
@@ -280,9 +282,11 @@ def quality_summary(records: list[dict]) -> dict:
 
 def compare_reference(report: dict, reference_path: Path) -> dict:
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
+    selected_splits = set(report.get("splits", []))
     reference_rows = {
         (row["split"], row["label_filename"]): row
         for row in reference.get("photos", [])
+        if row.get("split") in selected_splits
     }
     candidate_rows = {
         (row["split"], row["label_filename"]): row
@@ -394,7 +398,10 @@ def compare_reference(report: dict, reference_path: Path) -> dict:
         "candidate_minus_reference_signed_prediction_mean": statistics.mean(
             new["prediction"] - old["prediction"] for new, old in paired
         ),
-        "reference_quality_by_split": reference.get("quality_by_split"),
+        "reference_quality_by_split": {
+            split: metrics for split, metrics in reference.get("quality_by_split", {}).items()
+            if split in selected_splits
+        },
     }
 
 
@@ -409,8 +416,26 @@ def main() -> int:
 
     import step_7_i_experimental_migraphx_server as server
 
+    experiment_id = args.experiment_id
+    if not experiment_id.startswith("v") or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in experiment_id):
+        raise ValueError(f"Invalid experiment ID: {experiment_id!r}")
+    experiment_dir = HERE / "experiment-versions" / experiment_id
+    experiment_file = experiment_dir / "experiment.py"
+    manifest_file = experiment_dir / "experiment.json"
+    if not experiment_file.is_file() or not manifest_file.is_file():
+        raise FileNotFoundError(f"Experiment version must contain experiment.py and experiment.json: {experiment_dir}")
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    if str(experiment_dir) not in sys.path:
+        sys.path.insert(0, str(experiment_dir))
+    experiment = ModuleType(f"distil_fp32_{experiment_id}")
+    experiment.__file__ = str(experiment_file)
+    exec(compile(experiment_file.read_text(encoding="utf-8"), str(experiment_file), "exec"), experiment.__dict__)
+
     if server.EXPERIMENT != "distilled-b0-migraphx-fp32":
         raise RuntimeError("This benchmark is scoped to Distil-FP32; set WAVE_EXPERIMENT=distilled-b0-migraphx-fp32")
+    if manifest.get("id") != experiment_id:
+        raise RuntimeError(f"Experiment manifest ID does not match directory: {manifest.get('id')!r}")
+    splits = ["test"] if args.final_test else ["validation"]
     server_started = time.perf_counter()
     warmup = server.initialize_models()
     warmup["python_and_runtime_imports_ms"] = (server_started - PROCESS_START) * 1000.0
@@ -418,14 +443,14 @@ def main() -> int:
     warmup["process_start_to_models_ready_ms"] = (time.perf_counter() - PROCESS_START) * 1000.0
 
     raw_dir = ROOT / "step-0-raw-data"
-    all_rows = [item for split in args.splits for item in load_split(split, raw_dir, args.limit)]
+    all_rows = [item for split in splits for item in load_split(split, raw_dir, args.limit)]
     photos = []
     for item in all_rows:
         row = {"split": item["split"], "label_filename": item["label_filename"], "label": item["label"],
                "source_filename": item["photo"].name}
         started = time.perf_counter()
         try:
-            measured = run_instrumented(item["photo"], server)
+            measured = experiment.run_pipeline(item["photo"], server, run_instrumented)
             row.update(measured)
             row["failure"] = None
         except Exception as error:
@@ -441,7 +466,7 @@ def main() -> int:
 
     quality_by_split = {}
     latency_by_split = {}
-    for split in args.splits:
+    for split in splits:
         split_rows = [row for row in photos if row["split"] == split]
         quality_by_split[split] = quality_summary(split_rows)
         latency_by_split[split] = {
@@ -457,19 +482,23 @@ def main() -> int:
     report = {
         "schema_version": 1,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "experiment_id": experiment_id,
+        "experiment_name": manifest.get("name", experiment_id),
+        "experiment_hypothesis": manifest.get("hypothesis"),
+        "experiment_status": manifest.get("status", "active"),
         "candidate": "Distil-FP32 MIGraphX FP32 + v18 EfficientNet-B0 CPU regressor",
         "top_level_categories": ["warmup", "preprocessing", "waviness_inference"],
         "warmup": warmup,
         "dataset": {
-            "splits": list(args.splits),
+            "splits": splits,
             "source_directory": str(raw_dir),
             "split_snapshot": SPLIT_SNAPSHOT,
             "split_manifest_sha256": sha256_file(ROOT / "step-3-dataset-splits/snapshots" / SPLIT_SNAPSHOT / "manifest.json"),
             "split_file_sha256s": {
                 split: sha256_file(ROOT / "step-3-dataset-splits/snapshots" / SPLIT_SNAPSHOT / f"{split}.csv")
-                for split in args.splits
+                for split in splits
             },
-            "split_counts": {split: sum(row["split"] == split for row in photos) for split in args.splits},
+            "split_counts": {split: sum(row["split"] == split for row in photos) for split in splits},
             "limit_per_split": args.limit,
             "labels_sha256": sha256_file(ROOT / "labels.csv"),
         },
@@ -489,11 +518,11 @@ def main() -> int:
         },
         "quality_by_split": quality_by_split,
         "latency_by_split": latency_by_split,
-        "comparison": compare_reference({"photos": photos}, args.compare_reference) if args.compare_reference else None,
+        "comparison": compare_reference({"photos": photos, "splits": splits}, args.compare_reference) if args.compare_reference else None,
         "failure_count": sum(row["failure"] is not None for row in photos),
         "photos": photos,
     }
-    output_dir = args.output_dir.resolve()
+    output_dir = args.output_dir.resolve() / experiment_id
     output_dir.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output_path = output_dir / f"distil-fp32-fine-grained-{run_id}.json"
