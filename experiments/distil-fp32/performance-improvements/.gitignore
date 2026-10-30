@@ -4,3 +4,5 @@ training-runs/**/checkpoints/
 training-runs/**/*.onnx
 training-runs/**/*.log
 training-runs/**/__pycache__/
+
+runs/**/profiles/

@@ -1,0 +1,603 @@
+{
+  "schema_version": 1,
+  "created_at_utc": "2026-10-30T12:45:13.363663+00:00",
+  "experiment_id": "v007_fast_step1_resize",
+  "experiment_name": "Faster Step 1 resize \u00b7 linear interpolation",
+  "experiment_hypothesis": "Keep v001 preprocessing unchanged except test OpenCV linear interpolation instead of area interpolation when downscaling the raw photo to the Step 1 448 \u00d7 448 input. This may reduce resize latency; the altered segmentation input must be checked for quality.",
+  "experiment_status": "smoke_only",
+  "candidate": "Distil-FP32 MIGraphX FP32 + configured waviness regressor",
+  "top_level_categories": [
+    "warmup",
+    "preprocessing",
+    "waviness_inference"
+  ],
+  "warmup": {
+    "runtime_registration_ms": 143.64773500710726,
+    "step1_session_load_ms": 4707.052255049348,
+    "regressor_session_load_ms": 13.696323963813484,
+    "warm_448_first_run_ms": 4502.248408971354,
+    "warm_regressor_ms": 6.435052957385778,
+    "warm_crop_selector_ms": 69.87315905280411,
+    "segmentation_steps_loaded": [
+      1
+    ],
+    "python_and_runtime_imports_ms": 186.27011007629335,
+    "initialize_models_total_ms": 9443.051119917072,
+    "process_start_to_models_ready_ms": 9629.32169099804
+  },
+  "profiling": null,
+  "dataset": {
+    "splits": [
+      "validation"
+    ],
+    "source_directory": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-0-raw-data",
+    "split_snapshot": "20261028T081606614158Z",
+    "split_manifest_sha256": "ce350b764a9e1dc1a5fba196f2c042666bab10676f4fed80375c2f801016b282",
+    "whole_split_manifest_sha256": null,
+    "split_file_sha256s": {
+      "validation": "ab33054c9701fcf9ca1be13acf3bfa6939fd6a6d74321f99e607516f642e2f92"
+    },
+    "split_counts": {
+      "validation": 5
+    },
+    "limit_per_split": 5,
+    "labels_sha256": "8325b27a14b4ab286268bc7613e6a2c38a8cf9caea7b6f21aecd3ce2328708e0"
+  },
+  "environment": {
+    "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+    "python": "3.12.13",
+    "opencv": "5.0.0",
+    "numpy": "2.5.3",
+    "onnxruntime": "1.29.0",
+    "execution_providers": [
+      "AzureExecutionProvider",
+      "CPUExecutionProvider",
+      "MIGraphXExecutionProvider"
+    ],
+    "step1_model": "/home/ubuntu/dev/deep-learning/wave-regression-model/experiments/distil-fp32/seg-distil-b0-step1-448-fp32-20261030.onnx",
+    "step2_model": "/home/ubuntu/dev/deep-learning/wave-regression-model/experiments/distil-fp32/seg-distil-b0-step2-384-to224-fp32-20261030.onnx",
+    "regressor_model": "/home/ubuntu/dev/deep-learning/wave-regression-model/experiments/distil-fp32/performance-improvements/training-runs/v001_coordinate_crop_single_output/run-v001-1/model.onnx",
+    "segmentation_steps_loaded": [
+      1
+    ],
+    "step1_sha256": "96410800203e3f19b7dab26980ea6413f6f9369bb868e23bfa7f14eca6681fda",
+    "step2_sha256": "8a9465acbe908092dc84634343e3de78328379708035ae164daf76bc49367afb",
+    "regressor_sha256": "50948b8e500885c56cf864d3baaeb654f5d796d4dada272165dd1470b7a2a9aa",
+    "step1_profiling_enabled": false
+  },
+  "quality_by_split": {
+    "validation": {
+      "n": 5,
+      "failures": 0,
+      "mae": 0.14000290751457214,
+      "rmse": 0.14639989921815513,
+      "prediction_mean": 0.3336001098155975
+    }
+  },
+  "latency_by_split": {
+    "validation": {
+      "preprocessing_total_ms": {
+        "count": 5,
+        "median_ms": 53.8881269749254,
+        "p95_ms": 72.4940081126988,
+        "max_ms": 72.4940081126988
+      },
+      "waviness_inference_total_ms": {
+        "count": 5,
+        "median_ms": 5.935578024946153,
+        "p95_ms": 6.325619062408805,
+        "max_ms": 6.325619062408805
+      },
+      "total_raw_to_score_ms": {
+        "count": 5,
+        "median_ms": 59.552756953053176,
+        "p95_ms": 78.43060803133994,
+        "max_ms": 78.43060803133994
+      },
+      "operations": {
+        "preprocessing.coordinates.map_crop_to_source": {
+          "count": 5,
+          "median_ms": 0.012923963367938995,
+          "p95_ms": 0.01778407022356987,
+          "max_ms": 0.01778407022356987
+        },
+        "preprocessing.decode_oriented_rgb": {
+          "count": 5,
+          "median_ms": 20.913682994432747,
+          "p95_ms": 41.201193002052605,
+          "max_ms": 41.201193002052605
+        },
+        "preprocessing.final_canvas.allocate_and_direct_resize": {
+          "count": 5,
+          "median_ms": 3.445493057370186,
+          "p95_ms": 3.8447509286925197,
+          "max_ms": 3.8447509286925197
+        },
+        "preprocessing.final_image.jpeg_decode_and_rgb_convert": {
+          "count": 5,
+          "median_ms": 0.3189269918948412,
+          "p95_ms": 0.331321032717824,
+          "max_ms": 0.331321032717824
+        },
+        "preprocessing.final_image.jpeg_encode": {
+          "count": 5,
+          "median_ms": 0.27997500728815794,
+          "p95_ms": 3.775872988626361,
+          "max_ms": 3.775872988626361
+        },
+        "preprocessing.final_image.pil_materialization": {
+          "count": 5,
+          "median_ms": 0.1024219673126936,
+          "p95_ms": 0.12133794371038675,
+          "max_ms": 0.12133794371038675
+        },
+        "preprocessing.final_mask.resize_and_apply": {
+          "count": 5,
+          "median_ms": 0.1505720429122448,
+          "p95_ms": 0.1833540154621005,
+          "max_ms": 0.1833540154621005
+        },
+        "preprocessing.final_tensor.normalize_mean_std": {
+          "count": 5,
+          "median_ms": 0.30225596856325865,
+          "p95_ms": 0.38963009137660265,
+          "max_ms": 0.38963009137660265
+        },
+        "preprocessing.final_tensor.rgb_to_float32_and_scale": {
+          "count": 5,
+          "median_ms": 0.11140899732708931,
+          "p95_ms": 0.19262102432549,
+          "max_ms": 0.19262102432549
+        },
+        "preprocessing.final_tensor.transpose_and_contiguous_tensor": {
+          "count": 5,
+          "median_ms": 0.03852194640785456,
+          "p95_ms": 0.05311903078109026,
+          "max_ms": 0.05311903078109026
+        },
+        "preprocessing.step1.lower_water_crop_selection": {
+          "count": 5,
+          "median_ms": 1.1600930010899901,
+          "p95_ms": 1.4625489711761475,
+          "max_ms": 1.4625489711761475
+        },
+        "preprocessing.step1.mask_resize_to_crop_grid": {
+          "count": 5,
+          "median_ms": 0.08099200204014778,
+          "p95_ms": 0.0990960979834199,
+          "max_ms": 0.0990960979834199
+        },
+        "preprocessing.step1.segmentation_inference": {
+          "count": 5,
+          "median_ms": 22.318584960885346,
+          "p95_ms": 25.20377899054438,
+          "max_ms": 25.20377899054438
+        },
+        "preprocessing.step1_tensor.convert_to_float32_and_scale": {
+          "count": 5,
+          "median_ms": 0.1736560370773077,
+          "p95_ms": 0.2480940893292427,
+          "max_ms": 0.2480940893292427
+        },
+        "preprocessing.step1_tensor.normalize_mean_std": {
+          "count": 5,
+          "median_ms": 1.5264389803633094,
+          "p95_ms": 1.7202920280396938,
+          "max_ms": 1.7202920280396938
+        },
+        "preprocessing.step1_tensor.resize_rgb": {
+          "count": 5,
+          "median_ms": 0.47346705105155706,
+          "p95_ms": 0.4977829521521926,
+          "max_ms": 0.4977829521521926
+        },
+        "preprocessing.step1_tensor.transpose_and_contiguous_tensor": {
+          "count": 5,
+          "median_ms": 0.14461996033787727,
+          "p95_ms": 0.2120169810950756,
+          "max_ms": 0.2120169810950756
+        },
+        "waviness_inference.score_extraction": {
+          "count": 5,
+          "median_ms": 0.009928946383297443,
+          "p95_ms": 0.015267985872924328,
+          "max_ms": 0.015267985872924328
+        },
+        "waviness_inference.v18_regressor_onnxruntime": {
+          "count": 5,
+          "median_ms": 5.912374006584287,
+          "p95_ms": 6.311091012321413,
+          "max_ms": 6.311091012321413
+        }
+      }
+    }
+  },
+  "comparison": {
+    "reference_report": "/home/ubuntu/dev/deep-learning/wave-regression-model/experiments/distil-fp32/performance-improvements/runs/v001_coordinate_crop_single_output/distil-fp32-fine-grained-20261030T114854Z.json",
+    "paired_n": 5,
+    "missing": [],
+    "candidate_failures_where_reference_succeeded": [],
+    "reference_failures_where_candidate_succeeded": [],
+    "quality_by_split_on_paired_successful_photos": {
+      "validation": {
+        "paired_n": 5,
+        "candidate_mae": 0.14000290751457214,
+        "reference_mae": 0.12410059094429017,
+        "mae_delta_candidate_minus_reference": 0.015902316570281974,
+        "candidate_rmse": 0.14639989921815513,
+        "reference_rmse": 0.12949400663388402,
+        "rmse_delta_candidate_minus_reference": 0.01690589258427111,
+        "mean_absolute_per_photo_error_delta": 0.01590231657028198,
+        "prediction_delta_mae": 0.025766468048095702,
+        "per_photo_absolute_error_regressions": 3
+      }
+    },
+    "strict_no_regression_gate": {
+      "passed": false,
+      "same_cohort_as_reference": false,
+      "no_failures_on_either_run": true,
+      "mae_not_worse_on_each_split": false,
+      "rmse_not_worse_on_each_split": false,
+      "no_individual_absolute_error_regressions": false
+    },
+    "omitted_from_candidate": [
+      "step-2_B63EE29D-11D4-421A-87A2-03DED0662BAE.jpg",
+      "step-2_F3002C10-E84A-4B56-88F7-1BAB187750BF.jpg",
+      "step-2_IMG_7148.jpg",
+      "step-2_IMG_7149.jpg",
+      "step-2_IMG_7274.jpg",
+      "step-2_IMG_7305.jpg",
+      "step-2_IMG_7306.jpg",
+      "step-2_IMG_7311.jpg",
+      "step-2_IMG_7335.jpg",
+      "step-2_IMG_7339.jpg",
+      "step-2_IMG_7371.jpg",
+      "step-2_IMG_7395.jpg",
+      "step-2_IMG_7411.jpg",
+      "step-2_IMG_7415.jpg",
+      "step-2_IMG_7418.jpg",
+      "step-2_IMG_7531.jpg",
+      "step-2_IMG_7541.jpg",
+      "step-2_IMG_7551.jpg",
+      "step-2_IMG_7565.jpg",
+      "step-2_IMG_7590.jpg",
+      "step-2_IMG_7609.jpg",
+      "step-2_IMG_7624.jpg",
+      "step-2_IMG_7634.jpg",
+      "step-2_IMG_7646.jpg",
+      "step-2_IMG_7650.jpg",
+      "step-2_IMG_7729.jpg",
+      "step-2_IMG_7744.jpg",
+      "step-2_IMG_7747.jpg",
+      "step-2_IMG_7762.jpg",
+      "step-2_IMG_7782.jpg",
+      "step-2_IMG_7792 2.jpg",
+      "step-2_IMG_7793.jpg",
+      "step-2_IMG_7796.jpg",
+      "step-2_IMG_7802.jpg",
+      "step-2_IMG_7803.jpg",
+      "step-2_IMG_7808.jpg",
+      "step-2_IMG_7809.jpg",
+      "step-2_IMG_7812.jpg",
+      "step-2_IMG_7819.jpg",
+      "step-2_IMG_7822.jpg",
+      "step-2_IMG_7837.jpg",
+      "step-2_IMG_7855.jpg"
+    ],
+    "outside_reference": [],
+    "input_or_label_mismatches": [],
+    "candidate_minus_reference_signed_prediction_mean": -0.002046358585357666,
+    "reference_quality_by_split": {
+      "validation": {
+        "n": 47,
+        "failures": 0,
+        "mae": 0.10044064420334836,
+        "rmse": 0.12618642108591752,
+        "prediction_mean": 0.41997187188331114
+      }
+    }
+  },
+  "failure_count": 0,
+  "photos": [
+    {
+      "split": "validation",
+      "label_filename": "step-2_01CD9896-FF23-4384-9FCE-AA46AF920408.jpg",
+      "label": 0.1,
+      "source_filename": "01CD9896-FF23-4384-9FCE-AA46AF920408.heic",
+      "prediction": 0.22696927189826965,
+      "preprocessing_total_ms": 55.510967038571835,
+      "waviness_inference_total_ms": 6.325619062408805,
+      "total_raw_to_score_ms": 61.8371469900012,
+      "timings_ms": {
+        "preprocessing.decode_oriented_rgb": 21.064565982669592,
+        "preprocessing.step1_tensor.resize_rgb": 0.47346705105155706,
+        "preprocessing.step1_tensor.convert_to_float32_and_scale": 0.16471906565129757,
+        "preprocessing.step1_tensor.normalize_mean_std": 1.7126979073509574,
+        "preprocessing.step1_tensor.transpose_and_contiguous_tensor": 0.1395809231325984,
+        "preprocessing.step1.segmentation_inference": 22.318584960885346,
+        "preprocessing.step1.mask_resize_to_crop_grid": 0.08099200204014778,
+        "preprocessing.step1.lower_water_crop_selection": 1.1600930010899901,
+        "preprocessing.coordinates.map_crop_to_source": 0.01778407022356987,
+        "preprocessing.final_canvas.allocate_and_direct_resize": 3.445493057370186,
+        "preprocessing.final_mask.resize_and_apply": 0.1505720429122448,
+        "preprocessing.final_image.pil_materialization": 0.12133794371038675,
+        "preprocessing.final_image.jpeg_encode": 3.775872988626361,
+        "preprocessing.final_image.jpeg_decode_and_rgb_convert": 0.3189269918948412,
+        "preprocessing.final_tensor.rgb_to_float32_and_scale": 0.19262102432549,
+        "preprocessing.final_tensor.normalize_mean_std": 0.29532297048717737,
+        "preprocessing.final_tensor.transpose_and_contiguous_tensor": 0.03451504744589329,
+        "waviness_inference.v18_regressor_onnxruntime": 6.311091012321413,
+        "waviness_inference.score_extraction": 0.009928946383297443
+      },
+      "image": {
+        "width": 3024,
+        "height": 4032,
+        "format": ".heic"
+      },
+      "intermediate": {
+        "step1_mask_crop_xyxy_224": [
+          40,
+          46,
+          204,
+          210
+        ],
+        "source_crop_xyxy": [
+          540,
+          828,
+          2754,
+          3780
+        ],
+        "regressor_tensor_shape": [
+          1,
+          3,
+          224,
+          224
+        ],
+        "regressor_tensor_dtype": "float32"
+      },
+      "failure": null,
+      "source_size_bytes": 597943,
+      "source_sha256": "c20976da713e338a10d0a3495b50d8d78b402a73943c61f210a86ec590583af3"
+    },
+    {
+      "split": "validation",
+      "label_filename": "step-2_1CC8A1C6-EDA4-4BFA-956A-FCAE3DE8EA88.jpg",
+      "label": 0.05,
+      "source_filename": "1CC8A1C6-EDA4-4BFA-956A-FCAE3DE8EA88.heic",
+      "prediction": 0.13052013516426086,
+      "preprocessing_total_ms": 46.582192997448146,
+      "waviness_inference_total_ms": 5.302110919728875,
+      "total_raw_to_score_ms": 51.885116030462086,
+      "timings_ms": {
+        "preprocessing.decode_oriented_rgb": 18.599487957544625,
+        "preprocessing.step1_tensor.resize_rgb": 0.3503259504213929,
+        "preprocessing.step1_tensor.convert_to_float32_and_scale": 0.15297706704586744,
+        "preprocessing.step1_tensor.normalize_mean_std": 1.2159979669377208,
+        "preprocessing.step1_tensor.transpose_and_contiguous_tensor": 0.14461996033787727,
+        "preprocessing.step1.segmentation_inference": 20.51410498097539,
+        "preprocessing.step1.mask_resize_to_crop_grid": 0.050754984840750694,
+        "preprocessing.step1.lower_water_crop_selection": 1.02499988861382,
+        "preprocessing.coordinates.map_crop_to_source": 0.009487965144217014,
+        "preprocessing.final_canvas.allocate_and_direct_resize": 3.267599968239665,
+        "preprocessing.final_mask.resize_and_apply": 0.11390296276658773,
+        "preprocessing.final_image.pil_materialization": 0.09601993951946497,
+        "preprocessing.final_image.jpeg_encode": 0.25766307953745127,
+        "preprocessing.final_image.jpeg_decode_and_rgb_convert": 0.313948024995625,
+        "preprocessing.final_tensor.rgb_to_float32_and_scale": 0.09012909140437841,
+        "preprocessing.final_tensor.normalize_mean_std": 0.3057830035686493,
+        "preprocessing.final_tensor.transpose_and_contiguous_tensor": 0.03536604344844818,
+        "waviness_inference.v18_regressor_onnxruntime": 5.2926039788872,
+        "waviness_inference.score_extraction": 0.006022048182785511
+      },
+      "image": {
+        "width": 3024,
+        "height": 4032,
+        "format": ".heic"
+      },
+      "intermediate": {
+        "step1_mask_crop_xyxy_224": [
+          32,
+          36,
+          192,
+          196
+        ],
+        "source_crop_xyxy": [
+          432,
+          648,
+          2592,
+          3528
+        ],
+        "regressor_tensor_shape": [
+          1,
+          3,
+          224,
+          224
+        ],
+        "regressor_tensor_dtype": "float32"
+      },
+      "failure": null,
+      "source_size_bytes": 610350,
+      "source_sha256": "c9230a11228408e31b858c102c2af73a7c21d343e8d548887758ffca63da37c3"
+    },
+    {
+      "split": "validation",
+      "label_filename": "step-2_27DBA071-3A77-4E1B-96BF-3371E85F1FB9.jpg",
+      "label": 0.0,
+      "source_filename": "27DBA071-3A77-4E1B-96BF-3371E85F1FB9.heic",
+      "prediction": 0.17778557538986206,
+      "preprocessing_total_ms": 48.089315998367965,
+      "waviness_inference_total_ms": 5.935578024946153,
+      "total_raw_to_score_ms": 54.02523488737643,
+      "timings_ms": {
+        "preprocessing.decode_oriented_rgb": 19.61066306103021,
+        "preprocessing.step1_tensor.resize_rgb": 0.36852003540843725,
+        "preprocessing.step1_tensor.convert_to_float32_and_scale": 0.17539900727570057,
+        "preprocessing.step1_tensor.normalize_mean_std": 1.1765940580517054,
+        "preprocessing.step1_tensor.transpose_and_contiguous_tensor": 0.1403230708092451,
+        "preprocessing.step1.segmentation_inference": 19.889855990186334,
+        "preprocessing.step1.mask_resize_to_crop_grid": 0.0791279599070549,
+        "preprocessing.step1.lower_water_crop_selection": 1.4625489711761475,
+        "preprocessing.coordinates.map_crop_to_source": 0.013826065696775913,
+        "preprocessing.final_canvas.allocate_and_direct_resize": 3.8447509286925197,
+        "preprocessing.final_mask.resize_and_apply": 0.1766210189089179,
+        "preprocessing.final_image.pil_materialization": 0.10246201418340206,
+        "preprocessing.final_image.jpeg_encode": 0.2585949841886759,
+        "preprocessing.final_image.jpeg_decode_and_rgb_convert": 0.2984190359711647,
+        "preprocessing.final_tensor.rgb_to_float32_and_scale": 0.10485597886145115,
+        "preprocessing.final_tensor.normalize_mean_std": 0.30225596856325865,
+        "preprocessing.final_tensor.transpose_and_contiguous_tensor": 0.03852194640785456,
+        "waviness_inference.v18_regressor_onnxruntime": 5.912374006584287,
+        "waviness_inference.score_extraction": 0.015267985872924328
+      },
+      "image": {
+        "width": 3024,
+        "height": 4032,
+        "format": ".heic"
+      },
+      "intermediate": {
+        "step1_mask_crop_xyxy_224": [
+          4,
+          24,
+          168,
+          188
+        ],
+        "source_crop_xyxy": [
+          54,
+          432,
+          2268,
+          3384
+        ],
+        "regressor_tensor_shape": [
+          1,
+          3,
+          224,
+          224
+        ],
+        "regressor_tensor_dtype": "float32"
+      },
+      "failure": null,
+      "source_size_bytes": 533900,
+      "source_sha256": "681104e9c8d402a396dc279e12575f0bc11bd46b595abd9f9a23ff61f5d8e969"
+    },
+    {
+      "split": "validation",
+      "label_filename": "step-2_31EA2168-A06F-4EA3-9F56-3B1A303E0709.jpg",
+      "label": 0.9,
+      "source_filename": "31EA2168-A06F-4EA3-9F56-3B1A303E0709.heic",
+      "prediction": 0.7839930057525635,
+      "preprocessing_total_ms": 72.4940081126988,
+      "waviness_inference_total_ms": 5.936329020187259,
+      "total_raw_to_score_ms": 78.43060803133994,
+      "timings_ms": {
+        "preprocessing.decode_oriented_rgb": 41.201193002052605,
+        "preprocessing.step1_tensor.resize_rgb": 0.4977829521521926,
+        "preprocessing.step1_tensor.convert_to_float32_and_scale": 0.2480940893292427,
+        "preprocessing.step1_tensor.normalize_mean_std": 1.7202920280396938,
+        "preprocessing.step1_tensor.transpose_and_contiguous_tensor": 0.2120169810950756,
+        "preprocessing.step1.segmentation_inference": 25.20377899054438,
+        "preprocessing.step1.mask_resize_to_crop_grid": 0.0990960979834199,
+        "preprocessing.step1.lower_water_crop_selection": 0.40393706876784563,
+        "preprocessing.coordinates.map_crop_to_source": 0.012923963367938995,
+        "preprocessing.final_canvas.allocate_and_direct_resize": 1.3591559836640954,
+        "preprocessing.final_mask.resize_and_apply": 0.1833540154621005,
+        "preprocessing.final_image.pil_materialization": 0.1024219673126936,
+        "preprocessing.final_image.jpeg_encode": 0.27997500728815794,
+        "preprocessing.final_image.jpeg_decode_and_rgb_convert": 0.331321032717824,
+        "preprocessing.final_tensor.rgb_to_float32_and_scale": 0.12380199041217566,
+        "preprocessing.final_tensor.normalize_mean_std": 0.38963009137660265,
+        "preprocessing.final_tensor.transpose_and_contiguous_tensor": 0.04333094693720341,
+        "waviness_inference.v18_regressor_onnxruntime": 5.9150399174541235,
+        "waviness_inference.score_extraction": 0.013455981388688087
+      },
+      "image": {
+        "width": 4032,
+        "height": 3024,
+        "format": ".heic"
+      },
+      "intermediate": {
+        "step1_mask_crop_xyxy_224": [
+          35,
+          94,
+          75,
+          134
+        ],
+        "source_crop_xyxy": [
+          630,
+          1269,
+          1350,
+          1809
+        ],
+        "regressor_tensor_shape": [
+          1,
+          3,
+          224,
+          224
+        ],
+        "regressor_tensor_dtype": "float32"
+      },
+      "failure": null,
+      "source_size_bytes": 2164349,
+      "source_sha256": "8da97f0d40205848387ad9a161d246b1c44fd196ca45aee25df83f81a37a95ff"
+    },
+    {
+      "split": "validation",
+      "label_filename": "step-2_9F72053F-B40A-4CC1-841A-120DFCE95B5C.jpg",
+      "label": 0.15,
+      "source_filename": "9F72053F-B40A-4CC1-841A-120DFCE95B5C.heic",
+      "prediction": 0.3487325608730316,
+      "preprocessing_total_ms": 53.8881269749254,
+      "waviness_inference_total_ms": 5.664239986799657,
+      "total_raw_to_score_ms": 59.552756953053176,
+      "timings_ms": {
+        "preprocessing.decode_oriented_rgb": 20.913682994432747,
+        "preprocessing.step1_tensor.resize_rgb": 0.4895570455119014,
+        "preprocessing.step1_tensor.convert_to_float32_and_scale": 0.1736560370773077,
+        "preprocessing.step1_tensor.normalize_mean_std": 1.5264389803633094,
+        "preprocessing.step1_tensor.transpose_and_contiguous_tensor": 0.18722005188465118,
+        "preprocessing.step1.segmentation_inference": 24.329331004992127,
+        "preprocessing.step1.mask_resize_to_crop_grid": 0.0975829316303134,
+        "preprocessing.step1.lower_water_crop_selection": 1.2059890432283282,
+        "preprocessing.coordinates.map_crop_to_source": 0.012823962606489658,
+        "preprocessing.final_canvas.allocate_and_direct_resize": 3.5967669682577252,
+        "preprocessing.final_mask.resize_and_apply": 0.11803105007857084,
+        "preprocessing.final_image.pil_materialization": 0.09739201050251722,
+        "preprocessing.final_image.jpeg_encode": 0.2888910239562392,
+        "preprocessing.final_image.jpeg_decode_and_rgb_convert": 0.3210720606148243,
+        "preprocessing.final_tensor.rgb_to_float32_and_scale": 0.11140899732708931,
+        "preprocessing.final_tensor.normalize_mean_std": 0.3003830788657069,
+        "preprocessing.final_tensor.transpose_and_contiguous_tensor": 0.05311903078109026,
+        "waviness_inference.v18_regressor_onnxruntime": 5.653390078805387,
+        "waviness_inference.score_extraction": 0.007214024662971497
+      },
+      "image": {
+        "width": 3024,
+        "height": 4032,
+        "format": ".heic"
+      },
+      "intermediate": {
+        "step1_mask_crop_xyxy_224": [
+          44,
+          34,
+          212,
+          202
+        ],
+        "source_crop_xyxy": [
+          594,
+          612,
+          2862,
+          3636
+        ],
+        "regressor_tensor_shape": [
+          1,
+          3,
+          224,
+          224
+        ],
+        "regressor_tensor_dtype": "float32"
+      },
+      "failure": null,
+      "source_size_bytes": 687827,
+      "source_sha256": "83e4e63cc199e113a7eb29f6d47f1507ac2ca3dc5c753e0fe41cd52b9f26942c"
+    }
+  ]
+}

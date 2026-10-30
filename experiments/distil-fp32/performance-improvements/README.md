@@ -20,7 +20,11 @@ performance-improvements/
 │   ├── v003_roi_mask_processing/   # ROI-limited Step 1 mask processing
 │   ├── v004_working_resolution_cap/ # capped working-photo resolution
 │   ├── v005_baseline_canvas_coordinate_crop/ # v001 crop + v002 canvas
-│   └── v006_working_resolution_cap_skip_step2/ # v002 Step 2 removal + v004 cap
+│   ├── v006_working_resolution_cap_skip_step2/ # v002 Step 2 removal + v004 cap
+│   ├── v007_fast_step1_resize/ # test faster Step 1 interpolation
+│   ├── v008_step1_onnx_profile/ # profile Step 1 operators
+│   ├── v009_remove_final_jpeg_roundtrip/ # bypass final JPEG decode/encode
+│   └── v010_fused_step1_tensor_prep/ # write normalized tensor directly
 └── runs/
     ├── v000_baseline/                # immutable JSON reports for that version
     ├── v001_coordinate_crop_single_output/
@@ -28,7 +32,11 @@ performance-improvements/
     ├── v003_roi_mask_processing/
     ├── v004_working_resolution_cap/
     ├── v005_baseline_canvas_coordinate_crop/
-    └── v006_working_resolution_cap_skip_step2/
+    ├── v006_working_resolution_cap_skip_step2/
+    ├── v007_fast_step1_resize/
+    ├── v008_step1_onnx_profile/
+    ├── v009_remove_final_jpeg_roundtrip/
+    └── v010_fused_step1_tensor_prep/
 ```
 
 Create a new `experiment-versions/v001_<hypothesis>/` directory for the first
@@ -217,3 +225,27 @@ measured 74.91 ms median raw-to-score (p95 87.48 ms), faster than both v002
 regressing individually, so v006 fails the strict quality gate. See the
 [matched-regressor comparison](training-runs/matched-regressor-results.md#validation-comparison)
 and [fine-grained report](runs/v006_working_resolution_cap_skip_step2/distil-fp32-fine-grained-20261030T122626Z.json).
+
+## v001 follow-up micro-experiments
+
+Four isolated candidates were smoke-benchmarked on the same first five validation
+photos (all HEIC), with the v001-matched regressor held fixed. These are one-pass
+microbatch results, not full validation results or quality-gate decisions. The
+reported quality deltas compare each candidate with v001 on those same five
+photos; timing differences across separate processes are directional only.
+
+| Candidate | Raw-to-score median | Targeted observation | MAE / RMSE delta vs. v001 | Per-photo errors worse |
+| --- | ---: | --- | ---: | ---: |
+| [v007 linear Step 1 resize](runs/v007_fast_step1_resize/distil-fp32-fine-grained-20261030T124513Z.json) | 59.55 ms | Step 1 resize: 0.47 ms; previous v001 timings for these photos had 6.63 ms median | +0.01590 / +0.01691 | 3 / 5 |
+| [v008 Step 1 ONNX profile](runs/v008_step1_onnx_profile/distil-fp32-fine-grained-20261030T124524Z.json) | 58.76 ms · profiled | ONNX Runtime exposed one MIGraphX provider node over six calls; no inner layer breakdown | 0 / 0 | 0 / 5 |
+| [v009 skip final JPEG](runs/v009_remove_final_jpeg_roundtrip/distil-fp32-fine-grained-20261030T124535Z.json) | 62.82 ms | Removes a JPEG encode/decode pair that previously took about 0.6 ms median | +0.00050 / +0.00218 | 4 / 5 |
+| [v010 fused tensor prep](runs/v010_fused_step1_tensor_prep/distil-fp32-fine-grained-20261030T124545Z.json) | 56.85 ms | Fused scale/normalize/NCHW write: 0.24 ms vs. about 1.51 ms for the previous three operations on these photos | 0 / 0 | 0 / 5 |
+
+The v007 resize appears much faster but already shows a quality warning on this
+small sample. v009 saves only a small amount of work and also trends worse in
+sample quality. v010 is the most promising smoke result: tensor preparation fell
+by about 1.26 ms with no prediction difference visible at the reported
+precision. It still needs a full 47-photo validation run with a matched regressor
+before selection. v008 profiling latency is not comparable because tracing adds
+substantial overhead; its trace is retained under the ignored local `runs/.../profiles/`
+folder, and its JSON report contains the operator summary.

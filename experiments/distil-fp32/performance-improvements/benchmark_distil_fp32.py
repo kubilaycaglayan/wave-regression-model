@@ -43,6 +43,8 @@ def parse_args() -> argparse.Namespace:
                         help="prior report JSON; compares predictions on matched photos")
     parser.add_argument("--limit", type=int,
                         help="optional first-N photo smoke run; not a quality result")
+    parser.add_argument("--profile-step1", action="store_true",
+                        help="collect ONNX Runtime node profiling for Step 1; profiled latency is diagnostic only")
     return parser.parse_args()
 
 
@@ -284,10 +286,10 @@ def quality_summary(records: list[dict]) -> dict:
     }
 
 
-def initialize_models_for_steps(server, steps: list[int]) -> dict:
+def initialize_models_for_steps(server, steps: list[int], *, step1_profile_prefix: Path | None = None) -> dict:
     """Warm only the sessions needed by a version; preserve baseline init verbatim."""
     normalized = sorted(set(int(step) for step in steps))
-    if normalized == [1, 2]:
+    if normalized == [1, 2] and step1_profile_prefix is None:
         return server.initialize_models()
     if not normalized or any(step not in (1, 2) for step in normalized):
         raise ValueError(f"Invalid required_segmentation_steps: {steps!r}")
@@ -308,9 +310,23 @@ def initialize_models_for_steps(server, steps: list[int]) -> dict:
         session_name = f"STEP{step}_SESSION"
         if step in normalized:
             tick = time.perf_counter()
-            session = server.load_session(
-                getattr(server, f"STEP{step}_ONNX"), device, f"Step {step} segmentation"
-            )
+            if step == 1 and step1_profile_prefix is not None:
+                options = ort.SessionOptions()
+                options.log_severity_level = 3
+                options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+                provider_options = {"migraphx_fp16_enable": "1"} if server.CONFIG["fp16"] else {}
+                options.add_provider_for_devices([device], provider_options)
+                options.enable_profiling = True
+                options.profile_file_prefix = str(step1_profile_prefix)
+                session = ort.InferenceSession(
+                    str(server.STEP1_ONNX), sess_options=options
+                )
+                if "MIGraphXExecutionProvider" not in session.get_providers():
+                    raise RuntimeError(f"Step 1 profiling session did not load on MIGraphX: {session.get_providers()}")
+            else:
+                session = server.load_session(
+                    getattr(server, f"STEP{step}_ONNX"), device, f"Step {step} segmentation"
+                )
             setattr(server, session_name, session)
             setup[f"step{step}_session_load_ms"] = (time.perf_counter() - tick) * 1000.0
         else:
@@ -344,6 +360,46 @@ def initialize_models_for_steps(server, steps: list[int]) -> dict:
     setup["warm_crop_selector_ms"] = (time.perf_counter() - tick) * 1000.0
     setup["segmentation_steps_loaded"] = normalized
     return setup
+
+
+def summarize_onnx_profile(trace_path: Path, *, trace_path_relative_to: Path) -> dict:
+    """Summarize ONNX Runtime node events; do not treat profiled latency as normal latency."""
+    events = json.loads(trace_path.read_text(encoding="utf-8"))
+    node_events = [
+        event for event in events
+        if event.get("cat") == "Node" and event.get("ph") == "X"
+        and isinstance(event.get("args"), dict)
+    ]
+    grouped: dict[tuple[str, str], list[float]] = {}
+    for event in node_events:
+        args = event["args"]
+        operator = str(args.get("op_name") or event.get("name") or "unknown")
+        provider = str(args.get("provider") or "unknown")
+        grouped.setdefault((provider, operator), []).append(float(event.get("dur", 0.0)) / 1000.0)
+    operators = [
+        {
+            "provider": provider,
+            "operator": operator,
+            "event_count": len(values),
+            "total_ms": sum(values),
+            "mean_ms_per_event": statistics.mean(values),
+            "max_ms_per_event": max(values),
+        }
+        for (provider, operator), values in grouped.items()
+    ]
+    operators.sort(key=lambda row: row["total_ms"], reverse=True)
+    model_runs = [event for event in events if event.get("cat") == "Session" and event.get("name") == "model_run"]
+    return {
+        "enabled": True,
+        "diagnostic_only": True,
+        "trace_file": str(trace_path.resolve().relative_to(trace_path_relative_to.resolve())),
+        "trace_event_count": len(events),
+        "node_event_count": len(node_events),
+        "model_run_event_count": len(model_runs),
+        "operator_count": len(operators),
+        "top_operators_by_total_ms": operators[:30],
+        "note": "ONNX Runtime profiling adds overhead. Trace includes the session warm-up call and the measured photo calls; do not use its request latencies as unprofiled performance results.",
+    }
 
 
 def compare_reference(report: dict, reference_path: Path) -> dict:
@@ -502,8 +558,18 @@ def main() -> int:
     if manifest.get("id") != experiment_id:
         raise RuntimeError(f"Experiment manifest ID does not match directory: {manifest.get('id')!r}")
     splits = ["whole"] if args.whole else ["test"] if args.final_test else ["validation"]
+    profile_prefix = None
+    profile_root = args.output_dir.resolve() / experiment_id / "profiles"
+    if args.profile_step1:
+        if 1 not in manifest.get("required_segmentation_steps", [1, 2]):
+            raise ValueError("--profile-step1 requires Step 1 segmentation in the experiment manifest")
+        profile_root.mkdir(parents=True, exist_ok=True)
+        profile_prefix = profile_root / f"step1-ort-profile-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     server_started = time.perf_counter()
-    warmup = initialize_models_for_steps(server, manifest.get("required_segmentation_steps", [1, 2]))
+    warmup = initialize_models_for_steps(
+        server, manifest.get("required_segmentation_steps", [1, 2]),
+        step1_profile_prefix=profile_prefix,
+    )
     warmup["python_and_runtime_imports_ms"] = (server_started - PROCESS_START) * 1000.0
     warmup["initialize_models_total_ms"] = (time.perf_counter() - server_started) * 1000.0
     warmup["process_start_to_models_ready_ms"] = (time.perf_counter() - PROCESS_START) * 1000.0
@@ -530,6 +596,11 @@ def main() -> int:
               f"{row.get('total_raw_to_score_ms', 0.0):.2f} ms"
               + (f" ERROR {row['failure']}" if row["failure"] else ""), flush=True)
 
+    step1_profile = None
+    if args.profile_step1:
+        trace_path = Path(server.STEP1_SESSION.end_profiling())
+        step1_profile = summarize_onnx_profile(trace_path, trace_path_relative_to=HERE)
+
     quality_by_split = {}
     latency_by_split = {}
     for split in splits:
@@ -552,9 +623,10 @@ def main() -> int:
         "experiment_name": manifest.get("name", experiment_id),
         "experiment_hypothesis": manifest.get("hypothesis"),
         "experiment_status": manifest.get("status", "active"),
-        "candidate": "Distil-FP32 MIGraphX FP32 + v18 EfficientNet-B0 CPU regressor",
+        "candidate": "Distil-FP32 MIGraphX FP32 + configured waviness regressor",
         "top_level_categories": ["warmup", "preprocessing", "waviness_inference"],
         "warmup": warmup,
+        "profiling": {"step1_onnxruntime": step1_profile} if step1_profile else None,
         "dataset": {
             "splits": splits,
             "source_directory": str(raw_dir),
@@ -588,6 +660,7 @@ def main() -> int:
             "step1_sha256": sha256_file(server.STEP1_ONNX),
             "step2_sha256": sha256_file(server.STEP2_ONNX),
             "regressor_sha256": sha256_file(server.REGRESSOR_ONNX),
+            "step1_profiling_enabled": bool(args.profile_step1),
         },
         "quality_by_split": quality_by_split,
         "latency_by_split": latency_by_split,
