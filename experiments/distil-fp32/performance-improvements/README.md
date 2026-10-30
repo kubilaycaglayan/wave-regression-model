@@ -16,11 +16,13 @@ performance-improvements/
 │   ├── README.md
 │   ├── v000_baseline/                 # immutable reference adapter + manifest
 │   ├── v001_coordinate_crop_single_output/ # coordinate crop candidate
-│   └── v002_skip_step2_keep_baseline_image/ # isolate Step 2 removal
+│   ├── v002_skip_step2_keep_baseline_image/ # isolate Step 2 removal
+│   └── v003_roi_mask_processing/   # ROI-limited Step 1 mask processing
 └── runs/
     ├── v000_baseline/                # immutable JSON reports for that version
     ├── v001_coordinate_crop_single_output/
-    └── v002_skip_step2_keep_baseline_image/
+    ├── v002_skip_step2_keep_baseline_image/
+    └── v003_roi_mask_processing/
 ```
 
 Create a new `experiment-versions/v001_<hypothesis>/` directory for the first
@@ -129,3 +131,17 @@ error. The candidate failed the validation gate and is marked rejected. This
 isolated result indicates the Step 2 stage materially affects the regressor's
 input quality. Details are in [v002](experiment-versions/v002_skip_step2_keep_baseline_image/)
 and its [benchmark report](runs/v002_skip_step2_keep_baseline_image/distil-fp32-fine-grained-20261030T112636Z.json).
+
+## Experiment 3: ROI-limited Step 1 mask processing
+
+`v003_roi_mask_processing` kept both segmentation models and the baseline
+downstream stages, but estimated the Step 1 water bounds on the native mask
+grid and expanded/eroded the mask only in a mapped source ROI. It completed all
+47 validation photos without failures; test was not run.
+
+This attempt was unsuccessful. Median raw-to-score was **110.02 ms** versus
+**98.90 ms** for v000. The ROI mask expansion operation alone took **18.85 ms**
+median. MAE improved slightly (**0.110743** vs **0.110818**), but RMSE increased
+(**0.138456** vs **0.138429**) and 7 photos regressed individually, so the
+strict quality gate failed. It is marked rejected. See [v003](experiment-versions/v003_roi_mask_processing/)
+and its [benchmark report](runs/v003_roi_mask_processing/distil-fp32-fine-grained-20261030T112855Z.json).
