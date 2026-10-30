@@ -17,10 +17,10 @@ Each regressor uses the same frozen ImageNet EfficientNet-B0 backbone,
 trainable sigmoid regression head, seed, optimizer settings, augmentations,
 early stopping, and split. The shared policy is in `training-policy.json`.
 Validation chooses the checkpoint. The held-out test split is not prepared by
-default and was used only for the final check of v000 and the validation-selected
-v001. That check found a quality regression for v001; see
-`../training-runs/matched-regressor-results.md`. Do not use those test results
-to tune another candidate; a new held-out cohort is needed for further selection.
+default. It was run as a final check for all five versions after training and
+validation selection; see `../training-runs/matched-regressor-results.md`.
+Treat those results as final checks, not a tuning set. A new held-out cohort is
+needed for further model selection.
 
 From the repository root, run input preparation in the MIGraphX runtime
 environment:

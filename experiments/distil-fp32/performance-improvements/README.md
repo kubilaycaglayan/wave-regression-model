@@ -88,9 +88,8 @@ python experiments/distil-fp32/performance-improvements/render_benchmark_report.
 
 The v000–v004 preprocessing versions have also been evaluated with matched,
 retrained regressors. See the [matched-regressor results](training-runs/matched-regressor-results.md)
-and [training tools](training/README.md). v001 was selected from validation
-for a final test check because it was both faster and more accurate there, but
-its held-out test quality regressed; no preprocessing candidate is selected.
+and [training tools](training/README.md). All five versions now have final test
+checks; the test results do not confirm a quality-preserving latency win.
 
 The historical full-split baseline reported validation MAE **0.110818** and
 test MAE **0.110720**, with no failed photos; its raw-to-score medians were

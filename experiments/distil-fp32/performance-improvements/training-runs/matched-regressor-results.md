@@ -24,20 +24,27 @@ individual images had higher error.
 
 ## Final test check
 
-After selecting v001 using validation, v000 and v001 were evaluated on the
-reserved 46-photo test split. v001 remained much faster, but its aggregate
-quality was worse than v000:
+After training and validation selection, all five versions were evaluated on
+the reserved 46-photo test split. Their paired results against retrained v000
+were:
 
 | Version | MAE | RMSE | Median raw-to-score | p95 raw-to-score |
 | --- | ---: | ---: | ---: | ---: |
 | v000 retrained baseline | 0.114616 | 0.141656 | 98.39 ms | 106.76 ms |
-| v001 matched regressor | 0.125327 | 0.167611 | 59.81 ms | 67.52 ms |
+| v001 coordinate crop | 0.125327 | 0.167611 | 59.81 ms | 67.52 ms |
+| v002 skip Step 2 | 0.142534 | 0.182296 | 80.10 ms | 83.85 ms |
+| v003 ROI mask processing | 0.114302 | 0.144591 | 111.66 ms | 117.97 ms |
+| v004 resolution cap | 0.115810 | 0.137867 | 94.28 ms | 98.69 ms |
 
-v001's test MAE increased by **0.010711** and RMSE by **0.025955**; 24 of 46
-test photos had higher absolute error. Therefore v001 is not selected despite
-its validation result. The reserved test set has now served its final-check
-purpose and must not be used to tune or rank v002–v004. No candidate currently
-demonstrates a confirmed quality-preserving latency improvement.
+All test runs completed without failures. v001's test MAE increased by
+**0.010711** and RMSE by **0.025955**; 24 of 46 photos had higher absolute
+error. v002 regressed on both aggregate quality metrics. v003 had nearly
+unchanged MAE (-0.000314), slightly worse RMSE (+0.002936), and higher latency.
+v004 improved RMSE by **0.003788**, but MAE increased by **0.001194** and median
+latency was only **4.11 ms** lower. None demonstrates a confirmed quality-
+preserving latency improvement. These test results are final checks and must
+not be used as a tuning or selection set; further selection needs a new held-out
+cohort.
 
 The HTML dashboard has per-photo and fine-grained latency results. Trained
 metrics, checkpoints, and ONNX exports are grouped under
