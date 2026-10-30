@@ -83,6 +83,7 @@ def main() -> None:
         "v003_roi_mask_processing",
         "v004_working_resolution_cap",
         "v005_baseline_canvas_coordinate_crop",
+        "v006_working_resolution_cap_skip_step2",
     ]
     splits = args.split or ["train", "validation"]
 

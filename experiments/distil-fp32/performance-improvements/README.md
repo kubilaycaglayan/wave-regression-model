@@ -19,14 +19,16 @@ performance-improvements/
 │   ├── v002_skip_step2_keep_baseline_image/ # isolate Step 2 removal
 │   ├── v003_roi_mask_processing/   # ROI-limited Step 1 mask processing
 │   ├── v004_working_resolution_cap/ # capped working-photo resolution
-│   └── v005_baseline_canvas_coordinate_crop/ # v001 crop + v002 canvas
+│   ├── v005_baseline_canvas_coordinate_crop/ # v001 crop + v002 canvas
+│   └── v006_working_resolution_cap_skip_step2/ # v002 Step 2 removal + v004 cap
 └── runs/
     ├── v000_baseline/                # immutable JSON reports for that version
     ├── v001_coordinate_crop_single_output/
     ├── v002_skip_step2_keep_baseline_image/
     ├── v003_roi_mask_processing/
     ├── v004_working_resolution_cap/
-    └── v005_baseline_canvas_coordinate_crop/
+    ├── v005_baseline_canvas_coordinate_crop/
+    └── v006_working_resolution_cap_skip_step2/
 ```
 
 Create a new `experiment-versions/v001_<hypothesis>/` directory for the first
@@ -201,3 +203,17 @@ aggregate quality metrics over the matched v000 baseline and reduced median
 latency by 14.31 ms, but 19 photos regressed individually, so it fails the
 strict quality gate. See the [matched-regressor comparison](training-runs/matched-regressor-results.md#validation-comparison)
 and [fine-grained report](runs/v005_baseline_canvas_coordinate_crop/distil-fp32-fine-grained-20261030T121926Z.json).
+
+## Experiment 6: 2048 px working cap and skip Step 2
+
+`v006_working_resolution_cap_skip_step2` combines v004's 2048 px cap for Step 1
+source-space mask and pixel operations with v002's removal of Step 2 segmentation
+and its downstream crop/JPEG stages. It retains the original 448 × 448 input to
+Step 1, the capped working photo for source-space processing, and the Step 1
+canvas/JPEG round trip before regressor inference. On all 47 validation photos, v006 completed without preprocessing failures and
+measured 74.91 ms median raw-to-score (p95 87.48 ms), faster than both v002
+(81.32 ms) and v004 (91.72 ms). Quality regressed against retrained v000
+(MAE 0.130061 vs. 0.118095; RMSE 0.172008 vs. 0.160190), with 28 photos
+regressing individually, so v006 fails the strict quality gate. See the
+[matched-regressor comparison](training-runs/matched-regressor-results.md#validation-comparison)
+and [fine-grained report](runs/v006_working_resolution_cap_skip_step2/distil-fp32-fine-grained-20261030T122626Z.json).

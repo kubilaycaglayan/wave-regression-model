@@ -1,7 +1,7 @@
 # Matched-regressor comparison
 
-Each v000–v005 preprocessing route prepared RGB inputs for the same EfficientNet-B0
-frozen-backbone regressor training recipe. All five models used seed 42, the
+Each v000–v006 preprocessing route prepared RGB inputs for the same EfficientNet-B0
+frozen-backbone regressor training recipe. All seven models used seed 42, the
 same hyperparameters and augmentations, and the same 215-photo training cohort
 plus all 47 validation photos. The common cohort contains 215 photos; the two
 photos excluded by preprocessing failures are `step-2_IMG_7592.jpg` and
@@ -17,6 +17,7 @@ photos excluded by preprocessing failures are `step-2_IMG_7592.jpg` and
 | v003 ROI mask processing | 0.121055 | 0.155764 | 112.88 ms | 125.20 ms |
 | v004 resolution cap | 0.113904 | 0.151264 | 91.72 ms | 103.05 ms |
 | v005 baseline canvas + coordinate crop | 0.115530 | 0.151688 | 84.51 ms | 94.84 ms |
+| v006 resolution cap + skip Step 2 | 0.130061 | 0.172008 | **74.91 ms** | **87.48 ms** |
 
 v001 led validation on both aggregate quality metrics and latency. v004 also
 improved both aggregate quality metrics and latency relative to retrained v000.
@@ -29,6 +30,14 @@ validation preprocessing failures, but 19 of 47 images had higher absolute
 error than v000, so it fails the strict per-photo quality gate. It was slower
 and less accurate than v001, but more accurate and slightly slower than v002.
 Its fine-grained validation report is [here](../runs/v005_baseline_canvas_coordinate_crop/distil-fp32-fine-grained-20261030T121926Z.json).
+
+v006 delivered a compound latency reduction: median raw-to-score was **74.91
+ms**, 6.41 ms faster than v002 and 16.81 ms faster than v004; against retrained
+v000 it was 23.91 ms faster. This came with a quality regression: MAE increased
+by **0.011966** and RMSE by **0.011819** versus v000, with 28 of 47 photos
+regressing individually. Against v002, v006 was 0.001426 worse in MAE but
+0.002404 better in RMSE. It completed validation without preprocessing failures
+but fails the quality gate. See its [fine-grained report](../runs/v006_working_resolution_cap_skip_step2/distil-fp32-fine-grained-20261030T122626Z.json).
 
 ## Final test check
 

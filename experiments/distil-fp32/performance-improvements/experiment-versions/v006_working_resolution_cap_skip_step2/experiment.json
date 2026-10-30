@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "v006_working_resolution_cap_skip_step2",
+  "name": "2048 px working cap · skip Step 2",
+  "status": "rejected_quality_regression",
+  "required_segmentation_steps": [1],
+  "hypothesis": "Combine v004's 2048 px cap for Step 1 source-space mask and pixel processing with v002's removal of Step 2 segmentation and its crop/JPEG stages. These changes target different work: source-resolution Step 1 processing and the entire Step 2 inference path.",
+  "changes": [
+    "Keep Step 1 model input unchanged at 448 × 448 from the original photo.",
+    "Create a working photo capped to 2048 px on its longest side for Step 1 mask expansion, erosion, bounding box, and masked ROI operations.",
+    "Keep the Step 1 canvas and JPEG round trip.",
+    "Skip Step 2 segmentation and feed the decoded Step 1 image directly to the regressor, as in v002."
+  ],
+  "quality_policy": {
+    "selection_split": "validation",
+    "final_check_split": "test",
+    "baseline_experiment_id": "v000_baseline",
+    "gate": "same cohort, no failures, and no MAE, RMSE, or per-photo absolute-error regression"
+  }
+}

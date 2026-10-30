@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "experiment_id": "v006_working_resolution_cap_skip_step2",
+  "run_id": "run-v006-1",
+  "architecture": "EfficientNet-B0 with frozen ImageNet backbone and trained sigmoid head",
+  "seed": 42,
+  "learning_rate": 0.001,
+  "batch_size": 8,
+  "max_epochs": 100,
+  "early_stopping_patience": 10,
+  "best_checkpoint": "checkpoints/best-epoch=epoch=22-val_mae=val_mae=0.130061.ckpt",
+  "best_epoch_zero_based": 22,
+  "epochs_completed": 33,
+  "training_count": 215,
+  "validation_count": 47,
+  "common_training_cohort_count": 215,
+  "excluded_from_training_split": [
+    "step-2_IMG_7592.jpg",
+    "step-2_IMG_7593.jpg"
+  ],
+  "test_used": false,
+  "split_snapshot": "20261028T081606614158Z",
+  "train_cache_signature": {
+    "experiment_id": "v006_working_resolution_cap_skip_step2",
+    "experiment_code_sha256": "b86d4983c470ea0af5e7ad3b74532aee733db095a4f992c757247e9c882627ab",
+    "experiment_manifest_sha256": "948154aeedd5e80f0e1523871016ff5359ea536ca22a8c629c67ddd50338e546",
+    "benchmark_code_sha256": "5f10cb46adaf81d3d413f06c51c532a1e07685265f40789df16a35cd77041f9f",
+    "server_code_sha256": "1af366419af99b6edd7c64591ea93768fea746b04655f14bf38f93b1d41003ab",
+    "split_snapshot": "20261028T081606614158Z",
+    "snapshot_manifest_sha256": "ce350b764a9e1dc1a5fba196f2c042666bab10676f4fed80375c2f801016b282",
+    "split": "train",
+    "split_csv_sha256": "ec6880935758e3f3d11502ac66aea4a56e06a029f06644867765f261f1fbadb3",
+    "rows": 217
+  },
+  "validation_cache_signature": {
+    "experiment_id": "v006_working_resolution_cap_skip_step2",
+    "experiment_code_sha256": "b86d4983c470ea0af5e7ad3b74532aee733db095a4f992c757247e9c882627ab",
+    "experiment_manifest_sha256": "948154aeedd5e80f0e1523871016ff5359ea536ca22a8c629c67ddd50338e546",
+    "benchmark_code_sha256": "5f10cb46adaf81d3d413f06c51c532a1e07685265f40789df16a35cd77041f9f",
+    "server_code_sha256": "1af366419af99b6edd7c64591ea93768fea746b04655f14bf38f93b1d41003ab",
+    "split_snapshot": "20261028T081606614158Z",
+    "snapshot_manifest_sha256": "ce350b764a9e1dc1a5fba196f2c042666bab10676f4fed80375c2f801016b282",
+    "split": "validation",
+    "split_csv_sha256": "ab33054c9701fcf9ca1be13acf3bfa6939fd6a6d74321f99e607516f642e2f92",
+    "rows": 47
+  },
+  "validation_metrics": {
+    "val_loss": 0.014793531969189644,
+    "val_mae": 0.13006068766117096,
+    "val_rmse": 0.17200890183448792
+  },
+  "elapsed_training_seconds": 53.8518078729976,
+  "created_at_utc": "2026-10-30T12:25:59.216341+00:00"
+}
