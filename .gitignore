@@ -13,6 +13,7 @@ step-7-predict-captures-holder/*
 __pycache__/
 __pycache__/*
 *.py[cod]
+native/build/
 
 # Machine-specific GPU runtime pins.
 /requirements-rocm-*.txt
