@@ -14,9 +14,11 @@ performance-improvements/
 ├── distil-fp32-benchmark-report.html # individual and comparison views
 ├── experiment-versions/
 │   ├── README.md
-│   └── v000_baseline/                 # immutable reference adapter + manifest
+│   ├── v000_baseline/                 # immutable reference adapter + manifest
+│   └── v001_coordinate_crop_single_output/ # coordinate crop candidate
 └── runs/
-    └── v000_baseline/                # immutable JSON reports for that version
+    ├── v000_baseline/                # immutable JSON reports for that version
+    └── v001_coordinate_crop_single_output/
 ```
 
 Create a new `experiment-versions/v001_<hypothesis>/` directory for the first
@@ -86,3 +88,25 @@ and measured **98.90 ms** median raw-to-score. The test split was not rerun.
 Startup through model readiness took **18.60 s**. Detailed records are in
 [`runs/v000_baseline/`](runs/v000_baseline/), including the [latest
 validation-only report](runs/v000_baseline/distil-fp32-fine-grained-20261030T111422Z.json).
+
+## Experiment 1: coordinate crop with one final image
+
+`v001_coordinate_crop_single_output` used Step 1 mask coordinates to choose a
+lower-water ROI on the original photo, then created one final 224 × 224 input
+for the waviness regressor. It skipped Step 1's saved image, the intermediate
+JPEG round trip, and Step 2 segmentation. The full 47-photo validation cohort
+completed without failures; only Step 1 segmentation was loaded. The reserved
+test split was not run.
+
+The speed hypothesis was supported: median raw-to-score was **59.56 ms**
+(p95 **73.67 ms**), versus **98.90 ms** (p95 **106.95 ms**) for the paired
+baseline. Median preprocessing was **53.93 ms**, and median waviness inference
+was **5.40 ms**. Startup through model readiness was **9.77 s**, down from
+**18.59 s**.
+
+This candidate **failed the validation quality gate**. On the same 47 photos,
+MAE increased from **0.110818** to **0.136065** and RMSE from **0.138429** to
+**0.168556**; 28 photos had higher absolute error. Keep it as a measured,
+rejected experiment and do not select it for final test evaluation. The result
+and implementation are in [v001](experiment-versions/v001_coordinate_crop_single_output/),
+with the [benchmark report](runs/v001_coordinate_crop_single_output/distil-fp32-fine-grained-20261030T112406Z.json).

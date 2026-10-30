@@ -280,6 +280,68 @@ def quality_summary(records: list[dict]) -> dict:
     }
 
 
+def initialize_models_for_steps(server, steps: list[int]) -> dict:
+    """Warm only the sessions needed by a version; preserve baseline init verbatim."""
+    normalized = sorted(set(int(step) for step in steps))
+    if normalized == [1, 2]:
+        return server.initialize_models()
+    if not normalized or any(step not in (1, 2) for step in normalized):
+        raise ValueError(f"Invalid required_segmentation_steps: {steps!r}")
+
+    import onnxruntime as ort
+    import numpy as np
+
+    setup = {}
+    tick = time.perf_counter()
+    for name, library_path in zip(server.mx.get_ep_names(), server.mx.get_library_paths()):
+        ort.register_execution_provider_library(name, library_path)
+    device = next((d for d in ort.get_ep_devices() if d.ep_name == server.mx.get_ep_name()), None)
+    if device is None:
+        raise RuntimeError("ONNX Runtime did not expose a MIGraphX device")
+    setup["runtime_registration_ms"] = (time.perf_counter() - tick) * 1000.0
+
+    for step in (1, 2):
+        session_name = f"STEP{step}_SESSION"
+        if step in normalized:
+            tick = time.perf_counter()
+            session = server.load_session(
+                getattr(server, f"STEP{step}_ONNX"), device, f"Step {step} segmentation"
+            )
+            setattr(server, session_name, session)
+            setup[f"step{step}_session_load_ms"] = (time.perf_counter() - tick) * 1000.0
+        else:
+            setattr(server, session_name, None)
+
+    if not server.REGRESSOR_ONNX.is_file():
+        raise FileNotFoundError(f"v18 regressor model file not found: {server.REGRESSOR_ONNX}")
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = options.inter_op_num_threads = 1
+    options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    tick = time.perf_counter()
+    server.REGRESSOR_SESSION = ort.InferenceSession(
+        str(server.REGRESSOR_ONNX), sess_options=options, providers=["CPUExecutionProvider"]
+    )
+    setup["regressor_session_load_ms"] = (time.perf_counter() - tick) * 1000.0
+    if "CPUExecutionProvider" not in server.REGRESSOR_SESSION.get_providers():
+        raise RuntimeError("The v18 regressor did not load on CPU")
+
+    for step in normalized:
+        size = 448 if step == 1 else 384
+        tick = time.perf_counter()
+        getattr(server, f"STEP{step}_SESSION").run(
+            ["water_mask"], {"pixel_values": np.zeros((1, 3, size, size), dtype=np.float32)}
+        )
+        setup[f"warm_{size}_first_run_ms"] = (time.perf_counter() - tick) * 1000.0
+    tick = time.perf_counter()
+    server.REGRESSOR_SESSION.run(["scores"], {"images": np.zeros((1, 3, 224, 224), dtype=np.float32)})
+    setup["warm_regressor_ms"] = (time.perf_counter() - tick) * 1000.0
+    tick = time.perf_counter()
+    server.warm_crop_selector()
+    setup["warm_crop_selector_ms"] = (time.perf_counter() - tick) * 1000.0
+    setup["segmentation_steps_loaded"] = normalized
+    return setup
+
+
 def compare_reference(report: dict, reference_path: Path) -> dict:
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
     selected_splits = set(report.get("splits", []))
@@ -437,7 +499,7 @@ def main() -> int:
         raise RuntimeError(f"Experiment manifest ID does not match directory: {manifest.get('id')!r}")
     splits = ["test"] if args.final_test else ["validation"]
     server_started = time.perf_counter()
-    warmup = server.initialize_models()
+    warmup = initialize_models_for_steps(server, manifest.get("required_segmentation_steps", [1, 2]))
     warmup["python_and_runtime_imports_ms"] = (server_started - PROCESS_START) * 1000.0
     warmup["initialize_models_total_ms"] = (time.perf_counter() - server_started) * 1000.0
     warmup["process_start_to_models_ready_ms"] = (time.perf_counter() - PROCESS_START) * 1000.0
@@ -512,6 +574,7 @@ def main() -> int:
             "step1_model": str(server.STEP1_ONNX),
             "step2_model": str(server.STEP2_ONNX),
             "regressor_model": str(server.REGRESSOR_ONNX),
+            "segmentation_steps_loaded": manifest.get("required_segmentation_steps", [1, 2]),
             "step1_sha256": sha256_file(server.STEP1_ONNX),
             "step2_sha256": sha256_file(server.STEP2_ONNX),
             "regressor_sha256": sha256_file(server.REGRESSOR_ONNX),
