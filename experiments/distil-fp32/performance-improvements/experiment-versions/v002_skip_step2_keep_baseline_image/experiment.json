@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "v002_skip_step2_keep_baseline_image",
+  "name": "Skip Step 2 · keep baseline image",
+  "status": "rejected_quality_regression",
+  "required_segmentation_steps": [1],
+  "hypothesis": "Preserve the v000 Step 1 mask, ROI, canvas, and JPEG path exactly, but pass that Step 1 output directly to the waviness regressor. This isolates the quality and latency impact of removing Step 2 segmentation and its downstream crop operations.",
+  "changes": [
+    "Keep Step 1 full-resolution mask expansion, erosion, bounding box, masking, and crop behavior unchanged.",
+    "Keep the Step 1 224 × 224 canvas and JPEG encode/decode unchanged.",
+    "Skip Step 2 segmentation, its mask processing, lower-water crop, and second canvas/JPEG round trip.",
+    "Feed the decoded Step 1 image through the baseline final tensor preparation and regressor inference."
+  ],
+  "quality_policy": {
+    "selection_split": "validation",
+    "final_check_split": "test",
+    "baseline_experiment_id": "v000_baseline",
+    "gate": "same cohort, no failures, and no MAE, RMSE, or per-photo absolute-error regression"
+  }
+}

@@ -15,10 +15,12 @@ performance-improvements/
 ├── experiment-versions/
 │   ├── README.md
 │   ├── v000_baseline/                 # immutable reference adapter + manifest
-│   └── v001_coordinate_crop_single_output/ # coordinate crop candidate
+│   ├── v001_coordinate_crop_single_output/ # coordinate crop candidate
+│   └── v002_skip_step2_keep_baseline_image/ # isolate Step 2 removal
 └── runs/
     ├── v000_baseline/                # immutable JSON reports for that version
-    └── v001_coordinate_crop_single_output/
+    ├── v001_coordinate_crop_single_output/
+    └── v002_skip_step2_keep_baseline_image/
 ```
 
 Create a new `experiment-versions/v001_<hypothesis>/` directory for the first
@@ -110,3 +112,20 @@ MAE increased from **0.110818** to **0.136065** and RMSE from **0.138429** to
 rejected experiment and do not select it for final test evaluation. The result
 and implementation are in [v001](experiment-versions/v001_coordinate_crop_single_output/),
 with the [benchmark report](runs/v001_coordinate_crop_single_output/distil-fp32-fine-grained-20261030T112406Z.json).
+
+## Experiment 2: skip Step 2, keep the baseline Step 1 image
+
+`v002_skip_step2_keep_baseline_image` preserves v000's Step 1 full-size mask,
+erosion, bounding box, masked ROI, 224 × 224 canvas, and JPEG round trip, then
+feeds that image directly to the waviness regressor. It loads only Step 1. All
+47 validation photos completed without failures; the reserved test split was
+not run.
+
+Median raw-to-score improved from **98.90 ms** to **81.00 ms** (p95 **88.49
+ms**), and startup through model readiness fell from **18.59 s** to **9.63 s**.
+Quality regressed substantially: MAE increased from **0.110818** to **0.171235**
+and RMSE from **0.138429** to **0.210184**; 33 of 47 photos had higher absolute
+error. The candidate failed the validation gate and is marked rejected. This
+isolated result indicates the Step 2 stage materially affects the regressor's
+input quality. Details are in [v002](experiment-versions/v002_skip_step2_keep_baseline_image/)
+and its [benchmark report](runs/v002_skip_step2_keep_baseline_image/distil-fp32-fine-grained-20261030T112636Z.json).
