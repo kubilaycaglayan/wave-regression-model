@@ -18,13 +18,15 @@ performance-improvements/
 │   ├── v001_coordinate_crop_single_output/ # coordinate crop candidate
 │   ├── v002_skip_step2_keep_baseline_image/ # isolate Step 2 removal
 │   ├── v003_roi_mask_processing/   # ROI-limited Step 1 mask processing
-│   └── v004_working_resolution_cap/ # capped working-photo resolution
+│   ├── v004_working_resolution_cap/ # capped working-photo resolution
+│   └── v005_baseline_canvas_coordinate_crop/ # v001 crop + v002 canvas
 └── runs/
     ├── v000_baseline/                # immutable JSON reports for that version
     ├── v001_coordinate_crop_single_output/
     ├── v002_skip_step2_keep_baseline_image/
     ├── v003_roi_mask_processing/
-    └── v004_working_resolution_cap/
+    ├── v004_working_resolution_cap/
+    └── v005_baseline_canvas_coordinate_crop/
 ```
 
 Create a new `experiment-versions/v001_<hypothesis>/` directory for the first
@@ -185,3 +187,17 @@ counts, and latency results are in the [whole cohort results](training-runs/matc
 and in the dashboard's **Whole · all labeled photos** view. Because it
  overlaps the training and test sets, do not use it as an independent quality
 result.
+
+## Experiment 5: baseline canvas with coordinate lower-water crop
+
+`v005_baseline_canvas_coordinate_crop` combines v001's coordinate-based
+lower-water crop selection with v002's baseline Step 1 full-resolution mask,
+canvas, and JPEG path. It skips Step 2 segmentation, maps the Step 1 mask onto
+the 224 × 224 canvas, then crops and resizes the selected lower-water region.
+This tests whether retaining v002's Step 1 representation while replacing
+Step 2 with a coordinate crop can improve the quality/latency tradeoff. The full 47-photo validation cohort completed without failures: MAE 0.115530,
+RMSE 0.151688, median raw-to-score 84.51 ms (p95 94.84 ms). It improved both
+aggregate quality metrics over the matched v000 baseline and reduced median
+latency by 14.31 ms, but 19 photos regressed individually, so it fails the
+strict quality gate. See the [matched-regressor comparison](training-runs/matched-regressor-results.md#validation-comparison)
+and [fine-grained report](runs/v005_baseline_canvas_coordinate_crop/distil-fp32-fine-grained-20261030T121926Z.json).

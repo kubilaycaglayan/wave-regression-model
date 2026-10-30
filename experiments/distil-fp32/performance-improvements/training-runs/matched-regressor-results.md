@@ -1,11 +1,11 @@
 # Matched-regressor comparison
 
-Each v000–v004 preprocessing route prepared RGB inputs for the same EfficientNet-B0
+Each v000–v005 preprocessing route prepared RGB inputs for the same EfficientNet-B0
 frozen-backbone regressor training recipe. All five models used seed 42, the
 same hyperparameters and augmentations, and the same 215-photo training cohort
-plus all 47 validation photos. Two training photos failed preprocessing in
-v000, v003, and v004, so `step-2_IMG_7592.jpg` and `step-2_IMG_7593.jpg` were
-excluded from every model's training cohort.
+plus all 47 validation photos. The common cohort contains 215 photos; the two
+photos excluded by preprocessing failures are `step-2_IMG_7592.jpg` and
+`step-2_IMG_7593.jpg`.
 
 ## Validation comparison
 
@@ -16,15 +16,23 @@ excluded from every model's training cohort.
 | v002 skip Step 2 | 0.128635 | 0.174412 | 81.33 ms | 85.84 ms |
 | v003 ROI mask processing | 0.121055 | 0.155764 | 112.88 ms | 125.20 ms |
 | v004 resolution cap | 0.113904 | 0.151264 | 91.72 ms | 103.05 ms |
+| v005 baseline canvas + coordinate crop | 0.115530 | 0.151688 | 84.51 ms | 94.84 ms |
 
 v001 led validation on both aggregate quality metrics and latency. v004 also
 improved both aggregate quality metrics and latency relative to retrained v000.
 The strict per-photo no-regression gate flagged these versions because some
 individual images had higher error.
 
+v005 improved on the retrained v000 baseline by **0.002565 MAE** and
+**0.008502 RMSE**, with median raw-to-score reduced by **14.31 ms**. It had no
+validation preprocessing failures, but 19 of 47 images had higher absolute
+error than v000, so it fails the strict per-photo quality gate. It was slower
+and less accurate than v001, but more accurate and slightly slower than v002.
+Its fine-grained validation report is [here](../runs/v005_baseline_canvas_coordinate_crop/distil-fp32-fine-grained-20261030T121926Z.json).
+
 ## Final test check
 
-After training and validation selection, all five versions were evaluated on
+After training and validation selection, the original five versions were evaluated on
 the reserved 46-photo test split. Their paired results against retrained v000
 were:
 

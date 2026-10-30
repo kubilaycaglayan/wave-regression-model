@@ -50,6 +50,7 @@ ALL_EXPERIMENTS = (
     "v002_skip_step2_keep_baseline_image",
     "v003_roi_mask_processing",
     "v004_working_resolution_cap",
+    "v005_baseline_canvas_coordinate_crop",
 )
 
 

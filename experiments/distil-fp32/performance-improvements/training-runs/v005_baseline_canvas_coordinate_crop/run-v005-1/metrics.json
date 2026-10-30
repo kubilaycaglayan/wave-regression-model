@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "experiment_id": "v005_baseline_canvas_coordinate_crop",
+  "run_id": "run-v005-1",
+  "architecture": "EfficientNet-B0 with frozen ImageNet backbone and trained sigmoid head",
+  "seed": 42,
+  "learning_rate": 0.001,
+  "batch_size": 8,
+  "max_epochs": 100,
+  "early_stopping_patience": 10,
+  "best_checkpoint": "checkpoints/best-epoch=epoch=08-val_mae=val_mae=0.115530.ckpt",
+  "best_epoch_zero_based": 8,
+  "epochs_completed": 19,
+  "training_count": 215,
+  "validation_count": 47,
+  "common_training_cohort_count": 215,
+  "excluded_from_training_split": [
+    "step-2_IMG_7592.jpg",
+    "step-2_IMG_7593.jpg"
+  ],
+  "test_used": false,
+  "split_snapshot": "20261028T081606614158Z",
+  "train_cache_signature": {
+    "experiment_id": "v005_baseline_canvas_coordinate_crop",
+    "experiment_code_sha256": "0e999948b6af29c7f6fe9ef56b384bd5c57deb02370258eb3cbe0086fcda55f2",
+    "experiment_manifest_sha256": "499db1869aca8c83fc92ef1a9b091e31af447fe75a21ea504639d87018dfa8a9",
+    "benchmark_code_sha256": "5f10cb46adaf81d3d413f06c51c532a1e07685265f40789df16a35cd77041f9f",
+    "server_code_sha256": "1af366419af99b6edd7c64591ea93768fea746b04655f14bf38f93b1d41003ab",
+    "split_snapshot": "20261028T081606614158Z",
+    "snapshot_manifest_sha256": "ce350b764a9e1dc1a5fba196f2c042666bab10676f4fed80375c2f801016b282",
+    "split": "train",
+    "split_csv_sha256": "ec6880935758e3f3d11502ac66aea4a56e06a029f06644867765f261f1fbadb3",
+    "rows": 217
+  },
+  "validation_cache_signature": {
+    "experiment_id": "v005_baseline_canvas_coordinate_crop",
+    "experiment_code_sha256": "0e999948b6af29c7f6fe9ef56b384bd5c57deb02370258eb3cbe0086fcda55f2",
+    "experiment_manifest_sha256": "499db1869aca8c83fc92ef1a9b091e31af447fe75a21ea504639d87018dfa8a9",
+    "benchmark_code_sha256": "5f10cb46adaf81d3d413f06c51c532a1e07685265f40789df16a35cd77041f9f",
+    "server_code_sha256": "1af366419af99b6edd7c64591ea93768fea746b04655f14bf38f93b1d41003ab",
+    "split_snapshot": "20261028T081606614158Z",
+    "snapshot_manifest_sha256": "ce350b764a9e1dc1a5fba196f2c042666bab10676f4fed80375c2f801016b282",
+    "split": "validation",
+    "split_csv_sha256": "ab33054c9701fcf9ca1be13acf3bfa6939fd6a6d74321f99e607516f642e2f92",
+    "rows": 47
+  },
+  "validation_metrics": {
+    "val_loss": 0.011504587717354298,
+    "val_mae": 0.11552995443344116,
+    "val_rmse": 0.15168775618076324
+  },
+  "elapsed_training_seconds": 40.072717059985735,
+  "created_at_utc": "2026-10-30T12:18:28.163552+00:00"
+}

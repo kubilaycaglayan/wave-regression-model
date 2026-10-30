@@ -17,7 +17,7 @@ Each regressor uses the same frozen ImageNet EfficientNet-B0 backbone,
 trainable sigmoid regression head, seed, optimizer settings, augmentations,
 early stopping, and split. The shared policy is in `training-policy.json`.
 Validation chooses the checkpoint. The held-out test split is not prepared by
-default. It was run as a final check for all five versions after training and
+default. The original five v000–v004 versions were run as final checks after training and
 validation selection; see `../training-runs/matched-regressor-results.md`.
 Treat those results as final checks, not a tuning set. A new held-out cohort is
 needed for further model selection.

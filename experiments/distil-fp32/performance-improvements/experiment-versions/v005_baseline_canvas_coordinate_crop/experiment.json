@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "v005_baseline_canvas_coordinate_crop",
+  "name": "Baseline canvas · coordinate lower-water crop",
+  "status": "rejected_quality_regression",
+  "required_segmentation_steps": [1],
+  "hypothesis": "Combine v001's coordinate-based lower-water crop selection with v002's baseline Step 1 mask, canvas, and JPEG construction. The Step 1 mask is mapped to the 224 × 224 canvas, then its selected lower-water coordinates crop that canvas. This avoids Step 2 segmentation while retaining the baseline Step 1 representation.",
+  "changes": [
+    "Keep Step 1 full-resolution mask expansion, erosion, bounding box, masking, and 224 × 224 canvas behavior from v002.",
+    "Keep the Step 1 JPEG encode/decode round trip from v002.",
+    "Map the Step 1 water mask into canvas coordinates and select the lower-water crop with the shared coordinate selector from v001.",
+    "Crop and resize the selected region to the final 224 × 224 regressor image; omit Step 2 segmentation."
+  ],
+  "quality_policy": {
+    "selection_split": "validation",
+    "final_check_split": "test",
+    "baseline_experiment_id": "v000_baseline",
+    "gate": "same cohort, no failures, and no MAE, RMSE, or per-photo absolute-error regression"
+  }
+}
