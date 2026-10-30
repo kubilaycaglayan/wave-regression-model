@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "dataset_snapshot": "20261028T081606614158Z",
+  "counts": {
+    "train": 217,
+    "validation": 47,
+    "test": 46
+  },
+  "architecture": "efficientnet_b0",
+  "pretrained_backbone": true,
+  "trainable_components": "regression head only; frozen ImageNet backbone",
+  "seed": 42,
+  "learning_rate": 0.001,
+  "batch_size": 8,
+  "maximum_epochs": 100,
+  "early_stopping": {
+    "monitor": "val_mae",
+    "mode": "min",
+    "patience": 10
+  },
+  "training_augmentations": "existing mild horizontal flip and color jitter",
+  "validation_policy": "select best checkpoint by validation MAE",
+  "test_policy": "do not prepare or evaluate test until one candidate is selected"
+}

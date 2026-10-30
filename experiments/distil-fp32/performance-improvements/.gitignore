@@ -1,0 +1,6 @@
+# Reproducible prepared tensors and trained model binaries stay local.
+training-cache/
+training-runs/**/checkpoints/
+training-runs/**/*.onnx
+training-runs/**/*.log
+training-runs/**/__pycache__/
