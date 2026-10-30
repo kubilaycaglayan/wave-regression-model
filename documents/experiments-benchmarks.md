@@ -51,34 +51,46 @@ The reference baseline is the current v18 PyTorch route: validation MAE **0.1356
 
 ## Model files and exact candidate mapping
 
-These are the model artifacts used by the server. They were saved in `/tmp` for the experiments and are **not tracked in the repository**. File sizes are approximate (`ls -lh` rounded them to MB):
+The names below are **stable artifact IDs**, independent of where a copy is stored. SHA-256 and byte size identify the exact ONNX files used in these benchmarks. The original export filenames are included only as aliases to help recognize an existing copy; they are not storage locations.
 
-| Candidate | Step 1 segmentation graph (448×448 input) | Step 2 graph (384×384 input) | Regressor |
+| Stable artifact ID | Repository-relative location | Original filename alias | Size (bytes) | SHA-256 |
+|---|---|---|---:|---|
+| `seg-distil-b0-step1-448-fp32-20261030` | `experiments/distil-fp32/seg-distil-b0-step1-448-fp32-20261030.onnx` | `wave-segformer-b0-distilled-area-water-448.onnx` | 15,021,640 | `96410800203e3f19b7dab26980ea6413f6f9369bb868e23bfa7f14eca6681fda` |
+| `seg-distil-b0-step2-384-to224-fp32-20261030` | `experiments/distil-fp32/seg-distil-b0-step2-384-to224-fp32-20261030.onnx` | `wave-segformer-b0-distilled-area-water-384-to224.onnx` | 15,021,640 | `8a9465acbe908092dc84634343e3de78328379708035ae164daf76bc49367afb` |
+| `seg-b0-step1-448-fp32-20261030` | `experiments/area-b0/seg-b0-step1-448-fp32-20261030.onnx` | `wave-segformer-b0-water-448.onnx` | 15,174,575 | `c95596fced297d6957deec9454270460a7a212a8a0b14692a9efc71f0d6062ba` |
+| `seg-b0-step2-384-to224-fp32-20261030` | `experiments/area-b0/seg-b0-step2-384-to224-fp32-20261030.onnx` | `wave-segformer-b0-water-384-to224.onnx` | 15,174,575 | `d427790dc765ced30aa753ef82de86b6dc068119368f9cbdc3b5087fe3aa5002` |
+| `seg-b2-step1-448-migraphx-fp16-mode-20261030` | Not copied into this artifact bundle | `wave-segformer-b2-water-448.onnx` | 110,143,340 | `8ccdfa777ce1c09e255564d12ef7eff2e8013306500ca00ef754de29704627be` |
+| `seg-b2-step2-384-to448-migraphx-fp16-mode-20261030` | Not copied into this artifact bundle | `wave-segformer-b2-water-384-to448.onnx` | 110,143,340 | `a17cbfd0a11191b65da3dcdec5c31593053346b30d43f3828d45fb3659d87634` |
+| `reg-v18-efficientnet-b0-cpu-20261030` | `experiments/shared/reg-v18-efficientnet-b0-cpu-20261030.onnx` | `wave-v18-efficientnet-b0-regressor.onnx` | 16,033,955 | `80f6bbbd2c00d99bf0a80f08e87159f71297c3acf6f1e2fdaf0e9be282850e2a` |
+
+The candidate mapping is:
+
+| Candidate | Step 1 artifact ID | Step 2 artifact ID | Regressor artifact ID |
 |---|---|---|---|
-| Distil-FP32 | `/tmp/wave-segformer-b0-distilled-area-water-448.onnx` (~15 MB) | `/tmp/wave-segformer-b0-distilled-area-water-384-to224.onnx` (~15 MB) | `/tmp/wave-v18-efficientnet-b0-regressor.onnx` (~16 MB) |
-| Area-B0 | `/tmp/wave-segformer-b0-water-448.onnx` (~15 MB) | `/tmp/wave-segformer-b0-water-384-to224.onnx` (~15 MB) | same v18 regressor (~16 MB) |
-| Stable-B2 | `/tmp/wave-segformer-b2-water-448.onnx` (~106 MB) | `/tmp/wave-segformer-b2-water-384-to448.onnx` (~106 MB) | same v18 regressor (~16 MB) |
+| Distil-FP32 | `seg-distil-b0-step1-448-fp32-20261030` | `seg-distil-b0-step2-384-to224-fp32-20261030` | `reg-v18-efficientnet-b0-cpu-20261030` |
+| Area-B0 | `seg-b0-step1-448-fp32-20261030` | `seg-b0-step2-384-to224-fp32-20261030` | `reg-v18-efficientnet-b0-cpu-20261030` |
+| Stable-B2 | `seg-b2-step1-448-migraphx-fp16-mode-20261030` | `seg-b2-step2-384-to448-migraphx-fp16-mode-20261030` | `reg-v18-efficientnet-b0-cpu-20261030` |
 
-Each candidate therefore needs approximately **46 MB** of model files for B0 or **228 MB** for B2, before runtime libraries, compiled graph state, and memory used for image tensors. The B2 files remain about 106 MB each on disk; the server enables MIGraphX FP16 execution for them with a provider option. They are not smaller FP16 ONNX files.
+**Distil-FP32 size:** its two segmentation graphs are **30,043,280 bytes (28.65 MiB)**. Including the shared v18 regressor, its full model set is **46,077,235 bytes (43.94 MiB)**. The files are in [`experiments/distil-fp32/`](../experiments/distil-fp32/) and [`experiments/shared/`](../experiments/shared/). Area-B0's full set is 46,383,105 bytes (44.23 MiB); its graphs are in [`experiments/area-b0/`](../experiments/area-b0/). Together, the two candidates and one shared regressor occupy **76,426,385 bytes (72.89 MiB)** in the repository. Stable-B2 needs approximately **228 MB**. Its B2 files remain about 110 MB each on disk; the server enables MIGraphX FP16 execution for them with a provider option, so they are not smaller FP16 ONNX files.
 
 Model provenance:
 
-- Distil-FP32 uses the SegFormer-B0 binary water/not-water student distilled from the SegFormer-B2 teacher. Training used 217 training rows split by capture date (169 fit images / 39 dates; 48 selection images / 12 dates), with validation and test excluded. Teacher targets were regenerated for the exact OpenCV runtime resize transforms. The student had 0.9517 mean IoU against the teacher on the training-date holdout; that is segmentation teacher agreement, **not waviness MAE**. The training/export investigation is documented in [`experiments.md`](experiments.md), section “B2-to-B0 binary segmentation distillation with the runtime resize contract”. Source artifacts were in `/tmp/wave_b2_b0_binary_distill_area_v1/` and `/tmp/wave_migraphx_b0_distilled_area_full_eval_v5/`.
+- Distil-FP32 uses the SegFormer-B0 binary water/not-water student distilled from the SegFormer-B2 teacher. Training used 217 training rows split by capture date (169 fit images / 39 dates; 48 selection images / 12 dates), with validation and test excluded. Teacher targets were regenerated for the exact OpenCV runtime resize transforms. The student had 0.9517 mean IoU against the teacher on the training-date holdout; that is segmentation teacher agreement, **not waviness MAE**. The training/export investigation is documented in [`experiments.md`](experiments.md), section “B2-to-B0 binary segmentation distillation with the runtime resize contract”. Its two benchmark ONNX graphs are now stored at the repository-relative paths in the artifact table. The student training checkpoint and exporter are still not tracked, so preserving these ONNX files preserves the exact inference artifact; retraining is only needed if they are lost or the model is intentionally changed.
 - Area-B0 uses the non-distilled B0 water segmenter exported to two static ONNX input shapes. It is the B0 MIGraphX + OpenCV area-preprocessing full-route candidate documented in [`experiments.md`](experiments.md), around the MIGraphX B0/OpenCV area comparison.
 - Stable-B2 uses the stable SegFormer-B2 water segmenter ONNX exports. `MIGRAPHX_SKIP_BENCHMARKING=1` and `MIGRAPHX_USE_FAST_SOFTMAX=0` were set before importing MIGraphX to avoid the nondeterministic setup/configuration previously observed. Its final exact-nearest / 24-worker setup and quality analysis are in [`experiments.md`](experiments.md), sections “Stable MIGraphX FP16 determinism configuration” and “Six-photo warmed-server run”.
 
-**Reproducibility constraint:** the ONNX graphs, regression ONNX, and the tested Python virtual environment currently live in `/tmp`; they are not source-controlled. Their exact bytes cannot be recovered from this document alone if that temporary data is deleted. Recreating the segmentation graphs requires the training/export artifacts or checkpoints described in `experiments.md` and its `/tmp` run paths. The v18 regression source checkpoint is the repository's selected v18 checkpoint; it was exported to ONNX for this server. Preserve/copy the needed ONNX files and environment when handing this experiment to another machine. Do not silently substitute another checkpoint and call the result the same experiment.
+**Artifact retention:** the Distil-FP32 and Area-B0 graphs and their shared regressor are now present in `experiments/` at the paths in the table. Keep these files with the experiment when committing or transferring the repository; validate them with the recorded hashes. The source checkpoint for the regressor is the tracked checkpoint selected by `PREDICT_CHECKPOINT_PATH` in `.env`; its SHA-256 is `d95f6a48a8d282bcb34f610f41a1377da5c2508389cda032461afc8fb4bb1b17`. Stable-B2's two segmentation graphs are identified by SHA-256 but were not part of the requested copy, so that candidate still requires an archived copy or re-export from its source checkpoint. The distilled student's training checkpoint/exporter is not tracked, but its two inference graphs are preserved in the repository.
 
 ## Repository setup and runtime environment
 
 Repository root: `/home/ubuntu/dev/deep-learning/wave-regression-model`. The serving entry point is [`step_7_i_experimental_migraphx_server.py`](../step_7_i_experimental_migraphx_server.py). Supporting repository files are `step_0_a_native_heif_decoder.py` (optional native HEIF wrapper) and `step_2_b_crop_selector.py` (lower-water crop selection). The benchmark image set and outputs live in `step-7-predict-captures-holder/experiment-predict-holder/`.
 
-The measured runtime was a Python 3.12 virtual environment at `/tmp/wave_migraphx_312_env`, on a Linux machine with a supported AMD GPU/ROCm stack and MIGraphX ONNX Runtime execution provider. Observed versions included ONNX Runtime 1.29.0, MIGraphX EP package `1.0.0+rocm10.1.0`, OpenCV 5.0.0, NumPy 2.5.3, Pillow 12.3.0, and pillow-heif 1.8.0. The repository's `requirements-common.txt` is **not sufficient by itself** to install the MIGraphX provider; use a compatible ROCm/MIGraphX installation for the target host. The exact tested environment is under `/tmp` and is not committed.
+The measured runtime was Python 3.12 on Linux with an AMD GPU/ROCm stack and the MIGraphX ONNX Runtime execution provider. Observed versions included ONNX Runtime 1.29.0, MIGraphX EP package `1.0.0+rocm10.1.0`, OpenCV 5.0.0, NumPy 2.5.3, Pillow 12.3.0, and pillow-heif 1.8.0. The repository's `requirements-rocm-gfx1151.txt` pins the machine's PyTorch/ROCm wheel set; the common requirements alone do not install MIGraphX. Install a compatible AMD provider build and preserve these observed versions when reproducing results. Environment locations are machine-specific and are intentionally not part of the handoff.
 
-Before starting, verify that all three selected model files exist, the native library path below exists, the GPU/MIGraphX provider is visible to ONNX Runtime, and the six HEIC inputs are present. The experiment server checks missing graphs and provider availability and exits with a clear error. The optional native decoder can be rebuilt after installing `pillow-heif` and a C++17 compiler:
+Before starting Distil-FP32 or Area-B0, verify that the four candidate segmentation graphs and shared regressor in `experiments/` match their recorded hashes, the native library can be loaded (or fallback is acceptable), the GPU/MIGraphX provider is visible to ONNX Runtime, and the six HEIC inputs are present. The experiment server checks missing graphs and provider availability and exits with a clear error. The optional native decoder can be rebuilt after installing `pillow-heif` and a C++17 compiler:
 
 ```bash
-/tmp/wave_migraphx_312_env/bin/python step_0_b_build_native_heif.py
+python step_0_b_build_native_heif.py
 ```
 
 This generates `native/build/libwave_heif_tiles.so`, linked to the libheif bundled with that environment. The server can fall back to Pillow HEIC decoding if the helper is unavailable, but that changes performance and is not an apples-to-apples reproduction of the measured runs.
@@ -86,27 +98,35 @@ This generates `native/build/libwave_heif_tiles.so`, linked to the libheif bundl
 MIGraphX library paths and deterministic settings used for launch:
 
 ```bash
-export LD_LIBRARY_PATH="/tmp/wave_migraphx_312_env/lib/python3.12/site-packages/migraphx_libs:/opt/rocm/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+MIGRAPHX_SITE_PACKAGES="$(python -c 'import onnxruntime_ep_migraphx as m; from pathlib import Path; print(Path(m.__file__).resolve().parents[1])')"
+export LD_LIBRARY_PATH="${MIGRAPHX_SITE_PACKAGES}/migraphx_libs:/opt/rocm/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export MIGRAPHX_SKIP_BENCHMARKING=1
 export MIGRAPHX_USE_FAST_SOFTMAX=0
 ```
 
 ## Start one experiment server
 
-The server binds only to `127.0.0.1:8765`, warms its models before reporting ready, keeps them in memory, and serves requests sequentially. Stop the existing server with Ctrl-C before starting a different candidate on the same port. The server left running after the recorded runs was Stable-B2. Choose a candidate key with `WAVE_EXPERIMENT`:
+The server binds only to `127.0.0.1:8765`, warms its models before reporting ready, keeps them in memory, and serves requests sequentially. Stop the existing server with Ctrl-C before starting a different candidate on the same port. The server left running after the recorded runs was Stable-B2. Distil-FP32 and Area-B0 artifacts are now in `experiments/`; set `MODEL_DIR` there and choose either candidate key with `WAVE_EXPERIMENT`. Stable-B2 graph files were not included in the requested artifact copy. The explicit graph overrides below make the selected artifact files unambiguous and avoid relying on the server's original machine-specific defaults:
 
 ```bash
+export MODEL_DIR="$PWD/experiments"
+export REGRESSOR_ONNX="$MODEL_DIR/shared/reg-v18-efficientnet-b0-cpu-20261030.onnx"
+
 # Distil-FP32
-WAVE_EXPERIMENT=distilled-b0-migraphx-fp32 /tmp/wave_migraphx_312_env/bin/python -u step_7_i_experimental_migraphx_server.py
+WAVE_EXPERIMENT=distilled-b0-migraphx-fp32 \
+WAVE_STEP1_ONNX="$MODEL_DIR/distil-fp32/seg-distil-b0-step1-448-fp32-20261030.onnx" \
+WAVE_STEP2_ONNX="$MODEL_DIR/distil-fp32/seg-distil-b0-step2-384-to224-fp32-20261030.onnx" \
+WAVE_REGRESSOR_ONNX="$REGRESSOR_ONNX" python -u step_7_i_experimental_migraphx_server.py
 
 # Area-B0
-WAVE_EXPERIMENT=migraphx-b0-opencv-area /tmp/wave_migraphx_312_env/bin/python -u step_7_i_experimental_migraphx_server.py
+WAVE_EXPERIMENT=migraphx-b0-opencv-area \
+WAVE_STEP1_ONNX="$MODEL_DIR/area-b0/seg-b0-step1-448-fp32-20261030.onnx" \
+WAVE_STEP2_ONNX="$MODEL_DIR/area-b0/seg-b0-step2-384-to224-fp32-20261030.onnx" \
+WAVE_REGRESSOR_ONNX="$REGRESSOR_ONNX" python -u step_7_i_experimental_migraphx_server.py
 
-# Stable-B2
-WAVE_EXPERIMENT=stable-migraphx-fp16-b2-opencv-nearest /tmp/wave_migraphx_312_env/bin/python -u step_7_i_experimental_migraphx_server.py
 ```
 
-Run from the repository root after exporting the library path/settings above. The default candidate is Distil-FP32, but specifying the key explicitly prevents accidentally benchmarking the wrong model. `WAVE_SERVER_PORT` can override the port. Optional `WAVE_STEP1_ONNX`, `WAVE_STEP2_ONNX`, and `WAVE_REGRESSOR_ONNX` override graph paths; only use them if intentionally running a different artifact and record that change.
+Run from the repository root after exporting the library path/settings above. The server default is Distil-FP32, but specify the candidate key explicitly to prevent accidentally benchmarking the wrong model. `WAVE_SERVER_PORT` can override the port. Optional `WAVE_STEP1_ONNX`, `WAVE_STEP2_ONNX`, and `WAVE_REGRESSOR_ONNX` override graph paths; only use them if intentionally running a different artifact and record that change.
 
 Wait for the startup JSON line with `"ready": true`, and check:
 
