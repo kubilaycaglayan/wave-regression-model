@@ -17,12 +17,14 @@ performance-improvements/
 │   ├── v000_baseline/                 # immutable reference adapter + manifest
 │   ├── v001_coordinate_crop_single_output/ # coordinate crop candidate
 │   ├── v002_skip_step2_keep_baseline_image/ # isolate Step 2 removal
-│   └── v003_roi_mask_processing/   # ROI-limited Step 1 mask processing
+│   ├── v003_roi_mask_processing/   # ROI-limited Step 1 mask processing
+│   └── v004_working_resolution_cap/ # capped working-photo resolution
 └── runs/
     ├── v000_baseline/                # immutable JSON reports for that version
     ├── v001_coordinate_crop_single_output/
     ├── v002_skip_step2_keep_baseline_image/
-    └── v003_roi_mask_processing/
+    ├── v003_roi_mask_processing/
+    └── v004_working_resolution_cap/
 ```
 
 Create a new `experiment-versions/v001_<hypothesis>/` directory for the first
@@ -145,3 +147,19 @@ median. MAE improved slightly (**0.110743** vs **0.110818**), but RMSE increased
 (**0.138456** vs **0.138429**) and 7 photos regressed individually, so the
 strict quality gate failed. It is marked rejected. See [v003](experiment-versions/v003_roi_mask_processing/)
 and its [benchmark report](runs/v003_roi_mask_processing/distil-fp32-fine-grained-20261030T112855Z.json).
+
+## Experiment 4: 2048 px working resolution cap
+
+`v004_working_resolution_cap` kept Step 1's original-photo 448 × 448 model
+input and both segmentation stages. It downsampled the source once to a
+2048 px maximum-long-side working image for Step 1 mask expansion, erosion,
+bounding box, and masked ROI operations, then retained the baseline canvas
+and JPEG stages. All 47 validation photos completed without failures; test was
+not run.
+
+Median raw-to-score improved modestly from **98.90 ms** to **90.94 ms**, but
+quality failed the gate: MAE rose from **0.110818** to **0.122735**, RMSE from
+**0.138429** to **0.155863**, and 30 photos regressed individually. The new
+downsampling operation itself cost **8.42 ms** median. This version is marked
+rejected. See [v004](experiment-versions/v004_working_resolution_cap/) and its
+[benchmark report](runs/v004_working_resolution_cap/distil-fp32-fine-grained-20261030T113058Z.json).
