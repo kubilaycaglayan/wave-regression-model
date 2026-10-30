@@ -12,7 +12,7 @@ The technical training stack is a separate document: [training-stack.md](trainin
 - This is a localized project for **Samsun, Turkey**. Photos come from a fixed location and camera, with 3–4 recurring angles, usually 2–10 photos per day.
 - The **lower part of the sea** matters most: it is the water closest to the coast and to the people swimming. The Step 2 crop therefore prefers bottom-anchored rectangles inside the lower sea band.
 - The public GitHub repository holds **code only**. Sea photos, labels, and checkpoints are stored and shared through **Hugging Face**.
-- Training data and inference use the same preprocessing profile (`fast-v1`): single-pass 448 px segmentation for Step 1, 384 px segmentation for Step 2, float16 on GPU, and a 224×224 model input.
+- Training data and inference use the same preprocessing profile (`fast-v2`): single-pass 448 px SegFormer-B2 segmentation, lower-water crop selection on a 224×224 mask, coordinate mapping back to the original photo, and no Step 2 segmentation pass.
 
 ## 1. One incoming photo — inference
 
@@ -21,12 +21,12 @@ The technical training stack is a separate document: [training-stack.md](trainin
 flowchart TD
     RAW["Incoming raw sea photo, iPhone HEIC or fixed camera capture"] --> DECODE["Decode image and apply EXIF orientation"]
     DECODE --> SEG1["Step 1: Sea segmentation with pretrained SegFormer water classes"]
-    SEG1 --> CLEAN["Clean the water mask: erode edges and drop mixed pixels"]
-    CLEAN --> STD["Keep only the sea: crop to the water area and fit on a black 224x224 square"]
-    STD --> SEG2["Step 2: Segment the standardized image again"]
-    SEG2 --> CROP["Lower-water rectangle search: bottom-anchored, within the lower sea band, the water closest to the coast"]
-    CROP --> INPUT["Final 224x224 model input: the same representation used in training"]
-    INPUT --> NORM["ImageNet normalization"]
+    SEG1 --> GRID["Resize predicted mask to 224×224"]
+    GRID --> CROP["Select lower-water rectangle on mask grid"]
+    CROP --> MAP["Map coordinates to original photo"]
+    MAP --> INPUT["Resize source ROI and apply water mask on black 224×224 canvas"]
+    INPUT --> PASS["Step 2 carries the JPEG forward unchanged"]
+    PASS --> NORM["ImageNet normalization"]
     NORM --> MODEL["Frozen EfficientNet-B0 backbone and trained regression head with sigmoid output"]
     MODEL --> SCORE["Waviness score: 0.00 = calm, 1.00 = very wavy"]
 
@@ -37,7 +37,7 @@ flowchart TD
     classDef result fill:#fdecea,stroke:#b33a3a,color:#3b1515;
 
     class RAW,DECODE capture;
-    class SEG1,CLEAN,STD,SEG2,NORM process;
+    class SEG1,GRID,MAP,PASS,NORM process;
     class CROP,INPUT key;
     class MODEL ml;
     class SCORE result;
@@ -46,12 +46,12 @@ flowchart TD
 ### What each stage is doing
 
 - **Decode**: opens the iPhone HEIC or camera image and normalizes its EXIF orientation, so the scene is upright before any processing.
-- **Step 1 — sea segmentation**: the pretrained SegFormer identifies water classes (`water`, `sea`, `river`, `lake`). The mask is cleaned, the detected water is cropped, non-water pixels are blacked out, and the result is fitted onto a black 224×224 square. This removes sky, buildings, beach, and sand.
-- **Step 2 — lower-water crop**: the standardized image is segmented again, and a bottom-anchored rectangle is selected from the lower sea band. That region is the water nearest the coast and nearest the swimmers.
+- **Step 1 — coordinate crop**: the pretrained SegFormer identifies water classes (`water`, `sea`, `river`, `lake`). The predicted mask is resized to 224×224 and the selector chooses a bottom-anchored rectangle from the lower sea band. Those coordinates map back to the original photo; the source ROI is resized directly onto a black 224×224 canvas and masked.
+- **Step 2 — model-input handoff**: the final Step 1 JPEG is copied unchanged into the labeled-data directory. It does not run another segmentation model.
 - **Model input**: the selected crop is resized to 224×224 and normalized, which is exactly the representation the regression model was trained on.
 - **Regression**: the frozen EfficientNet-B0 backbone extracts features, the small trained head produces one value, and the sigmoid keeps the score in `[0, 1]`.
 
-The inference path recreates the training representation from a single raw photo. Step 2 works on the Step 1 standardized image, not on the original photo.
+The inference path recreates the training representation from a single raw photo. Crop coordinates come from the mask, while the selected pixels come from the original photo.
 
 ## 2. Full lifecycle — capture, training, inference, and retraining
 
@@ -64,9 +64,9 @@ flowchart TD
         PHOTOS --> RAW
     end
 
-    subgraph PREP["Shared preprocessing: fast-v1"]
-        SEG1["Step 1: Sea segmentation<br/>standardize to 224x224"]
-        SEG2["Step 2: Lower-water crop<br/>bottom of the sea, where people swim"]
+    subgraph PREP["Shared preprocessing: fast-v2"]
+        SEG1["Step 1: Segmentation + coordinate crop<br/>raw photo to 224x224 model input"]
+        SEG2["Step 2: Copy final model input<br/>no additional segmentation"]
         INPUT["224x224 model input"]
         RAW --> SEG1 --> SEG2 --> INPUT
     end

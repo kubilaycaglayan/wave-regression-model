@@ -43,7 +43,9 @@ labels.csv
 
 # Locally generated pipeline outputs.
 step-1-processed-data/archive/
+step-1-processed-data/fast-v2/
 step-1-processed-data/preprocessing-profile.json
+step-2-coordinate-crop-data/
 step-2-final-water-data/preprocessing-profile.json
 step-2-final-water-data/preprocessing-contract.json
 step-2-final-water-data/index.html

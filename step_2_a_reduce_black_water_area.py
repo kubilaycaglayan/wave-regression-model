@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
-"""Reduce black borders in processed water images without losing lower waves."""
+"""Produce the labeled lower-water images used by the waviness regressor."""
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import html
 import io
 import json
 import os
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
 import numpy as np
-import torch
 from PIL import Image
 
 from step_1_a_water_segmentation import (
@@ -31,7 +30,6 @@ from step_1_c_preprocessing_profiles import (
     configure_segmentation,
     ensure_profile_directory,
     get_profile,
-    profile_contract,
     require_profile_directory,
     step2_processor_size,
 )
@@ -239,36 +237,19 @@ def save_result(image: Image.Image, path: Path) -> None:
         image.save(path)
 
 
-def write_preprocessing_contract(profile, model: SegmentationModel, output_dir: Path) -> None:
-    if profile.name == "baseline-v16":
-        return
-    project_dir = Path(__file__).resolve().parent
-    names = (
-        "step_1_a_water_segmentation.py",
-        "step_1_b_preprocess_water_inputs.py",
-        "step_1_c_preprocessing_profiles.py",
-        "step_2_a_reduce_black_water_area.py",
-        "step_4_a_wave_dataset.py",
-        "step_5_a_wave_regression_model.py",
-        "step_7_a_predict.py",
-    )
-    hashes = {
-        name: hashlib.sha256((project_dir / name).read_bytes()).hexdigest()
-        for name in names
-    }
-    contract = profile_contract(
-        profile,
-        segmentation_model_revision=getattr(model.model.config, "_commit_hash", None),
-        device=str(model.device),
-        torch_version=str(torch.__version__),
-        code_sha256=hashes,
-    )
-    path = output_dir / "preprocessing-contract.json"
-    encoded = json.dumps(contract, indent=2, sort_keys=True) + "\n"
-    if path.exists() and path.read_text(encoding="utf-8") != encoded:
-        raise RuntimeError(f"Existing preprocessing contract differs from this run: {path}")
-    if not path.exists():
-        path.write_text(encoded, encoding="utf-8")
+def write_bytes_atomically(path: Path, content: bytes) -> None:
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def write_gallery(entries: list[tuple[str, Path]], input_dir: Path, output_dir: Path) -> None:
@@ -310,7 +291,7 @@ def diagnostic_line(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), default="fast-v1")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2"), default="fast-v2")
     parser.add_argument("--input-dir", type=Path, help="Step 1 directory; defaults to the selected profile")
     parser.add_argument("--output-dir", type=Path, help="Output directory; defaults to the selected profile")
     parser.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")
@@ -340,11 +321,16 @@ def main() -> None:
     processed = 0
     skipped = 0
     total_started = time.perf_counter()
-    if profile.name != "baseline-v16" and image_paths:
-        model = load_model(args.device)
-        if model.device.type != "cuda":
-            raise RuntimeError("The fast-v1 profile requires GPU segmentation with float16 precision")
-        write_preprocessing_contract(profile, model, output_dir)
+    if profile.coordinate_crop:
+        contract_path = input_dir / "preprocessing-contract.json"
+        if not contract_path.is_file():
+            raise FileNotFoundError(f"Missing Step 1 preprocessing contract: {contract_path}")
+        contract_bytes = contract_path.read_bytes()
+        destination_contract = output_dir / contract_path.name
+        if destination_contract.exists() and destination_contract.read_bytes() != contract_bytes:
+            raise RuntimeError(f"Step 2 preprocessing contract differs from Step 1: {destination_contract}")
+        if not destination_contract.exists():
+            write_bytes_atomically(destination_contract, contract_bytes)
     for index, source_path in enumerate(image_paths, 1):
         item_started = time.perf_counter()
         logical_stem = source_path.stem.removeprefix("step-1_")
@@ -357,6 +343,19 @@ def main() -> None:
                 logical_name, None, None, None, None, None,
                 "skipped: output already exists",
             ) + f" | time={time.perf_counter() - item_started:.3f}s")
+            continue
+
+        if profile.coordinate_crop:
+            try:
+                write_bytes_atomically(result_path, source_path.read_bytes())
+                processed += 1
+                entries.append((logical_name, result_path))
+                print(f"[{index}/{len(image_paths)}] {logical_name}: passed through Step 1 coordinate crop "
+                      f"({time.perf_counter() - item_started:.3f}s)")
+            except Exception as error:
+                skipped += 1
+                print(f"[{index}/{len(image_paths)}] {logical_name}: WARNING: {error}; skipped "
+                      f"({time.perf_counter() - item_started:.3f}s)")
             continue
 
         try:

@@ -78,7 +78,7 @@ def print_timing(label: str, started: float) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--threads", type=int, help="PyTorch CPU threads; benchmark for your hardware")
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), help="preprocessing profile; defaults from the checkpoint")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2"), help="preprocessing profile; defaults from the checkpoint")
     args = parser.parse_args()
     if args.threads is not None and args.threads < 1:
         parser.error("--threads must be positive")
@@ -105,9 +105,10 @@ def find_input_photos() -> list[Path]:
 
 
 def preprocess_photo(
-    path: Path, segmentation_model: SegmentationModel, *, reuse_step1_mask: bool = False
+    path: Path, segmentation_model: SegmentationModel, *, reuse_step1_mask: bool = False,
+    coordinate_crop: bool = False,
 ) -> tuple[Image.Image, bytes]:
-    """Reproduce the persisted Step 1 -> Step 2 training pipeline in memory."""
+    """Reproduce the checkpoint-matched training preprocessing in memory."""
     started = time.perf_counter()
     try:
         raw_image = load_rgb_image(path)
@@ -115,6 +116,24 @@ def preprocess_photo(
         kind = "HEIC/HEIF" if path.suffix.lower() in {".heic", ".heif"} else "image"
         raise RuntimeError(f"Could not decode {kind} file {path}: {error}") from error
     print_timing("Decode input", started)
+
+    if coordinate_crop:
+        started = time.perf_counter()
+        from step_1_b_preprocess_water_inputs import preprocess_coordinate_crop
+
+        model_input = preprocess_coordinate_crop(raw_image, segmentation_model)
+        if model_input is None:
+            raise RuntimeError("Water cannot be reliably detected for the lower-water coordinate crop")
+        print_timing("Step 1 mask and lower-water coordinate crop", started)
+        started = time.perf_counter()
+        encoded_model_input = encode_step_2_output(model_input)
+        model_input = decode_rgb_bytes(encoded_model_input)
+        if model_input.mode != "RGB" or model_input.size != IMAGE_SIZE:
+            raise RuntimeError(
+                f"Preprocessing produced {model_input.mode} {model_input.size}; expected RGB {IMAGE_SIZE}"
+            )
+        print_timing("Final model-input JPEG round trip", started)
+        return model_input, encoded_model_input
 
     started = time.perf_counter()
     projected_mask = None
@@ -191,6 +210,7 @@ def prepare_model_input(
     photo: Path,
     preview_inputs: Mapping[Path, Image.Image],
     segmentation_model: SegmentationModel | None,
+    *, coordinate_crop: bool = False,
 ) -> tuple[Image.Image, bytes | None, bool]:
     """Return the cached input or generate it, plus whether it was reused."""
     cached_input = preview_inputs.get(photo)
@@ -198,7 +218,9 @@ def prepare_model_input(
         return cached_input, None, True
     if segmentation_model is None:
         raise RuntimeError(f"No segmentation model is available to preprocess {photo}")
-    model_input, encoded_model_input = preprocess_photo(photo, segmentation_model)
+    model_input, encoded_model_input = preprocess_photo(
+        photo, segmentation_model, coordinate_crop=coordinate_crop
+    )
     return model_input, encoded_model_input, False
 
 
@@ -351,10 +373,15 @@ def main() -> None:
         if profile.name != "baseline-v16":
             namespace = configure_prediction_profile(profile, segmentation, sys.modules[__name__], str(device))
             print(f"Preprocessing profile {profile.name}; output namespace {namespace}", flush=True)
+        if profile.coordinate_crop:
+            from step_1_b_preprocess_water_inputs import warm_coordinate_crop_selector
+
+            warm_coordinate_crop_selector()
         contract = validate_checkpoint_preprocessing(
             checkpoint_path, segmentation=segmentation, device=device,
             step2_resolution=profile.step2_resolution, reuse_step1_mask=False,
             project_dir=PROJECT_DIR, sha256_for=sha256_for,
+            coordinate_crop=profile.coordinate_crop,
         )
         preview_inputs: dict[Path, Image.Image] = {}
         for photo in photos:
@@ -413,7 +440,8 @@ def main() -> None:
             try:
                 preview_path = preview_path_for(photo)
                 model_input, encoded_model_input, reused_preview = prepare_model_input(
-                    photo, preview_inputs, segmentation_model
+                    photo, preview_inputs, segmentation_model,
+                    coordinate_crop=profile.coordinate_crop,
                 )
                 if reused_preview:
                     print(f"Model input: reused {preview_path.relative_to(PROJECT_DIR)}")

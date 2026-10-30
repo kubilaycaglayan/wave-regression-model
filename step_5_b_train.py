@@ -33,6 +33,7 @@ from step_5_c_plot_training import (
     write_training_history,
 )
 from step_1_c_preprocessing_profiles import get_profile, require_profile_directory
+from step_3_b_split_paths import split_directory_for
 
 
 RANDOM_SEED = 42
@@ -73,7 +74,7 @@ def version_directory_name(
     """Return the stable directory name for a completed training run."""
     if not math.isfinite(best_mae) or not 0.0 <= best_mae <= 1.0:
         raise ValueError(f"Best validation MAE must be finite and within [0, 1], got {best_mae!r}")
-    profile_suffix = "-fast" if preprocessing_profile == "fast-v1" else ""
+    profile_suffix = f"-{preprocessing_profile}" if preprocessing_profile != "baseline-v16" else ""
     return f"{run_version}-mae-{best_mae:.4f}-{canonical_backbone_name(backbone_name)}{profile_suffix}"
 
 
@@ -205,11 +206,12 @@ def write_summary(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backbone", choices=SUPPORTED_BACKBONES, default=DEFAULT_BACKBONE)
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), default="fast-v1")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2"), default="fast-v2")
     args = parser.parse_args()
     profile = get_profile(args.profile)
     global SPLIT_SNAPSHOT_DIR
-    SPLIT_SNAPSHOT_DIR = Path(profile.split_dir) / "snapshots"
+    split_dir = split_directory_for(profile)
+    SPLIT_SNAPSHOT_DIR = split_dir / "snapshots"
     backbone_name = canonical_backbone_name(args.backbone)
     started = time.perf_counter()
     print(f"Random seed: {RANDOM_SEED}")
@@ -220,7 +222,7 @@ def main() -> None:
         batch_size=BATCH_SIZE,
         num_workers=0,
         image_dir=profile.step2_dir,
-        split_dir=profile.split_dir,
+        split_dir=split_dir,
     )
     require_profile_directory(profile, Path(profile.step2_dir))
     preprocessing_contract = None
@@ -235,7 +237,7 @@ def main() -> None:
             raise RuntimeError(f"Preprocessing contract has the wrong profile: {contract_path}")
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     run_version = next_run_version(CHECKPOINT_DIR)
-    pending_suffix = "-fast" if profile.name == "fast-v1" else ""
+    pending_suffix = f"-{profile.name}" if profile.name != "baseline-v16" else ""
     run_directory = CHECKPOINT_DIR / f"{run_version}-pending-{backbone_name}{pending_suffix}"
     run_directory.mkdir(parents=True, exist_ok=False)
     print(f"Run version: {run_version}")

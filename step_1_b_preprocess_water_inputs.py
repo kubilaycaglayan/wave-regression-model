@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create deterministic 224x224 masked RGB model inputs and an inspection gallery."""
+"""Create 224x224 lower-water model inputs and an inspection gallery."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import numpy as np
+import torch
 from PIL import Image
 from scipy.ndimage import minimum_filter
 
@@ -23,6 +24,7 @@ from step_1_a_water_segmentation import (
     configure_inference_device,
     extract_water_mask,
     iter_images,
+    load_model,
     load_rgb_image,
     run_segmentation,
 )
@@ -31,6 +33,7 @@ from step_1_c_preprocessing_profiles import (
     configure_segmentation,
     ensure_profile_directory,
     get_profile,
+    write_preprocessing_contract,
 )
 import step_1_a_water_segmentation as segmentation
 
@@ -121,10 +124,67 @@ def preprocess_raw_image_with_projected_mask(
     return standardized, _project_eroded_mask(image, eroded)
 
 
-def encode_step_1_output(image: Image.Image) -> bytes:
+def preprocess_coordinate_crop(image: Image.Image, segmentation_model: SegmentationModel) -> Image.Image | None:
+    """Crop the lower-water source-photo region directly onto the regressor canvas."""
+    import cv2
+
+    from step_2_b_crop_selector import select_crop
+
+    started = time.perf_counter()
+    class_map = run_segmentation(image, segmentation_model, output_size=(448, 448))
+    if segmentation.INFERENCE_PRECISION == "float16" and segmentation_model.device.type != "cuda":
+        raise RuntimeError("Coordinate-crop preprocessing requires the configured CUDA segmentation device")
+    water_mask = extract_water_mask(class_map, segmentation_model.water_class_ids)
+    mask_224 = cv2.resize(
+        water_mask.astype(np.uint8), (224, 224), interpolation=cv2.INTER_NEAREST_EXACT
+    ).astype(bool)
+    selected = select_crop(mask_224, np.zeros((224, 224), dtype=bool))
+    if selected is None:
+        return None
+
+    left, top, right, bottom = selected[0]
+    width, height = image.size
+    x0 = max(0, min(width, int(np.floor(left * width / 224))))
+    x1 = max(x0 + 1, min(width, int(np.ceil(right * width / 224))))
+    y0 = max(0, min(height, int(np.floor(top * height / 224))))
+    y1 = max(y0 + 1, min(height, int(np.ceil(bottom * height / 224))))
+    source_roi = np.asarray(image.convert("RGB"), dtype=np.uint8)[y0:y1, x0:x1]
+    mask_roi = mask_224[top:bottom, left:right]
+
+    scale = min(224 / source_roi.shape[1], 224 / source_roi.shape[0])
+    resized_width = max(1, min(224, round(source_roi.shape[1] * scale)))
+    resized_height = max(1, min(224, round(source_roi.shape[0] * scale)))
+    offset_x, offset_y = (224 - resized_width) // 2, (224 - resized_height) // 2
+    canvas = np.zeros((224, 224, 3), dtype=np.uint8)
+    canvas_roi = canvas[offset_y:offset_y + resized_height, offset_x:offset_x + resized_width]
+    cv2.resize(source_roi, (resized_width, resized_height), dst=canvas_roi,
+               interpolation=cv2.INTER_LANCZOS4)
+    final_mask = cv2.resize(mask_roi.astype(np.uint8), (resized_width, resized_height),
+                            interpolation=cv2.INTER_NEAREST_EXACT)
+    canvas_roi[final_mask == 0] = 0
+    print(
+        f"Coordinate crop: mask={mask_224.shape[1]}x{mask_224.shape[0]}, "
+        f"source_box=({x0},{y0},{x1},{y1}), selected={selected[0]}, "
+        f"elapsed={time.perf_counter() - started:.3f}s",
+        flush=True,
+    )
+    return Image.fromarray(canvas, mode="RGB")
+
+
+def warm_coordinate_crop_selector() -> float:
+    """Compile the crop selector before timing per-image preprocessing."""
+    from step_2_b_crop_selector import warm_crop_selector
+
+    elapsed = warm_crop_selector()
+    print(f"Coordinate crop selector warm-up: {elapsed:.3f}s", flush=True)
+    return elapsed
+
+
+def encode_step_1_output(image: Image.Image, *, full_chroma: bool = False) -> bytes:
     """Encode exactly as Step 1 does before Step 2 reads the image."""
     output = io.BytesIO()
-    image.save(output, format="JPEG", quality=95)
+    options = {"quality": 95, "subsampling": 0} if full_chroma else {"quality": 95}
+    image.save(output, format="JPEG", **options)
     return output.getvalue()
 
 
@@ -155,7 +215,9 @@ def processed_paths(source_path: Path, output_dir: Path, names: SourceOutputName
     return output_dir / f"step-1_{stem}.jpg"
 
 
-def write_output_atomically(standardized: Image.Image, standardized_path: Path) -> None:
+def write_output_atomically(
+    standardized: Image.Image, standardized_path: Path, *, full_chroma: bool = False
+) -> None:
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -165,7 +227,7 @@ def write_output_atomically(standardized: Image.Image, standardized_path: Path) 
             delete=False,
         ) as temporary:
             temporary_path = Path(temporary.name)
-            temporary.write(encode_step_1_output(standardized))
+            temporary.write(encode_step_1_output(standardized, full_chroma=full_chroma))
             temporary.flush()
             os.fsync(temporary.fileno())
         os.replace(temporary_path, standardized_path)
@@ -176,23 +238,29 @@ def write_output_atomically(standardized: Image.Image, standardized_path: Path) 
 
 
 def process_image(
-    model: SegmentationModel, source_path: Path, standardized_path: Path
-) -> tuple[str, float, str | None]:
+    model: SegmentationModel, source_path: Path, standardized_path: Path,
+    coordinate_crop: bool = False,
+) -> tuple[str, float, str | None, str | None]:
     """Process one pending image; returns (status, seconds, warning)."""
     started = time.perf_counter()
+    model_revision = getattr(model.model.config, "_commit_hash", None)
     try:
-        standardized = preprocess_raw_image(load_rgb_image(source_path), model)
+        source = load_rgb_image(source_path)
+        standardized = (
+            preprocess_coordinate_crop(source, model)
+            if coordinate_crop else preprocess_raw_image(source, model)
+        )
         if standardized is None:
-            return "skipped", time.perf_counter() - started, "no reliable water region"
-        write_output_atomically(standardized, standardized_path)
-        return "processed", time.perf_counter() - started, None
+            return "skipped", time.perf_counter() - started, "no reliable water region", model_revision
+        write_output_atomically(standardized, standardized_path, full_chroma=coordinate_crop)
+        return "processed", time.perf_counter() - started, None, model_revision
     except Exception as error:
-        return "skipped", time.perf_counter() - started, str(error)
+        return "skipped", time.perf_counter() - started, str(error), model_revision
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), default="fast-v1")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2"), default="fast-v2")
     parser.add_argument("--input-dir", type=Path, action="append", help="Additional input directory; repeatable")
     parser.add_argument("--output-dir", type=Path, help="Output directory; defaults to the selected profile")
     parser.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")
@@ -226,6 +294,10 @@ def main() -> None:
     pending: list[tuple[int, Path, Path]] = []
     for index, source_path in enumerate(image_paths, 1):
         standardized_path = processed_paths(source_path, output_dir, names)
+        next_step_path = Path(profile.step2_dir) / f"step-2_{standardized_path.name.removeprefix('step-1_')}"
+        if next_step_path.exists():
+            print(f"[{index}/{total}] {source_path.name}: skipped (Step 2 output already exists)")
+            continue
         if standardized_path.exists():
             print(f"[{index}/{total}] {source_path.name}: skipped (standardized input already exists)")
             entries[index] = (source_path.name, source_path, standardized_path)
@@ -236,12 +308,17 @@ def main() -> None:
 
     processing_seconds = 0.0
     run_started = time.perf_counter()
+    device = configure_inference_device(args.device) if not pending else None
+    model_revisions: set[str] = set()
     if pending:
         device = configure_inference_device(args.device)
-        if profile.name == "fast-v1" and device.type != "cuda":
-            raise RuntimeError("The fast-v1 profile requires GPU segmentation with float16 precision")
+        if profile.precision == "float16" and device.type != "cuda":
+            raise RuntimeError(f"The {profile.name} profile requires GPU segmentation with float16 precision")
+        if profile.coordinate_crop:
+            warm_coordinate_crop_selector()
         workers = select_worker_count(args.workers, device, len(pending))
-        tasks = {index: (source_path, standardized_path) for index, source_path, standardized_path in pending}
+        tasks = {index: (source_path, standardized_path, profile.coordinate_crop)
+                 for index, source_path, standardized_path in pending}
         settings = {
             "SEGMENTATION_RESOLUTION": profile.step1_resolution,
             "USE_OVERLAPPING_TILES": profile.overlapping_tiles,
@@ -251,15 +328,30 @@ def main() -> None:
             "INFERENCE_PRECISION": profile.precision,
         }
         results = run_segmentation_tasks(process_image, tasks, str(device), workers, settings)
-        for index, (status, elapsed, warning) in results:
-            source_path, standardized_path = tasks[index]
+        for index, (status, elapsed, warning, model_revision) in results:
+            source_path, standardized_path, _ = tasks[index]
             processing_seconds += elapsed
+            if model_revision:
+                model_revisions.add(model_revision)
             if status == "processed":
                 entries[index] = (source_path.name, source_path, standardized_path)
                 print(f"[{index}/{total}] {source_path.name}: processed ({elapsed:.3f}s)")
             else:
                 skipped.append(source_path.name)
                 print(f"[{index}/{total}] {source_path.name}: WARNING: {warning}; skipped ({elapsed:.3f}s)")
+
+    contract_path = output_dir / "preprocessing-contract.json"
+    if profile.name != "baseline-v16" and not contract_path.exists():
+        if not model_revisions:
+            model = load_model(str(device), verbose=False)
+            revision = getattr(model.model.config, "_commit_hash", None)
+            model_revisions = {revision} if revision else set()
+        if len(model_revisions) > 1:
+            raise RuntimeError(f"Multiple segmentation model revisions processed in one run: {sorted(model_revisions)}")
+        write_preprocessing_contract(profile, output_dir, device=str(device),
+                                     model_name=segmentation.MODEL_NAME,
+                                     torch_version=str(torch.__version__),
+                                     segmentation_model_revision=next(iter(model_revisions), None))
 
     write_gallery([entries[index] for index in sorted(entries)], output_dir)
     print(f"Processed: {len(entries) - already_present}")

@@ -124,10 +124,13 @@ validation-only report](runs/v000_baseline/distil-fp32-fine-grained-20261030T111
 
 `v001_coordinate_crop_single_output` used Step 1 mask coordinates to choose a
 lower-water ROI on the original photo, then created one final 224 × 224 input
-for the waviness regressor. It skipped Step 1's saved image, the intermediate
-JPEG round trip, and Step 2 segmentation. The full 47-photo validation cohort
-completed without failures; only Step 1 segmentation was loaded. The reserved
-test split was not run.
+for the waviness regressor. The 224 × 224 grid is used for mask-based crop
+selection; it is not an intermediate RGB photo. The selected coordinates map
+back to the original photo, whose source pixels are cropped and resized into
+the one final canvas. v001 skips Step 1's saved image, the intermediate JPEG
+round trip, and Step 2 segmentation. The full 47-photo validation cohort
+completed without failures; only Step 1 segmentation was loaded. The initial
+run used the shared v18 regressor and did not run the reserved test split.
 
 The speed hypothesis was supported: median raw-to-score was **59.56 ms**
 (p95 **73.67 ms**), versus **98.90 ms** (p95 **106.95 ms**) for the paired
@@ -141,6 +144,20 @@ MAE increased from **0.110818** to **0.136065** and RMSE from **0.138429** to
 rejected experiment and do not select it for final test evaluation. The result
 and implementation are in [v001](experiment-versions/v001_coordinate_crop_single_output/),
 with the [benchmark report](runs/v001_coordinate_crop_single_output/distil-fp32-fine-grained-20261030T112406Z.json).
+
+Later, v001 was also evaluated with its own retrained, preprocessing-matched
+waviness regressor. On validation it scored MAE **0.100441** and RMSE
+**0.126186**, with a **60.48 ms** median raw-to-score; 23 of 47 photos still had
+higher absolute error than the retrained v000 baseline, so it failed the strict
+per-photo gate. On the reserved test check, v001 scored MAE **0.125327** and
+RMSE **0.167611**, versus **0.114616 / 0.141656** for retrained v000. Thus the
+speed improvement is real, but v001 is not an accepted quality-preserving
+replacement. See the [matched-regressor and test results](training-runs/matched-regressor-results.md).
+
+The later v007–v010 follow-ups are five-photo smoke experiments derived from
+v001. They reuse v001's matched regressor and do not represent full-cohort
+quality results; v010 tensor preparation is the only one currently recommended
+to advance to full validation, not a selected change.
 
 ## Experiment 2: skip Step 2, keep the baseline Step 1 image
 

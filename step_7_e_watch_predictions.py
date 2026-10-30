@@ -119,7 +119,8 @@ def configure_experimental(single_resolution, logits_resolution, reuse_step1_mas
     return variant
 
 
-def process_photo(photo, checkpoint, digest, device, model, transform, segmenter, *, reuse_step1_mask=False, expected_segmentation_device=None):
+def process_photo(photo, checkpoint, digest, device, model, transform, segmenter, *, reuse_step1_mask=False,
+                  coordinate_crop=False, expected_segmentation_device=None):
     """Process one stable photo with the same preview and skip rules as Step 7."""
     if prediction.should_skip_photo(photo, checkpoint, digest):
         print(f"{photo.name}: skipped (matching prediction and preview already exist)", flush=True)
@@ -131,9 +132,11 @@ def process_photo(photo, checkpoint, digest, device, model, transform, segmenter
         print(f"{photo.name}: reused existing preview", flush=True)
     else:
         if reuse_step1_mask:
-            model_input, encoded = prediction.preprocess_photo(photo, segmenter, reuse_step1_mask=True)
+            model_input, encoded = prediction.preprocess_photo(photo, segmenter, reuse_step1_mask=True,
+                                                               coordinate_crop=coordinate_crop)
         else:
-            model_input, encoded = prediction.preprocess_photo(photo, segmenter)
+            model_input, encoded = prediction.preprocess_photo(photo, segmenter,
+                                                               coordinate_crop=coordinate_crop)
         if expected_segmentation_device is not None and segmenter.device != expected_segmentation_device:
             raise RuntimeError(f"Experimental segmentation switched from {expected_segmentation_device} to {segmenter.device}; "
                                "refusing to mix different device/precision inputs in the same cache")
@@ -163,7 +166,7 @@ def main():
     parser.add_argument("--poll-seconds", type=float, default=1.0)
     parser.add_argument("--watch-mode", choices=("auto", "event", "poll"), default="auto",
                         help="Linux close-write/move notifications, or portable stability polling")
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), help="preprocessing profile; defaults from the checkpoint")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2"), help="preprocessing profile; defaults from the checkpoint")
     parser.add_argument("--experimental-single-resolution", type=int, help="opt in to single-image segmentation at this resolution")
     parser.add_argument("--experimental-logits-resolution", type=int, help="interpolate single-image class scores to this size before argmax")
     parser.add_argument("--experimental-reuse-step1-mask", action="store_true", help="project the Step 1 mask instead of running Step 2 segmentation")
@@ -189,11 +192,11 @@ def main():
     checkpoint_contract = checkpoint_payload.get("fast_preprocessing_experiment") or {}
     profile_name = args.profile or checkpoint_contract.get("profile")
     profile = get_profile(profile_name) if profile_name else None
-    if profile is not None and profile.name == "fast-v1":
+    if profile is not None and profile.name == "fast-v2":
         if any((args.experimental_single_resolution is not None, args.experimental_logits_resolution is not None,
                 args.experimental_reuse_step1_mask, args.experimental_step2_resolution is not None,
                 args.experimental_precision != "float32")):
-            parser.error("--profile fast-v1 cannot be combined with custom --experimental-* settings")
+            parser.error("--profile fast-v2 cannot be combined with custom --experimental-* settings")
         namespace = configure_prediction_profile(profile, segmentation, prediction, str(device))
         print(f"Preprocessing profile {profile.name}; output namespace {namespace}", flush=True)
     elif args.experimental_single_resolution is not None:
@@ -210,11 +213,12 @@ def main():
         step2_resolution=step2_resolution,
         reuse_step1_mask=reuse_step1_mask,
         project_dir=prediction.PROJECT_DIR, sha256_for=prediction.sha256_for,
+        coordinate_crop=profile.coordinate_crop if profile is not None else False,
     )
     started = time.perf_counter()
     segmenter = load_model(str(device), verbose=False)
     prediction.validate_segmentation_revision(contract, segmenter)
-    expected_segmentation_device = device if profile is not None and profile.name == "fast-v1" or args.experimental_single_resolution is not None else None
+    expected_segmentation_device = device if profile is not None and profile.name == "fast-v2" or args.experimental_single_resolution is not None else None
     model = prediction.WaveRegressionModel.load_from_checkpoint(checkpoint, map_location=device, pretrained=False)
     model.to(device).eval()
     transform = prediction.build_evaluation_transform()
@@ -223,7 +227,12 @@ def main():
     started = time.perf_counter()
     # Warm the model input shapes used by both stages; no source photo is stored.
     run_segmentation(Image.new("RGB", (SEGMENTATION_RESOLUTION, SEGMENTATION_RESOLUTION)), segmenter)
-    if not reuse_step1_mask:
+    coordinate_crop = profile.coordinate_crop if profile is not None else False
+    if coordinate_crop:
+        from step_1_b_preprocess_water_inputs import warm_coordinate_crop_selector
+
+        warm_coordinate_crop_selector()
+    if not reuse_step1_mask and not coordinate_crop:
         previous = segmenter.processor.size
         if profile is not None or args.experimental_step2_resolution is not None:
             segmenter.processor.size = {"height": step2_resolution, "width": step2_resolution}
@@ -278,6 +287,7 @@ def main():
         try:
             device = process_photo(photo, checkpoint, digest, device, model, transform, segmenter,
                                    reuse_step1_mask=reuse_step1_mask,
+                                   coordinate_crop=coordinate_crop,
                                    expected_segmentation_device=expected_segmentation_device)
         except Exception as error:
             print(f"{photo.name}: failed: {type(error).__name__}: {error}", file=sys.stderr, flush=True)

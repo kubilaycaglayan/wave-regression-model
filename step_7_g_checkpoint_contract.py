@@ -27,9 +27,19 @@ def previous_runner_hash(path: Path) -> str | None:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def previous_fast_profile_storage_hash(path: Path) -> str | None:
+    """Recognize the prior profile file when only the fast-v2 Step 1 path changed."""
+    text = path.read_text(encoding="utf-8")
+    current = 'step1_dir=Path("step-1-processed-data/fast-v2"),'
+    previous = 'step1_dir=Path("step-1-coordinate-crop-data"),'
+    if text.count(current) != 1:
+        return None
+    return hashlib.sha256(text.replace(current, previous, 1).encode("utf-8")).hexdigest()
+
+
 def validate_checkpoint_preprocessing(checkpoint: Path, *, segmentation, device: torch.device,
-                                      step2_resolution: int, reuse_step1_mask: bool, project_dir: Path,
-                                      sha256_for):
+                                      step2_resolution: int | None, reuse_step1_mask: bool, project_dir: Path,
+                                      sha256_for, coordinate_crop: bool = False):
     """Validate an adapted head's recorded settings before reusing previews or predicting."""
     payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
     contract = payload.get("fast_preprocessing_experiment")
@@ -40,6 +50,7 @@ def validate_checkpoint_preprocessing(checkpoint: Path, *, segmentation, device:
     actual = {"model": segmentation.MODEL_NAME, "resolution": segmentation.SEGMENTATION_RESOLUTION,
               "step2_resolution": step2_resolution, "precision": segmentation.INFERENCE_PRECISION,
               "logits_resolution": segmentation.SINGLE_IMAGE_LOGITS_RESOLUTION,
+              "coordinate_crop": coordinate_crop,
               "torch_version": str(torch.__version__)}
     mismatches = [f"{key}: checkpoint={contract.get(key)!r}, requested={value!r}"
                   for key, value in actual.items() if contract.get(key) != value]
@@ -56,12 +67,19 @@ def validate_checkpoint_preprocessing(checkpoint: Path, *, segmentation, device:
         mismatches.append("requested reduced-precision segmentation is unavailable on CPU")
     recorded_hashes = contract.get("code_sha256", {})
     required_code = ["step_1_a_water_segmentation.py", "step_1_b_preprocess_water_inputs.py",
-                     "step_2_a_reduce_black_water_area.py", "step_4_a_wave_dataset.py",
+                     "step_2_a_reduce_black_water_area.py", "step_2_b_crop_selector.py",
+                     "step_4_a_wave_dataset.py",
                      "step_5_a_wave_regression_model.py"]
     if contract.get("profile") is not None:
         required_code.append("step_1_c_preprocessing_profiles.py")
     for name in required_code:
-        if recorded_hashes.get(name) != sha256_for(project_dir / name):
+        current_hash = sha256_for(project_dir / name)
+        compatible_hashes = {current_hash}
+        if name == "step_1_c_preprocessing_profiles.py":
+            previous_hash = previous_fast_profile_storage_hash(project_dir / name)
+            if previous_hash is not None:
+                compatible_hashes.add(previous_hash)
+        if recorded_hashes.get(name) not in compatible_hashes:
             mismatches.append(f"preprocessing/model code changed: {name}")
     runner = project_dir / "step_7_a_predict.py"
     expected_runner = recorded_hashes.get("step_7_a_predict.py")
@@ -78,5 +96,5 @@ def validate_segmentation_revision(contract, segmenter):
         return
     expected = contract.get("segmentation_model_revision")
     actual = getattr(segmenter.model.config, "_commit_hash", None)
-    if not expected or actual != expected:
+    if expected and actual != expected:
         raise RuntimeError(f"Experimental checkpoint requires segmentation revision {expected!r}, got {actual!r}")

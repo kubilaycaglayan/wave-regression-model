@@ -14,12 +14,13 @@ from typing import Iterator
 class PreprocessingProfile:
     name: str
     step1_resolution: int
-    step2_resolution: int
+    step2_resolution: int | None
     precision: str
     overlapping_tiles: bool
     tile_size: int
     tile_overlap: float
     logits_resolution: int | None
+    coordinate_crop: bool
     step1_dir: Path
     step2_dir: Path
     split_dir: Path
@@ -41,22 +42,24 @@ PROFILES = {
         tile_size=768,
         tile_overlap=0.25,
         logits_resolution=None,
+        coordinate_crop=False,
         step1_dir=Path("step-1-processed-data"),
         step2_dir=Path("step-2-final-water-data"),
         split_dir=Path("step-3-dataset-splits"),
     ),
-    "fast-v1": PreprocessingProfile(
-        name="fast-v1",
+    "fast-v2": PreprocessingProfile(
+        name="fast-v2",
         step1_resolution=448,
-        step2_resolution=384,
+        step2_resolution=None,
         precision="float16",
         overlapping_tiles=False,
         tile_size=768,
         tile_overlap=0.25,
         logits_resolution=448,
-        step1_dir=Path("step-1-processed-data"),
-        step2_dir=Path("step-2-final-water-data"),
-        split_dir=Path("step-3-dataset-splits"),
+        coordinate_crop=True,
+        step1_dir=Path("step-1-processed-data/fast-v2"),
+        step2_dir=Path("step-2-coordinate-crop-data"),
+        split_dir=Path("step-3-coordinate-crop-splits"),
     ),
 }
 
@@ -75,6 +78,7 @@ def profile_marker(profile: PreprocessingProfile) -> dict[str, object]:
         "step_1_b_preprocess_water_inputs.py",
         "step_1_c_preprocessing_profiles.py",
         "step_2_a_reduce_black_water_area.py",
+        "step_2_b_crop_selector.py",
     )
     return {
         "profile": profile.name,
@@ -99,6 +103,8 @@ def configure_segmentation(profile: PreprocessingProfile, segmentation_module) -
 @contextmanager
 def step2_processor_size(profile: PreprocessingProfile, segmentation_model) -> Iterator[None]:
     """Temporarily set the shared segmenter's resize for Step 2 inference."""
+    if profile.step2_resolution is None:
+        raise ValueError(f"Profile {profile.name} does not run Step 2 segmentation")
     previous = segmentation_model.processor.size
     segmentation_model.processor.size = {
         "height": profile.step2_resolution,
@@ -110,22 +116,52 @@ def step2_processor_size(profile: PreprocessingProfile, segmentation_model) -> I
         segmentation_model.processor.size = previous
 
 
-def profile_contract(profile: PreprocessingProfile, *, segmentation_model_revision: str | None,
-                     device: str, torch_version: str, code_sha256: dict[str, str]) -> dict[str, object]:
+def profile_contract(profile: PreprocessingProfile, *, model_name: str,
+                     segmentation_model_revision: str | None, device: str,
+                     torch_version: str, code_sha256: dict[str, str]) -> dict[str, object]:
     """Return checkpoint metadata validated by the prediction entry points."""
     return {
         "profile": profile.name,
-        "model": "nvidia/segformer-b2-finetuned-ade-512-512",
+        "model": model_name,
         "resolution": profile.step1_resolution,
         "step2_resolution": profile.step2_resolution,
         "precision": profile.precision,
         "logits_resolution": profile.logits_resolution,
+        "coordinate_crop": profile.coordinate_crop,
         "overlapping_tiles": profile.overlapping_tiles,
         "device": device,
         "torch_version": torch_version,
         "segmentation_model_revision": segmentation_model_revision,
         "code_sha256": code_sha256,
     }
+
+
+def write_preprocessing_contract(profile: PreprocessingProfile, output_dir: Path, *,
+                                 model_name: str, device: str, torch_version: str,
+                                 segmentation_model_revision: str | None = None) -> Path:
+    """Record the preprocessing identity used to create a profile's images."""
+    project_dir = Path(__file__).resolve().parent
+    names = (
+        "step_1_a_water_segmentation.py", "step_1_b_preprocess_water_inputs.py",
+        "step_1_c_preprocessing_profiles.py", "step_2_a_reduce_black_water_area.py",
+        "step_2_b_crop_selector.py", "step_4_a_wave_dataset.py",
+        "step_5_a_wave_regression_model.py", "step_7_a_predict.py",
+    )
+    hashes = {
+        name: hashlib.sha256((project_dir / name).read_bytes()).hexdigest()
+        for name in names
+    }
+    contract = profile_contract(
+        profile, model_name=model_name, segmentation_model_revision=segmentation_model_revision,
+        device=device, torch_version=torch_version, code_sha256=hashes,
+    )
+    path = output_dir / "preprocessing-contract.json"
+    encoded = json.dumps(contract, indent=2, sort_keys=True) + "\n"
+    if path.exists() and path.read_text(encoding="utf-8") != encoded:
+        raise RuntimeError(f"Existing preprocessing contract differs from this run: {path}")
+    if not path.exists():
+        path.write_text(encoded, encoding="utf-8")
+    return path
 
 
 def ensure_profile_directory(profile: PreprocessingProfile, directory: Path) -> None:
@@ -180,6 +216,7 @@ def configure_prediction_profile(profile: PreprocessingProfile, segmentation_mod
                 "step_1_b_preprocess_water_inputs.py",
                 "step_1_c_preprocessing_profiles.py",
                 "step_2_a_reduce_black_water_area.py",
+        "step_2_b_crop_selector.py",
                 "step_7_a_predict.py",
             )
         },

@@ -23,11 +23,11 @@ Predict one or more new photos:
 python step_7_a_predict.py
 # Optionally limit PyTorch CPU threads after benchmarking your hardware.
 python step_7_a_predict.py --threads 4
-# previews -> step-7-inference-preview/
+# previews -> step-7-inference-preview/<profile namespace>/
 # prediction histories -> step-7-predict-captures-holder/predictions/
 ```
 
-The standard training and prediction flow uses `fast-v1` and requires a CUDA GPU for image preprocessing. CPU preprocessing requires `--profile baseline-v16 --device cpu`; Step 1 and Step 2 directories are locked to one active profile at a time, so archive the current outputs before switching profiles. Step 1 and Step 2 outputs live in their existing directories beside `archive/`; Step 3 adds a profile-tagged timestamped snapshot to the existing split history; Step 5 adds a versioned checkpoint directory with `-fast` after the backbone name. Labels remain in the shared `labels.csv`.
+The standard training and prediction flow uses `fast-v2` coordinate cropping and requires a CUDA GPU for image preprocessing. CPU preprocessing remains available with `--profile baseline-v16 --device cpu`. The coordinate-crop profile uses its own Step 1, Step 2, and split directories so its outputs cannot mix with older preprocessing. Step 1 runs the repository's SegFormer-B2 model with the 448 × 448 fast settings, selects a lower-water rectangle on the 224 × 224 mask grid, and maps it back onto the original photo to create the final 224 × 224 model input. Step 2 carries that JPEG forward unchanged; it does not run a second segmentation model. This adopts v001's coordinate-crop method with the default pipeline's segmentation model, so train a new checkpoint on these inputs before prediction. The v001 benchmark used distilled SegFormer-B0 and its reported metrics are not a quality guarantee for this route. Step 3 keeps a separate timestamped split history, and Step 5 writes a versioned checkpoint directory. Labels remain in the shared `labels.csv`.
 
 Step 7 reuses valid cached inference previews when switching checkpoints.
 
@@ -79,41 +79,41 @@ step-1-water-mask-preview/index.html
 
 Inspect the original, mask, and overlay images. The generated `original` and `overlay` files are previews and should not be committed.
 
-### Create standardized Step 1 inputs
+### Create coordinate-cropped Step 1 model inputs
 
-![Step 1 standardized water-only input](readme_files/step-1-preprocessed-sea-example.jpg)
+![Step 1 lower-water coordinate-crop model input](readme_files/step-1-preprocessed-sea-example.jpg)
 
-Run the shared fast-v1 preprocessing flow used by prediction:
+Run the default fast-v2 coordinate-crop preprocessing flow used by prediction:
 
 ```bash
 python step_1_b_preprocess_water_inputs.py
 ```
 
-The fast-v1 profile requires a CUDA GPU. To use CPU, select the baseline profile explicitly:
+The fast-v2 profile requires a CUDA GPU. To use CPU, select the baseline profile explicitly:
 
 ```bash
 python step_1_b_preprocess_water_inputs.py --profile baseline-v16 --device cpu
 ```
 
-This reads from:
+This reads each new photo from:
 
 ```text
 step-0-raw-data/
 ```
 
-and writes standardized `224x224` images to:
+and writes the final lower-water coordinate-crop model input as `224x224` images to:
 
 ```text
-step-1-processed-data/
+step-1-processed-data/fast-v2/
 ```
 
 Open:
 
 ```text
-step-1-processed-data/index.html
+step-1-processed-data/fast-v2/index.html
 ```
 
-The script skips images whose `step-1_<name>.jpg` output already exists.
+The script skips images whose `step-1_<name>.jpg` output already exists, and skips earlier processing when the matching Step 2 output is already present.
 
 ## Step 2: Create and label the lower-water images
 
@@ -133,21 +133,23 @@ For CPU-only processing:
 python step_2_a_reduce_black_water_area.py --profile baseline-v16 --device cpu
 ```
 
+Use the baseline-v16 command only when Step 1 was also run with `--profile baseline-v16`; it reads and writes the baseline-v16 directories.
+
 This reads the Step 1 outputs and writes:
 
 ```text
-step-2-final-water-data/
+step-2-coordinate-crop-data/
 ```
 
-The crop selection is designed to retain the lower part of the detected water area, where waves are expected to be most visible.
+For the default `fast-v2` profile, Step 1 already selects the lower-water crop from the predicted mask and maps it back to the original photo. Step 2 copies that final model input into the labeled-data directory without running another segmentation model. The crop selection retains the lower part of detected water, where waves are expected to be most visible.
 
 Inspect the result here:
 
 ```text
-step-2-final-water-data/index.html
+step-2-coordinate-crop-data/index.html
 ```
 
-The script skips images whose `step-2_<name>.jpg` output already exists.
+The script skips images whose `step-2_<name>.jpg` output already exists and copies the matching Step 1 coordinate-crop JPEG unchanged.
 
 ### Label the new Step 2 images
 
@@ -190,7 +192,7 @@ python step_3_a_prepare_dataset_split.py
 
 This validates that:
 
-- every labeled image exists in `step-2-final-water-data/`;
+- every labeled image exists in the active profile's Step 2 output directory;
 - labels are between `0.0` and `1.0`;
 - filenames are unique and contain an image number;
 - no capture group is split across train, validation, and test.
@@ -203,7 +205,7 @@ Review:
 step-3-dataset-splits/summary.txt
 ```
 
-The generated manifests are:
+The generated manifests for every preprocessing profile share the existing `step-3-dataset-splits/` registry:
 
 ```text
 step-3-dataset-splits/train.csv
@@ -216,6 +218,8 @@ A timestamped immutable snapshot is also created under:
 ```text
 step-3-dataset-splits/snapshots/
 ```
+
+The coordinate-crop Step 2 filenames match the existing label convention, so existing labels can be reused. Step 3 keeps existing train/validation/test membership in the shared registry and assigns only newly labeled images. Each snapshot records its preprocessing profile in the manifest, so the history remains identifiable without separate split directories.
 
 ## Step 4: Inspect the training data
 
@@ -241,7 +245,7 @@ Run:
 python train.py
 ```
 
-The training script:
+The training script uses the coordinate-crop Step 2 images and profile-matched split snapshot. Existing checkpoints trained on the older two-segmentation preprocessing are not compatible; train a new checkpoint before running prediction. The training script:
 
 - loads `train.csv` and `validation.csv`;
 - uses the existing preprocessing outputs;
@@ -254,7 +258,7 @@ The training script:
 New checkpoints will be created in:
 
 ```text
-step-5-checkpoints/vN-mae-<best-mae>-<backbone>-fast/
+step-5-checkpoints/vN-mae-<best-mae>-<backbone>-fast-v2/
 ```
 
 Each training version directory contains its checkpoint, manifest, summary,
@@ -295,7 +299,7 @@ Configure the prediction checkpoint in `.env` (or the environment) using:
 
 ```text
 # Use the exact best-checkpoint path printed by train.py.
-PREDICT_CHECKPOINT_PATH=step-5-checkpoints/vN-mae-<best-mae>-<backbone>-fast/<best-checkpoint>.ckpt
+PREDICT_CHECKPOINT_PATH=step-5-checkpoints/vN-mae-<best-mae>-<backbone>-fast-v2/<best-checkpoint>.ckpt
 ```
 
 After training, update `PREDICT_CHECKPOINT_PATH` to the new checkpoint path printed by `train.py`.

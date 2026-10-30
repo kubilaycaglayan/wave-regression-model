@@ -13,6 +13,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from step_1_c_preprocessing_profiles import get_profile, require_profile_directory
+from step_3_b_split_paths import split_directory_for
 
 
 LABELS_PATH = Path("labels.csv")
@@ -228,6 +229,29 @@ def load_or_create_incremental_splits(
     return {name: sorted(split, key=lambda sample: sample.filename) for name, split in fixed.items()}, True
 
 
+def migrate_existing_split_membership(samples: list[Sample], discarded: set[str]) -> bool:
+    """Carry legacy membership only when migrating from a distinct registry."""
+    if ACTIVE_PROFILE != "fast-v2":
+        return False
+    split_names = {name: OUTPUT_DIR / f"{name}.csv" for name in SPLIT_NAMES}
+    if any(path.exists() for path in split_names.values()):
+        return False
+    previous_dir = Path("step-3-dataset-splits")
+    if previous_dir.resolve() == OUTPUT_DIR.resolve():
+        return False
+    previous_paths = {name: previous_dir / f"{name}.csv" for name in SPLIT_NAMES}
+    if not all(path.is_file() for path in previous_paths.values()):
+        return False
+
+    samples_by_name = {sample.filename: sample for sample in samples}
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    for name in SPLIT_NAMES:
+        prior_members = read_split_csv(previous_paths[name], samples_by_name, discarded)
+        write_csv(split_names[name], prior_members)
+    print(f"Carried existing train/validation/test membership from {previous_dir} into {OUTPUT_DIR}")
+    return True
+
+
 def validate_images(samples: list[Sample]) -> list[str]:
     discarded = read_discarded()
     processed = {
@@ -344,7 +368,7 @@ def summary_text(splits: dict[str, list[Sample]], groups: list[list[Sample]], to
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), default="fast-v1")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2"), default="fast-v2")
     parser.add_argument(
         "--seed",
         type=int,
@@ -356,7 +380,7 @@ def main() -> int:
     global IMAGE_DIR, OUTPUT_DIR, SNAPSHOT_DIR, BENCHMARK_DIR, BENCHMARK_TEST_PATH, ACTIVE_PROFILE
     ACTIVE_PROFILE = profile.name
     IMAGE_DIR = Path(profile.step2_dir)
-    OUTPUT_DIR = Path(profile.split_dir)
+    OUTPUT_DIR = split_directory_for(profile)
     SNAPSHOT_DIR = OUTPUT_DIR / "snapshots"
     BENCHMARK_DIR = OUTPUT_DIR / "benchmarks"
     BENCHMARK_TEST_PATH = BENCHMARK_DIR / "benchmark-v1-test.csv"
@@ -369,6 +393,7 @@ def main() -> int:
         samples_by_name = {sample.filename: sample for sample in samples}
         existing_test = OUTPUT_DIR / "test.csv"
         discarded = read_discarded()
+        migrate_existing_split_membership(samples, discarded)
         if not BENCHMARK_TEST_PATH.exists() and existing_test.exists():
             ensure_benchmark_v1(read_split_csv(existing_test, samples_by_name, discarded))
         splits, incremental = load_or_create_incremental_splits(samples, seed=args.seed, discarded=discarded)

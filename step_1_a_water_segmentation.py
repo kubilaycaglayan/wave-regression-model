@@ -206,8 +206,12 @@ def run_overlapping_segmentation(
 
 
 @torch.inference_mode()
-def run_segmentation(image: Image.Image, segmentation_model: SegmentationModel) -> torch.Tensor:
-    """Return a source-resolution predicted class-ID map."""
+def run_segmentation(
+    image: Image.Image,
+    segmentation_model: SegmentationModel,
+    *, output_size: tuple[int, int] | None = None,
+) -> torch.Tensor:
+    """Return a predicted class-ID map, optionally at (width, height)."""
     try:
         if MAX_SEGMENTATION_SIDE is not None and USE_OVERLAPPING_TILES:
             if MAX_SEGMENTATION_SIDE < 1:
@@ -219,9 +223,21 @@ def run_segmentation(image: Image.Image, segmentation_model: SegmentationModel) 
                                         max(1, round(image.height * scale))), Image.Resampling.LANCZOS)
                 class_map = run_overlapping_segmentation(reduced, segmentation_model)
                 resized = Image.fromarray(class_map.numpy(), mode="L").resize(image.size, Image.Resampling.NEAREST)
-                return torch.from_numpy(np.asarray(resized, dtype=np.uint8).copy())
+                class_map = torch.from_numpy(np.asarray(resized, dtype=np.uint8).copy())
+                if output_size is not None and output_size != image.size:
+                    projected = Image.fromarray(class_map.numpy(), mode="L").resize(
+                        output_size, Image.Resampling.NEAREST
+                    )
+                    class_map = torch.from_numpy(np.asarray(projected, dtype=np.uint8).copy())
+                return class_map
         if USE_OVERLAPPING_TILES:
-            return run_overlapping_segmentation(image, segmentation_model)
+            class_map = run_overlapping_segmentation(image, segmentation_model)
+            if output_size is not None and output_size != image.size:
+                projected = Image.fromarray(class_map.numpy(), mode="L").resize(
+                    output_size, Image.Resampling.NEAREST
+                )
+                class_map = torch.from_numpy(np.asarray(projected, dtype=np.uint8).copy())
+            return class_map
 
         if BENCHMARK_OBSERVER is not None:
             BENCHMARK_OBSERVER.segmentation_metadata(image.width, image.height, 1, "none", str(segmentation_model.device))
@@ -238,7 +254,8 @@ def run_segmentation(image: Image.Image, segmentation_model: SegmentationModel) 
                 mode="bilinear", align_corners=False,
             )
         class_map = logits.argmax(dim=1)[0].to(torch.uint8).cpu().numpy()
-        resized = Image.fromarray(class_map, mode="L").resize(image.size, Image.Resampling.NEAREST)
+        target_size = output_size or image.size
+        resized = Image.fromarray(class_map, mode="L").resize(target_size, Image.Resampling.NEAREST)
         return torch.from_numpy(np.asarray(resized, dtype=np.uint8).copy())
     except RuntimeError as error:
         error_text = str(error).lower()
@@ -251,7 +268,7 @@ def run_segmentation(image: Image.Image, segmentation_model: SegmentationModel) 
         print("CUDA inference unavailable or out of memory; retrying this image on CPU.")
         segmentation_model.device = torch.device("cpu")
         segmentation_model.model.to(segmentation_model.device)
-        return run_segmentation(image, segmentation_model)
+        return run_segmentation(image, segmentation_model, output_size=output_size)
 
 
 def extract_water_mask(class_map: torch.Tensor, water_class_ids: Iterable[int]) -> np.ndarray:

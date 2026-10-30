@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader
 from step_4_a_wave_dataset import WaveDataset, build_evaluation_transform
 from step_5_a_wave_regression_model import WaveRegressionModel
 from step_1_c_preprocessing_profiles import get_profile, require_profile_directory
+from step_3_b_split_paths import split_directory_for
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -104,7 +105,8 @@ _checkpoint_preprocessing = _checkpoint_payload.get("fast_preprocessing_experime
 _profile_name = _checkpoint_preprocessing.get("profile", "baseline-v16")
 PROFILE = get_profile(_profile_name)
 require_profile_directory(PROFILE, PROJECT_DIR / PROFILE.step2_dir)
-SPLIT_SNAPSHOT_DIR = PROFILE.split_dir / "snapshots"
+SPLIT_DIR = split_directory_for(PROFILE)
+SPLIT_SNAPSHOT_DIR = SPLIT_DIR / "snapshots"
 _MODEL_NAME_MATCH = re.fullmatch(r"(.+?)-best-val-mae-epoch=\d+-val_mae=[\d.]+\.ckpt", CHECKPOINT_PATH.name)
 if _MODEL_NAME_MATCH is None:
     raise ValueError(f"Cannot derive model name from checkpoint filename: {CHECKPOINT_PATH.name}")
@@ -141,7 +143,7 @@ def latest_test_manifest(
 
 
 TEST_CSV = latest_test_manifest(preprocessing_profile=PROFILE.name)
-TRAIN_CSV = PROFILE.split_dir / "train.csv"
+TRAIN_CSV = SPLIT_DIR / "train.csv"
 DISCARDED_PATH = Path("discarded_images.csv")
 
 

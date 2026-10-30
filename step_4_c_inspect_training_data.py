@@ -13,6 +13,7 @@ from PIL import Image
 from step_4_a_wave_dataset import WaveDataset, denormalize_image, build_training_transform
 from step_4_b_wave_datamodule import WaveDataModule
 from step_1_c_preprocessing_profiles import get_profile, require_profile_directory
+from step_3_b_split_paths import split_directory_for
 from torchvision.transforms.functional import to_tensor
 
 
@@ -64,7 +65,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=Path("step-4-data-preview"))
     parser.add_argument("--variants", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v1"), default="fast-v1")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2"), default="fast-v2")
     args = parser.parse_args()
     started = time.perf_counter()
     profile = get_profile(args.profile)
@@ -73,7 +74,7 @@ def main() -> None:
         args.data_dir,
         batch_size=args.batch_size,
         image_dir=profile.step2_dir,
-        split_dir=profile.split_dir,
+        split_dir=split_directory_for(profile),
     )
     module.setup()
     print(f"train samples: {len(module.train_dataset)}")
