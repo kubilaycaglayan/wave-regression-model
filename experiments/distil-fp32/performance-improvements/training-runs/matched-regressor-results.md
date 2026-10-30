@@ -51,3 +51,30 @@ metrics, checkpoints, and ONNX exports are grouped under
 `training-runs/<experiment-id>/<run-id>/`; generated checkpoints and model
 binaries remain ignored by git. Benchmark JSON files are under
 `runs/<experiment-id>/`.
+
+## Whole labeled-photo diagnostic cohort
+
+All five preprocessing versions were run across `whole`, the union of the fixed
+train, validation, and test snapshot (217 + 47 + 46 = 310 labeled photos).
+Each version used its own matched trained regressor. This cohort overlaps the
+training data and reserved test split, so these aggregate scores are descriptive
+only and must not be used for selection or tuning. MAE/RMSE below include only
+successful predictions; latency medians for preprocessing and inference also
+cover successful photos, while raw-to-score latency includes all 310 rows,
+including failures.
+
+| Version | Successful / 310 | Failures | MAE | RMSE | Preprocessing median | Regressor inference median | Raw-to-score median | Raw-to-score p95 | Report |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| v000 baseline | 308 | 2 | 0.096209 | 0.124412 | 94.32 ms | 5.58 ms | 99.95 ms | 108.05 ms | [JSON](../runs/v000_baseline/distil-fp32-fine-grained-20261030T120649Z.json) |
+| v001 coordinate crop | 309 | 1 | 0.103334 | 0.130578 | 55.21 ms | 5.40 ms | 60.59 ms | 77.80 ms | [JSON](../runs/v001_coordinate_crop_single_output/distil-fp32-fine-grained-20261030T120746Z.json) |
+| v002 skip Step 2 | 309 | 1 | 0.107073 | 0.137801 | 76.45 ms | 5.80 ms | 82.19 ms | 89.50 ms | [JSON](../runs/v002_skip_step2_keep_baseline_image/distil-fp32-fine-grained-20261030T120824Z.json) |
+| v003 ROI mask processing | 308 | 2 | 0.105212 | 0.133297 | 108.87 ms | 5.58 ms | 114.44 ms | 124.27 ms | [JSON](../runs/v003_roi_mask_processing/distil-fp32-fine-grained-20261030T120919Z.json) |
+| v004 resolution cap | 308 | 2 | 0.095059 | 0.120355 | 87.27 ms | 5.40 ms | 92.72 ms | 119.59 ms | [JSON](../runs/v004_working_resolution_cap/distil-fp32-fine-grained-20261030T121011Z.json) |
+
+The baseline and v003/v004 failed on `IMG_7592.HEIC` (Step 2 could not select
+a lower-water crop) and `IMG_7593.HEIC` (Step 1 water detection failed).
+v001 and v002 each failed on `IMG_7593.HEIC` for their Step 1 water-region
+check. The detailed JSON files retain the per-photo failure reasons and the
+full warm-up, preprocessing, and inference timing breakdown. The dashboard
+includes this cohort under **Whole · all labeled photos**, with an explicit
+warning that it is not independent evaluation.

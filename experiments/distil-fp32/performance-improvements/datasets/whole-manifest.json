@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "split_name": "whole",
+  "description": "All labeled photos; union of the fixed train, validation, and test snapshot.",
+  "created_at_utc": "2026-10-30T12:04:47.655236+00:00",
+  "snapshot": "20261028T081606614158Z",
+  "source_splits": [
+    "train",
+    "validation",
+    "test"
+  ],
+  "source_split_counts": {
+    "train": 217,
+    "validation": 47,
+    "test": 46
+  },
+  "count": 310,
+  "source_split_sha256": {
+    "train": "ec6880935758e3f3d11502ac66aea4a56e06a029f06644867765f261f1fbadb3",
+    "validation": "ab33054c9701fcf9ca1be13acf3bfa6939fd6a6d74321f99e607516f642e2f92",
+    "test": "b9a7d6c008aef966c83559165562769186eb27b4f0b735aa66affdd1689020d6"
+  },
+  "labels_sha256": "8325b27a14b4ab286268bc7613e6a2c38a8cf9caea7b6f21aecd3ce2328708e0",
+  "whole_csv_sha256": "77b54288016aef6f9a82077b3937e74b81d14ed3941174a3c05bf88affc3b2e4",
+  "evaluation_warning": "Overlaps train, validation, and test; descriptive aggregate only, not an independent evaluation split."
+}

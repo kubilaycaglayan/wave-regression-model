@@ -51,3 +51,9 @@ python experiments/distil-fp32/performance-improvements/training/export_regresso
 Benchmark reports remain under `runs/<experiment-id>/`. Training metrics and
 manifests are under `training-runs/<experiment-id>/<run-id>/`; checkpoint and
 ONNX binaries are git-ignored because they are reproducible model artifacts.
+
+For a descriptive run over every labeled photo, generate the isolated `whole`
+cohort with `python experiments/distil-fp32/performance-improvements/training/build_whole_split.py`,
+then run each experiment with its matched ONNX regressor and the benchmark's
+`--whole` option. This cohort overlaps training, validation, and test, so its
+quality metrics are not an independent evaluation and must not guide tuning.

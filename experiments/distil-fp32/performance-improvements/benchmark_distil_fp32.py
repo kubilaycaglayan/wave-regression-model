@@ -33,13 +33,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--experiment-id", default="v000_baseline",
                         help="version directory under experiment-versions/ (default: v000_baseline)")
-    parser.add_argument("--final-test", action="store_true",
-                        help="run the reserved test split for final checks; validation is the default")
+    split_group = parser.add_mutually_exclusive_group()
+    split_group.add_argument("--final-test", action="store_true",
+                             help="run the reserved test split for final checks; validation is the default")
+    split_group.add_argument("--whole", action="store_true",
+                             help="run all labeled photos in the whole diagnostic cohort")
     parser.add_argument("--output-dir", type=Path, default=HERE / "runs")
     parser.add_argument("--compare-reference", type=Path,
                         help="prior report JSON; compares predictions on matched photos")
     parser.add_argument("--limit", type=int,
-                        help="optional first-N smoke run per split; not a quality result")
+                        help="optional first-N photo smoke run; not a quality result")
     return parser.parse_args()
 
 
@@ -65,7 +68,8 @@ def sha256_file(path: Path) -> str:
 
 
 def load_split(split: str, raw_dir: Path, limit: int | None) -> list[dict]:
-    split_path = ROOT / "step-3-dataset-splits" / "snapshots" / SPLIT_SNAPSHOT / f"{split}.csv"
+    split_path = (HERE / "datasets" / "whole.csv" if split == "whole" else
+                  ROOT / "step-3-dataset-splits" / "snapshots" / SPLIT_SNAPSHOT / f"{split}.csv")
     if not split_path.is_file():
         raise FileNotFoundError(f"Dataset split is missing: {split_path}")
     raw_by_stem: dict[str, list[Path]] = {}
@@ -497,7 +501,7 @@ def main() -> int:
         raise RuntimeError("This benchmark is scoped to Distil-FP32; set WAVE_EXPERIMENT=distilled-b0-migraphx-fp32")
     if manifest.get("id") != experiment_id:
         raise RuntimeError(f"Experiment manifest ID does not match directory: {manifest.get('id')!r}")
-    splits = ["test"] if args.final_test else ["validation"]
+    splits = ["whole"] if args.whole else ["test"] if args.final_test else ["validation"]
     server_started = time.perf_counter()
     warmup = initialize_models_for_steps(server, manifest.get("required_segmentation_steps", [1, 2]))
     warmup["python_and_runtime_imports_ms"] = (server_started - PROCESS_START) * 1000.0
@@ -556,8 +560,14 @@ def main() -> int:
             "source_directory": str(raw_dir),
             "split_snapshot": SPLIT_SNAPSHOT,
             "split_manifest_sha256": sha256_file(ROOT / "step-3-dataset-splits/snapshots" / SPLIT_SNAPSHOT / "manifest.json"),
+            "whole_split_manifest_sha256": (
+                sha256_file(HERE / "datasets" / "whole-manifest.json") if "whole" in splits else None
+            ),
             "split_file_sha256s": {
-                split: sha256_file(ROOT / "step-3-dataset-splits/snapshots" / SPLIT_SNAPSHOT / f"{split}.csv")
+                split: sha256_file(
+                    HERE / "datasets" / "whole.csv" if split == "whole" else
+                    ROOT / "step-3-dataset-splits/snapshots" / SPLIT_SNAPSHOT / f"{split}.csv"
+                )
                 for split in splits
             },
             "split_counts": {split: sum(row["split"] == split for row in photos) for split in splits},

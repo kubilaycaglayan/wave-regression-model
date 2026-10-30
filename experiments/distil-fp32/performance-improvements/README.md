@@ -55,6 +55,12 @@ rows were excluded from the SegFormer-B0 student training split. The benchmark
 records the snapshot and file hashes. Timings are local raw-file-to-score and
 exclude HTTP upload and temporary request-file staging.
 
+The `whole` cohort is a separate diagnostic split containing all 310 labeled
+photos (217 train, 47 validation, 46 test). It overlaps every existing split,
+so its aggregate quality is descriptive only and must not be used to select or
+tune experiments. Its CSV and provenance are in `datasets/whole.csv` and
+`datasets/whole-manifest.json`; run it with `--whole`.
+
 ## Run an experiment
 
 From the repository root, use the isolated MIGraphX environment:
@@ -68,9 +74,10 @@ WAVE_EXPERIMENT=distilled-b0-migraphx-fp32 \
   --compare-reference experiments/distil-fp32/performance-improvements/runs/v000_baseline/distil-fp32-fine-grained-20261030T105902Z.json
 ```
 
-For final test evaluation, add `--final-test`. Validation runs never evaluate
-test implicitly. `--limit 1` can smoke-check a version but does not produce a
-full-cohort quality conclusion.
+For final test evaluation, add `--final-test`. For the descriptive all-labels
+cohort, add `--whole`. Validation runs never evaluate test implicitly.
+`--limit 1` can smoke-check a version but does not produce a full-cohort quality
+conclusion.
 
 ## View reports
 
@@ -78,7 +85,8 @@ The HTML dashboard has an individual timing tree and a side-by-side view of
 latency, MAE/RMSE, failures, and operation medians. It discovers all versioned
 reports under `runs/`, selects the latest report per version for the chosen
 split, and checks whether compared reports have matching photo fingerprints.
-Validation is selected by default; the test view is labeled as a final check.
+Validation is selected by default; the test view is labeled as a final check,
+and the whole view warns that it includes train, validation, and test photos.
 
 Regenerate the dashboard after benchmark runs:
 
@@ -168,3 +176,12 @@ quality failed the gate: MAE rose from **0.110818** to **0.122735**, RMSE from
 downsampling operation itself cost **8.42 ms** median. This version is marked
 rejected. See [v004](experiment-versions/v004_working_resolution_cap/) and its
 [benchmark report](runs/v004_working_resolution_cap/distil-fp32-fine-grained-20261030T113058Z.json).
+
+## Whole labeled-photo cohort
+
+The `whole` diagnostic cohort includes all 310 labeled photos and was run with
+each version's matched trained regressor. Its per-version MAE, RMSE, failure
+counts, and latency results are in the [whole cohort results](training-runs/matched-regressor-results.md#whole-labeled-photo-diagnostic-cohort)
+and in the dashboard's **Whole · all labeled photos** view. Because it
+ overlaps the training and test sets, do not use it as an independent quality
+result.
