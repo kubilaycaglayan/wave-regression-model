@@ -434,6 +434,25 @@ separate statistical quality study. The cold first request again spent about
 66 seconds compiling. The quality client ran PyTorch and ORT in separate
 processes, so its measurements are not the final integrated serving numbers.
 
+#### MIGraphX FP32 on the canonical 768-pixel tile shape
+
+To check whether the engine result transferred to the configured v16 model
+shape, I exported the same SegFormer-B2 at fixed 768 x 768 FP32 and ran one
+real tile from `IMG_7238.HEIC` through ONNX Runtime's MIGraphX execution
+provider. The first tile call took 60.26 s because of lazy compilation; the
+next three measured 95.1, 96.0, and 100.6 ms (98.3 ms median), versus 266.7 ms
+median for PyTorch on the same tile. The low-resolution argmax and the
+bilinearly upsampled 768 x 768 class map matched exactly on this tile. The
+MIGraphX session itself took 56.7 s to initialize in the second process.
+
+This is a promising single-tile engine speedup with exact mask output on one
+tile, but it cannot meet the 100 ms complete-request target: Step 1 requires 35
+such tiles, followed by source decode, Step 2, and regression. A rough sum of
+the warm tile medians alone exceeds 3.4 s. No full-request quality metric was
+run; MAE is unknown. This is not an adopted pipeline. Model export, server, and
+tile comparison are under `/tmp/wave-segformer-768.onnx`,
+`/tmp/migraphx_server_768.py`, and `/tmp/wave_compare_migraphx_768_tile.py`.
+
 The existing fast-v1 benchmark's phase timings help explain the remaining
 latency: HEIC decode is around 90–100 ms; first-pass segmentation about
 100–106 ms; Step 1 mask standardization about 90–130 ms; second-pass
@@ -988,6 +1007,100 @@ it confirms that CPU tuning cannot bridge the gap to 100 ms for the configured
 canonical route: almost all its time is B2 segmentation. I did not change the
 thread default. Per-setting official reports and logs are under
 `step-7-prediction-benchmarks/active-thread-sweep/`.
+
+### Raw-image-to-waviness EfficientNet candidate (date-held-out, rejected)
+
+As a compact end-to-end alternative to running both segmentation passes, I
+fine-tuned the current v16 EfficientNet-B0 regressor to score original decoded
+photos resized to 224 x 224. This is a real raw-image input contract: it uses
+all decoded source pixels before resize, runs no segmentation, and uses no
+cached prediction. The 12-date outer holdout contained 58 labeled photos; all
+were excluded from candidate training and epoch selection. The remaining 159
+training photos were divided by capture date into 116 fit and 43 selection
+photos. Selection chose epoch 9, then the model was refit on all 159 allowed
+photos before the outer evaluation. The model completed all 58 holdout photos.
+
+Outer-holdout MAE was 0.12525 on 58 photos. For the 48 photos with archived
+canonical inputs, candidate MAE was 0.13078 versus 0.10855 for the v16
+checkpoint on the same photos; candidate-minus-v16 MAE was +0.02223 (20.5%
+higher). The v16 baseline has seen some of these capture dates, so this is a
+conservative candidate comparison; it still clearly fails the no-hit quality
+gate.
+
+The complete raw-to-flushed-record route measured 185.9 ms median, 216.8 ms
+p95, and 243.0 ms maximum; 0/58 requests were below 100 ms. There were no
+preprocessing failures. Full-resolution HEIC decode plus Pillow Lanczos resize
+to 224 took 152.9 ms median / 258.9 ms p95 during input caching. Peak process
+RSS was 2.73 GiB across training and evaluation; inference-only peak memory was
+not isolated. This direct model therefore misses both quality and latency
+requirements. It is not adopted. The run took 57.6 seconds end to end, including
+source caching and training. Script, summary, and flushed per-photo records are
+under `/tmp/wave_rawdirect_dateholdout_v1/`.
+
+#### `reducing_gap=3` raw resize contract and full-backbone follow-up
+
+Before training a matched candidate, I screened two-stage Pillow Lanczos
+reduction on the same 58 full-resolution raw holdout sources. Default Lanczos
+resize to 224 x 224 took 63.4 ms median / 68.9 ms p95; `reducing_gap=3.0`
+took 10.4 / 11.1 ms. Full-resolution decode took 71.0 ms median / 105.7 ms
+p95 in this interleaved screen. All 58 resized outputs differed from default
+Lanczos, with mean absolute pixel difference 0.218 intensity levels. This is a
+changed input contract, so I trained and evaluated a matching raw regressor.
+
+The partial-backbone candidate (features 6 onward and head) completed all 58
+date-held-out photos. MAE was 0.12565 overall and 0.13105 on the 48 photos
+paired with v16 (0.10855), a +0.02250 (+20.7%) change. Raw-to-flushed-record
+latency was 105.9 ms median / 145.5 ms p95 / 188.9 ms max; 0/58 met 100 ms.
+Its faster resize lowered the paired median from 185.9 ms by about 80 ms, but
+the total still misses the target and MAE remains materially worse.
+
+I then unfroze the full EfficientNet-B0 backbone to check whether earlier
+features could adapt better to raw photos. This completed 58/58 with MAE
+0.12532 overall and 0.13091 paired versus v16 0.10855 (+20.6%). Latency was
+121.9 ms median / 157.3 ms p95 / 178.8 ms max. Full-backbone tuning did not
+improve paired MAE or latency over the partial-backbone `reducing_gap=3`
+candidate. Both remain rejected. Resize screen and candidate artifacts are
+under `/tmp/wave_raw_resize_gap_screen.py`,
+`/tmp/wave_rawdirect_gap3_v1/`, and `/tmp/wave_rawdirect_gap3_fullft_v1/`.
+
+#### Teacher-output distillation follow-up for the raw-image model
+
+I repeated the same date-held-out raw-image experiment with a combined loss:
+the labeled waviness SmoothL1 loss plus 0.5-weighted MSE to the v16 checkpoint's
+prediction on the matching canonical Step 2 image. Epoch selection still used
+the 43-image inner capture-date holdout and ground-truth MAE only; the 58 outer
+photos remained excluded from training and selection. The archive contained
+teacher inputs for 101/159 allowed training photos, so the other 58 fit photos
+used only the labeled loss. Selection again chose epoch 9.
+
+On the outer 58, candidate MAE was 0.12540. On the 48 paired archived v16
+inputs, candidate MAE was 0.13074 versus 0.10855 for v16, a +0.02219 (+20.4%)
+paired difference. This is effectively unchanged from the label-only raw
+model's 0.13078 paired MAE; teacher-output distillation did not recover the
+quality gap. These repeatedly examined dates remain exploratory.
+
+The raw-to-flushed-record latency was 165.9 ms median / 194.5 ms p95 / 230.0
+ms maximum, with 0/58 requests under 100 ms. Against the first label-only raw
+model run on the same 58 photos, the paired median latency saving was 17.0 ms
+(44/58 requests faster), but substantial latency remains and the MAE does not
+pass the quality gate. This run is rejected and not deployed. The teacher
+predictions, selected checkpoint, metrics, and per-photo timings are under
+`/tmp/wave_rawdirect_distill_v1/`.
+
+#### Training-date affine calibration screen for the raw-image candidate
+
+I screened a simple affine output calibration for the raw model trained on the
+116-image inner-fit set. The slope and intercept were fit only on the separate
+43-image, date-held-out selection set (0.9654 and 0.0300), then applied to the
+58 outer photos. This reduced selection MAE from 0.12710 to 0.12519, but outer
+MAE worsened from 0.13711 to 0.13848. On the 48 photos paired with canonical
+v16 outputs, calibrated MAE was 0.13894 versus 0.10855 for v16, a +0.03038
+difference. The calibration does not transfer and fails the quality gate.
+
+Calibrated raw-to-flushed-record latency was 157.0 ms median / 206.8 ms p95 /
+224.5 ms maximum, with 0/58 under 100 ms. No change was deployed. Results are
+under `/tmp/wave_rawdirect_dateholdout_v1/calibrated_summary.json` and
+`/tmp/wave_rawdirect_dateholdout_v1/calibrated_raw_to_record.jsonl`.
 
 ### HEIC decoder threads on the configured canonical B2 predictor
 
@@ -1586,51 +1699,60 @@ below 100 ms in either run. Results are under
 16-thread reference is under
 `/tmp/wave_yolo26_student_dual_exactcopy_cppcrop_eval/`.
 
-### Segmentation-held-out capture dates for thumbnail preprocessing
+### Date-held-out thumbnail student: corrected v16 quality comparison
 
-The previous fast-route studies used a thumbnail student trained on the full
-training split, so their regression capture-date holdout was not independent
-of preprocessing. I rebuilt that holdout from the ADE20K-pretrained YOLO26n
-semantic checkpoint. The selected 58-photo set spans 12 capture dates and was
-excluded from student training and checkpoint selection. Of the remaining
-training photos with teacher masks, 127 were used to train the student and 22
-from separate fit dates were used for segmentation checkpoint selection. The
-student stopped at epoch 22; best segmentation validation mIoU/pixel accuracy
-was 0.809/0.895 on those 22 fit-date images. One of the 58 final holdout photos
-had no saved teacher mask, but it was still processed and evaluated for
-waviness.
+The 58-photo cohort spans 12 capture dates and was excluded from thumbnail
+student training and segmentation checkpoint selection. The student used 127
+training photos and 22 photos from separate fit dates for checkpoint selection;
+best segmentation mIoU/pixel accuracy was 0.809/0.895. One holdout photo had no
+teacher mask, but it remained in the waviness evaluation.
 
-I ran the holdout through the thumbnail student with the unchanged production
-v16 regressor and compared against the canonical Step 2 JPEGs with the same
-v16 checkpoint. All 58 candidate requests succeeded. Candidate MAE/RMSE were
-0.13443/0.17282 versus 0.14538/0.18229 for canonical preprocessing. The
-candidate improved absolute error on 29 photos and worsened it on 29; mean
-absolute prediction shift was 0.07318, maximum 0.22158. Paired bootstrap 95%
-intervals for candidate minus canonical were [-0.03279, 0.01066] for MAE and
-[-0.03597, 0.01535] for RMSE, both including zero. These intervals are
-descriptive only: an audit of the v16 training manifest found 48 of the 58
-photos in v16's 2026-10-15 training split, and seven of the other ten share a
-capture date with at least one v16 training photo. Only the three photos from
-2026-10-23 are from dates absent from v16 training. On those three, candidate
-MAE/RMSE were 0.08620/0.09238 versus 0.13190/0.15108 for canonical v16, but
-three examples are too few to establish quality preservation. The segmentation
-student was held out by date, but the complete regressor-plus-preprocessor
-pipeline was not. This run therefore does not establish a fresh, independent
-waviness-quality result.
+Correction: the earlier comparison in this section used JPEGs from the active
+`step-2-final-water-data` folder as though they were canonical v16 inputs. Its
+preprocessing contract is `fast-v1` (448-pixel FP16 segmentation), not
+`baseline-v16`; the reported MAE 0.13443 vs 0.14538 was not a valid canonical-v16
+comparison. I regenerated the reference predictions from the 58 raw files with
+the actual baseline-v16 contract: full-resolution 768-pixel overlapping B2
+tiles in FP32 for Step 1 and Step 2, followed by the configured v16 regressor.
+Canonical v16 succeeded on 51/58; seven failed Step 2 crop selection. Its
+success-only MAE/RMSE were 0.12006/0.15645.
 
-Complete warm-request latency included thumbnail/source decode, both
-preprocessing stages, v16 regression, and a flushed prediction-record write.
-Median/p95/max was 35.3/41.9/46.9 ms; all 58/58 were under 100 ms. Median CPU
-time was 35.5 ms, peak RSS 2.31 GiB, and accelerator allocated/reserved memory
-0.12/0.15 GiB. The candidate preserves the current v16 checkpoint and target
-labels; the input resolution and segmentation model change, so this evidence
-applies specifically to the tested thumbnail contract. The set comes from
-existing training dates and is now consumed for evaluation; it is not a fresh
-future-capture confirmation. Keep this route experimental pending new-date
-labels and replication. Split metadata and complete per-image results are in
-`/tmp/wave_yolo26_capture_date_holdout_student_data_v1/` and
-`/tmp/wave_yolo26_clean_capture_holdout_eval_v1/`; the independently trained
-student is in `/tmp/wave_yolo26_capture_date_holdout_student_v1/`.
+The thumbnail student with the unchanged v16 head completed 58/58. On all
+candidate successes its MAE/RMSE were 0.13443/0.17282. On the 51 photos where
+both routes succeeded, candidate MAE/RMSE were 0.13226/0.17206 versus
+0.12006/0.15645 for canonical v16: MAE was higher by 0.01220 (+10.2%). Its
+absolute error improved on 20 photos and worsened on 31. A 12-date cluster
+bootstrap 95% interval for candidate-minus-v16 MAE was [-0.01408, 0.03416], so
+this small cohort cannot rule out a material quality hit. The candidate did
+complete the seven photos that v16 could not process; report this coverage gain
+separately rather than treating it as an MAE improvement.
+
+On the three 2026-10-23 photos from dates absent from v16 training, candidate
+MAE was 0.08620 versus 0.12712 for v16. This is encouraging but only three
+photos. Complete raw-to-flushed-record candidate latency was 35.26 ms median /
+41.94 ms p95 / 46.88 ms max, with 58/58 below 100 ms. Median CPU time was
+35.5 ms, peak RSS 2.31 GiB, and accelerator allocated/reserved memory
+0.12/0.15 GiB. Canonical v16 latency on this cohort was 10,057.6 ms median /
+10,092.3 ms p95, with 0/51 under 100 ms.
+
+I also trained the waviness head only on the 158 available candidate inputs
+outside the 58-photo holdout. The inputs came from the same date-held-out
+student. Starting from ImageNet weights, the frozen-backbone head scored MAE
+0.15193 on all 58 holdout photos and 0.14662 vs v16 0.12006 on the shared 51
+(+22.1%). Fine-tuning EfficientNet features[7:] worsened shared MAE to 0.15154
+(+26.2%). A v16-initialized partial fine-tune scored 0.14096 on the shared 51
+(+17.4%), but its initialization had already seen 48 of the 58 holdout photos,
+so it is not independent evidence. These head variants remained under 100 ms
+(34.65–35.05 ms median) but failed the MAE screen. None is adopted; v16 remains
+selected.
+
+The regenerated canonical-v16 records are in
+`/tmp/wave_v16_canonical_outer58_raw_eval_v1/`. The unchanged-v16-head
+thumbnail run is in `/tmp/wave_yolo26_clean_capture_holdout_eval_v1/`; the
+clean head training and runs are under `/tmp/wave_yolo26_clean_regressor_cv_*`.
+The student, its split, and teacher masks are under
+`/tmp/wave_yolo26_capture_date_holdout_student_v1/` and
+`/tmp/wave_yolo26_capture_date_holdout_student_data_v1/`.
 
 ### v16-matched regressor for the fast thumbnail pipeline
 
@@ -1769,6 +1891,42 @@ prediction timings. Reaching the target therefore requires a different
 segmentation execution path and a quality gate on the same labeled cohort; the
 small copy and thread adjustments cannot close this gap. The benchmark report
 is `/tmp/wave_current_v16_configured_path_probe/20261028T161549979780Z/`.
+
+#### ROCm kernel and transfer trace for the configured v16 path
+
+To determine whether the long Step 1 time was primarily caused by host/device
+traffic or by the segmenter itself, I captured one cold and one warm complete
+raw-to-output request with ROCm `rocprofv3` kernel and memory-copy tracing. The
+instrumented warm request took 11.587 s (the earlier uninstrumented warm sample
+was 11.377 s; profiler overhead makes this a diagnostic, not a new latency
+benchmark). The trace recorded 35 Step 1 tile forwards: 9.837 s in the tile
+model, 0.534 s preparing tiles, 0.268 s resizing/accumulating logits, and
+0.073 s finalizing the mask. Step 2 took 0.327 s. The one-photo waviness MAE is
+unknown; its absolute error was 0.1487, which is not a cohort metric.
+
+Across the profiled cold and warm requests, ROCm recorded 373 explicit
+host/device copies totaling about 823 MiB and 40.5 ms of summed copy duration
+(32.0 ms H2D, 8.5 ms D2H). That is too small to explain a multi-second request
+or close the sub-100 ms gap by itself. The GPU trace also contained 4,608
+elementwise copy-kernel dispatches and 706 GEMM dispatches during this single
+photo run. These kernel counts identify a possible model-execution/materialized
+tensor optimization target, but do not prove the copies are redundant; any
+fusion or layout change must first match masks and final JPEG bytes, then
+prediction outputs and paired waviness MAE. The run did not record process CPU
+time or peak host RSS, so it cannot support a CPU or total-memory conclusion.
+
+This evidence follows ROCm's recommended sequence of profiling the application
+timeline, transfers, and kernels before selecting an optimization. It makes
+another decoder-thread or host-to-device-copy experiment a low-priority route
+for the current v16 profile. The viable paths toward <100 ms remain either a
+substantially faster execution of the same segmentation function or a compact
+student that passes the strict paired waviness-quality gate; prior YOLO routes
+are not acceptable replacements because they regressed v16 MAE. Trace data and
+the benchmark report are in `/tmp/wave_v16_rocprof_profile_v1/` and
+`/tmp/wave_v16_rocprof_benchmark_v1/`. Reference: AMD's official [HIP
+performance guidelines](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/performance_guidelines.html)
+recommend profiling kernel execution, memory bandwidth, occupancy, and data
+movement before tuning.
 
 ### HEIC hardware-decoding feasibility check (FFmpeg VAAPI, stopped)
 
@@ -2602,3 +2760,3653 @@ and `step-2-final-water-data/archive/20261027T134224Z/`. Training heads, paired
 per-photo errors, capture-date bootstrap and full metrics are in
 `/tmp/wave_fast_vs_canonical_clean_date_regressor_v1/`; the student preprocessing
 runner and records are in `/tmp/wave_clean_holdout_candidate_inputs_v2/`.
+
+### Full preprocessing and regressor grouped by capture date
+
+An initial five-fold diagnostic cross-validated the regression heads on these
+101 photos but reused one YOLO student that had trained on those rows. It
+scored MAE/RMSE 0.16770/0.20534 for canonical inputs and 0.17011/0.21382 for
+candidate inputs; its date-clustered MAE interval crossed zero. Because the
+student had seen the held-out photos, this was not a full-pipeline quality
+estimate. I then ran a full capture-date-grouped cross-validation on the 101
+labeled photos that have both candidate inputs and archived canonical Step 2
+inputs. Each fold kept its outer
+dates out of YOLO student training, student checkpoint selection, regression
+head fitting, and regression epoch selection. The student was trained from
+canonical B2 teacher masks available for 96/101 photos; each outer training
+fold had 75–79 teacher masks. Regression heads used the same frozen ImageNet
+EfficientNet-B0 feature extractor and identical training
+photos for both preprocessing contracts. Each branch selected and refit its
+own scalar head using only the outer training dates.
+
+The candidate completed 100/101 outer-fold predictions; one photo failed Step
+2 crop selection. On the 100 paired successes, the canonical branch scored
+MAE/RMSE 0.25171/0.29970, and the candidate scored 0.25247/0.30468. Candidate
+minus canonical MAE was +0.00075, with a capture-date-cluster bootstrap 95%
+interval of [-0.01802, 0.01599]. RMSE increased by 0.00498; errors worsened on
+52 photos and improved on 48. The interval is too wide to establish a reliable
+MAE regression or no-regression. These absolute metrics are also substantially
+worse than the configured v16 model because each cross-validation head was
+trained from scratch on only about 80 photos. This is a controlled comparison
+between preprocessing contracts, not a production-quality estimate. The
+candidate fails the no-quality-hit and coverage gates; do not adopt it.
+
+For all 101 raw-to-record requests, 100 succeeded and all 100 successful
+requests were under 100 ms: median/p95/max was 36.97/42.58/47.97 ms. The one
+crop failure occurred after 9.85 ms and produced no prediction. Median process
+CPU time was 37.24 ms; peak process RSS was 2.42 GiB and peak PyTorch
+accelerator allocation during prediction was 0.198 GiB. Student training used
+about 0.9 GiB accelerator memory per fold. Full-request timing included source
+decode, YOLO, both preprocessing steps, regression, and flushed prediction
+record; model loading and warm-up were outside the timed request. These are
+warm-service request timings, not process-startup-to-first-prediction timings,
+so they do not establish a strict cold-start latency under 100 ms. The
+five-fold experiment took 427.7 seconds.
+
+This is a useful direction for speed and resource use, but it does not meet the
+required result: the candidate is slightly worse on both aggregate error
+metrics, one request fails, and the uncertainty remains large. More labeled
+training photos with both canonical and candidate inputs, plus untouched future
+capture dates, are needed before a quality-preserving replacement can be
+established. Per-photo OOF rows and fold checkpoints are in
+`/tmp/wave_fullpipeline_grouped_cv_v3/`; corrected complete-request timings are
+in `corrected_full_request_timing_v3.json`. The training runner is
+`/tmp/wave_fullpipeline_grouped_cv_v3.py`.
+
+#### Why the paired cohort could not be expanded with more canonical inputs
+
+I checked the 56 additional fast-route training photos that have no archived
+canonical Step 2 JPEG, to see if those baseline inputs could be regenerated.
+The first five were processed with the original 768-pixel overlapping B2
+pipeline. All five reached Step 2 but failed its reliable-crop selection, so
+there was no canonical model input to compare. The probe took 51.7 seconds,
+used 2.45 GiB peak RSS, and reached 8.42 GiB peak PyTorch-reserved accelerator
+memory. I stopped the larger regeneration attempt because these photos do not
+provide a paired canonical quality baseline through this preprocessing
+contract. This explains the current 101-photo paired limit; it does not prove
+that every one of the remaining 51 photos would fail. The candidate route does
+produce inputs for these examples, but that added coverage alone does not prove
+quality preservation. Probe records are in
+`/tmp/wave_missing_canonical_inputs_probe_v1/`.
+
+### More training data for the fast-input regression head
+
+A follow-up trained frozen-backbone and partially unfrozen EfficientNet-B0
+heads on 157 candidate-preprocessed training images from 39 capture dates.
+Model/epoch selection used 35 images across 11 training dates; the 58-image,
+12-date outer holdout was kept out of fitting and selection. Candidate Step 2
+outputs matched the previously cached candidate JPEG bytes on all 58 images.
+Both heads were evaluated on all 58 candidate inputs and against v16 on the 48
+images with archived canonical inputs. This checks the fast-input route with
+more training data, but changes both the preprocessing contract and fitted
+regression head.
+
+The frozen head had candidate-only MAE/RMSE 0.1662/0.2119 on 58 images. On the
+48-image paired cohort, its MAE/RMSE was 0.1562/0.1967 versus 0.1086/0.1452 for
+v16; paired MAE was 0.0476 worse, with 35 of 48 absolute errors worse. The
+partially unfrozen head had candidate-only MAE/RMSE 0.1694/0.2180; paired
+MAE/RMSE was 0.1575/0.2003, with paired MAE 0.0490 worse and 35 of 48
+absolute errors worse. Both routes succeeded on all 58 images. Neither passes
+the quality gate.
+
+Warm raw-image-to-flushed-record timing (model loading and warmup excluded) was
+37.4 ms median, 43.8 ms p95 and 66.4 ms max for the frozen head; the partially
+unfrozen head measured 37.2/43.3/49.8 ms. All 58 successful requests were under
+100 ms. Peak process RSS was 2.57 GiB and peak PyTorch accelerator allocation
+was 0.233 GiB (0.279 GiB reserved). These latency results do not meet the
+quality requirement and do not establish a cold-start under 100 ms. Reproducer
+and artifacts: `/tmp/wave_fast_student_regressor_157_date_holdout_v1.py` and
+`/tmp/wave_fast_student_regressor_157_date_holdout_v1/summary.json`.
+
+A separate tile-batching probe on a different held-out 3024 x 4032 photo
+confirmed this result. The canonical sequential FP32 run took 10.85 s for 35
+tiles. Microbatch size two took 31.35 s and changed two class-map pixels;
+batch size four took 32.66 s and changed three. Peak accelerator allocation
+reached 13.97 GiB (15.87 GiB reserved) and process peak RSS was 2.41 GiB.
+Batching is therefore both slower and non-identical on this sample and hardware.
+The probe is `/tmp/wave_batch_seg_tiles_probe_v1.py`; results are in
+`/tmp/wave_batch_seg_tiles_probe_v1.log`.
+
+### Canonical-resolution FP16 autocast probe
+
+To separate reduced precision from the earlier lower-resolution changes, I kept
+both canonical 768-pixel SegFormer passes, tile positions, weights, crop rules,
+and the v16 regression checkpoint unchanged and enabled FP16 autocast only for
+SegFormer inference. On one 3024 x 4032 image, full raw-to-prediction time fell
+from 11.53 s in FP32 to 6.48 s in FP16. Step 1 and Step 2 JPEG bytes changed;
+the prediction moved by 0.00138. This single-image timing is a probe, not a
+stable paired latency estimate.
+
+I then ran FP16 preprocessing on the existing 32-photo test split, which has
+been consulted in prior experiments and is not a newly untouched test. All 32
+requests succeeded. Candidate MAE/RMSE were 0.1311/0.1583 versus 0.1328/0.1616
+for v16 on archived canonical inputs. The candidate had lower absolute error on
+15 photos and higher error on 17. A 10,000-draw capture-date-cluster bootstrap
+across 18 dates gave candidate-minus-canonical 95% intervals of [-0.01485,
+0.01025] for MAE and [-0.01766, 0.00852] for RMSE. Both include a meaningful
+regression, so the point-estimate improvement does not establish preserved
+quality. None of the 32 candidate Step 2 JPEGs were byte-identical to archived
+canonical inputs.
+
+Warm raw-to-prediction plus Step 2 output-file write measured 5,646 ms median,
+5,849 ms p95 and 6,666 ms maximum; none of the 32 were under 100 ms. The timing
+excluded model loading and did not include a flushed prediction record. Peak
+process RSS was 2.93 GiB; peak PyTorch accelerator allocation/reservation was
+8.31/8.56 GiB. CPU time was not captured. Thus FP16 is a substantial speed
+improvement over the separate FP32 probe but remains far above target and does
+not pass the quality gate. Keep experimental. Script and detailed records:
+`/tmp/wave_canonical_fp16_test_quality_v1.py` and
+`/tmp/wave_canonical_fp16_test_quality_v1/summary.json`.
+
+### Canonical-initialized regressor adaptation for the date-held-out fast route
+
+To reduce the input-domain gap, I trained the candidate regressor from a
+canonical regressor fitted without any outer holdout dates, then adapted its
+scalar head to the fast-route inputs. The YOLO26 student and regressor fit and
+selection excluded all 12 outer capture dates. The student route produced 157
+training inputs and 58 holdout inputs; archived canonical inputs existed for
+101 training and 48 holdout photos. Canonical head selection used 12
+training-date photos; fast-head adaptation selected 3 epochs on 35 photos
+across 11 training dates, then refit on all 157 candidate training images.
+
+The adapted candidate scored MAE/RMSE 0.1519/0.1898 on all 58 holdout images.
+On the 48 paired images, it scored 0.1472/0.1849, compared with 0.1404/0.1840
+for a newly trained canonical head using the 101 shared training images. The
+paired MAE difference was +0.00676; 29 errors were worse and 19 better. Its
+11-date-cluster bootstrap 95% interval was [-0.00712, 0.01749], which does not
+rule out a material regression. Against the configured v16 checkpoint on the
+same 48 images, candidate MAE/RMSE were 0.1472/0.1849 versus 0.1086/0.1452;
+MAE was worse on 35 images and better on 13, with date-cluster interval
+[0.02906, 0.04491]. The v16 comparison is conservative for the candidate because
+v16 training included some of these dates; the newly trained canonical branch
+is the date-disjoint comparison. Neither comparison establishes quality
+preservation.
+
+The complete warm thumbnail-route request was remeasured with the adapted head:
+58/58 succeeded and their generated Step 2 JPEGs matched cached candidate bytes
+exactly. Raw-image-to-flushed-record timing was 35.20 ms median, 41.12 ms p95,
+and 45.26 ms maximum; all requests were under 100 ms. Median process CPU time
+was 35.49 ms. Peak RSS was 2.32 GiB and accelerator allocated/reserved memory
+was 0.135/0.172 GiB. Model load and warmup were excluded. This path decodes
+HEIF embedded thumbnails or JPEG draft images at roughly 320 pixels, so the
+result applies to that changed input contract. It is not acceptable as a
+quality-preserving replacement: the matched errors remain worse than the
+canonical branch and v16, despite meeting warm request latency. Reproduction,
+per-photo records, and metrics are in
+`/tmp/wave_fast_regressor_canonical_init_adaptation_v2/` and
+`/tmp/wave_fast_regressor_canonical_init_adaptation_latency_v2/`.
+
+### Full-resolution YOLO26s student on capture-date-held-out photos (quality and speed fail)
+
+To test whether a larger semantic model would improve the full-resolution YOLO26
+route, I trained YOLO26s from its ADE20K semantic checkpoint using the existing
+teacher-mask pairs. The outer test split remained 58 photos from 12 excluded
+capture dates. Checkpoint selection used 127 photos across 34 dates for training
+and 22 photos across 5 dates for selection; the selected 19-epoch schedule was
+then refit on all 149 non-holdout photos. Selection and refit took 390 and 306
+seconds, respectively. Training peak accelerator memory was about 1.4 GiB.
+
+On the 58 held-out photos, 56 completed and 2 failed preprocessing (one Step 1
+water-area failure, one Step 2 crop-selection failure). The student masks had
+mean teacher IoU 0.860 and minimum IoU 0.225. With the existing v16 regressor,
+candidate MAE/RMSE were 0.1361/0.1703 on all 56 successes. On the 48 photos with
+archived v16 inputs, candidate MAE/RMSE were 0.1366/0.1707 versus 0.1086/0.1452
+for v16; candidate absolute error was worse on 28 and better on 20. The paired
+MAE delta was +0.02806, with an 11-capture-date bootstrap 95% interval of
+[-0.00117, 0.04443]. This is not evidence of preserved waviness quality. The
+v16 checkpoint itself has seen some of these dates, so this comparison is not
+a fully date-disjoint baseline, but the candidate's clear point-estimate loss
+does not justify adoption.
+
+An initial timing pass calculated full-resolution teacher-mask IoU inside the
+timed loop. That diagnostic is not part of a prediction request and inflated
+latency, so those initial 229.8-ms and 151.1-ms values are not used as
+production-path measurements. I reran timing without teacher-mask scoring while
+keeping raw-image decode, full-resolution segmentation, both preprocessing
+steps, regression, and flushed output-record writing in the timed path.
+
+With the exact parallel HEIC tile decoder and compiled crop selector, canonical
+Pillow Lanczos resizing measured 107.8 ms median and 121.6 ms p95; 18/56
+requests were below 100 ms. Median CPU time was 292.5 ms, peak RSS 2.57 GiB,
+and PyTorch accelerator allocated/reserved memory 0.328/0.371 GiB. Stage timing
+identified standardization as the main remaining cost: erosion 3.8 ms,
+full-resolution ROI masking and Lanczos resize 58.4 ms, projection 1.4 ms,
+decode 19.7 ms, and YOLO plus mask transfer 12.7 ms. Smaller stages were
+Step 2 crop search 2.6 ms, Step 2 encoding/transform/transfer 2.3 ms, and
+regression 4.8 ms.
+
+I then enabled Pillow's documented `reducing_gap=3.0` two-stage reduction for
+the full-resolution masked ROI before its final Lanczos resize. It retains the
+full-resolution raw image and Lanczos final filter; it does not use the HEIF
+thumbnail or a lower-resolution segmentation input. The route measured
+64.6 ms median, 75.4 ms p95, and 86.4 ms maximum, with all 56 successful
+requests under 100 ms. Median CPU time fell to 242.4 ms; peak RSS and
+accelerator memory remained 2.57 GiB and 0.328/0.371 GiB. Standardization fell
+from 58.4 ms to 25.1 ms. Output JPEGs changed on 55/56 photos, so this is not an
+exact-output optimization. On the same 56 held-out photos, MAE/RMSE changed
+from 0.1361/0.1703 to 0.1348/0.1677. On the 48-photo paired set, candidate
+MAE changed from 0.1366 to 0.1345 (24 individual errors worsened and 24
+improved); the 11-date cluster-bootstrap 95% interval for optimized-minus-base
+MAE was [-0.00748, 0.00281]. This provides no evidence of a quality hit from
+this resize optimization on this sample, but the interval still allows a small
+regression and output pixels differ.
+
+The speed optimization does not fix the candidate model's quality gap to v16:
+the 48 paired photos scored MAE/RMSE 0.1345/0.1672 with the optimized route
+versus 0.1086/0.1452 for v16. Candidate-minus-v16 MAE was +0.02599, with
+date-cluster interval [-0.00291, 0.04204]. This remains a fast research route,
+not an acceptable replacement. A separate eight-strip resize experiment was
+also excluded: it changed Step 2 JPEGs on 7/56 photos and did not establish
+quality preservation. The result demonstrates that legitimate full-resolution
+resize optimization can meet the raw-to-output latency target on this hardware,
+but the segmentation/regression candidate still must pass the quality gate.
+
+Reproduction scripts and records are under `/tmp/wave_yolo26s_fullres_dateholdout_v1/`,
+`/tmp/wave_yolo26s_fullres_dateholdout_refit_eval_v1/`,
+`/tmp/wave_yolo26s_tiled_eval_v1/`, `/tmp/wave_yolo26s_tiled_eval_v2/`,
+`/tmp/wave_yolo26s_tiled_eval_v3/`, `/tmp/wave_yolo26s_tiled_eval_profile_v2/`,
+`/tmp/wave_yolo26s_tiled_eval_profile_v3/`, and
+`/tmp/wave_yolo26s_tiled_eval_reducing_gap3_v1/`. Pillow's resize option is
+documented at [Image.resize](https://pillow.readthedocs.io/en/stable/reference/Image.html?highlight=reducing_gap).
+No production pipeline code or model was changed.
+
+### Regressor adaptation for the expanded-mask YOLO26s route
+
+The expanded-mask YOLO26s student above produced a fast full-resolution route,
+but its unchanged v16 regression head still had paired MAE 0.12624 versus
+0.10855 for v16 on the same 48 photos. I generated Step 2 inputs for the 159
+non-outer-date training photos with the exact same student, full-resolution
+HEIF decode, `reducing_gap=3.0` standardization, and projected Step 2 mask. Two
+preprocessing failures left 157 candidate training inputs. The 12 outer dates
+(58 images) remained excluded from the regressor fit. Selection used 43
+photos from 14 capture dates; a frozen-head branch and a partial fine-tune of
+EfficientNet features 7 onward were compared by selection MAE only. The
+partial branch was selected at epoch 11 with selection MAE 0.09451, then
+refit on all 157 available training inputs.
+
+On the 58 outer photos, the adapted route completed 58/58 and scored MAE
+0.13291. On the 48 paired photos, candidate MAE was 0.12863 versus 0.10855 for
+v16 (+0.02008, or 18.5% higher); errors were worse on 28 and better on 20.
+Compared with the unchanged v16 head on this same YOLO route, adaptation also
+slightly worsened paired MAE (0.12863 versus 0.12624). The selection MAE did
+not transfer to the outer dates, so adaptation is rejected.
+
+Despite the quality failure, the raw-to-flushed-record route remained fast:
+72.99 ms median / 90.03 ms p95 / 93.09 ms maximum, with all 58 requests under
+100 ms. Median process CPU time was 254.84 ms; peak process RSS was 2.71 GiB,
+and PyTorch accelerator allocated/reserved memory was 0.568/0.807 GiB. These
+results confirm the speed potential of this preprocessing route but do not
+meet the no-quality-hit requirement. Nothing was deployed. Training and full
+request artifacts are under `/tmp/wave_yolo26s_v3_regadapt_v1/`.
+
+### Teacher-distilled regressor on the expanded-mask YOLO26s route
+
+I followed the failed direct adaptation with a partial EfficientNet fine-tune using
+both true waviness labels and a 0.5-weight v16 teacher-score loss on training
+photos with archived teacher inputs. All 12 outer capture dates (58 photos)
+were excluded from fitting and selection. The model was selected on an
+inner date split and refit on the available non-outer-date inputs. The
+corrected evaluation explicitly used the v16 checkpoint for the baseline; an
+earlier path-broken evaluation produced no valid result and is discarded.
+
+On the 58 outer-date photos the adapted candidate completed 58/58 and had MAE
+0.12539. On the 48-photo set with archived v16 inputs, candidate MAE was
+0.12081 versus 0.10855 for v16 (+0.01225, or 11.3% higher). Errors were worse
+on 25 and better on 23; the 11-date cluster-bootstrap 95% interval for the MAE
+delta was [-0.01306, 0.03681]. This did not establish preserved quality.
+
+The full raw-to-flushed-output evaluation measured 63.61 ms median, 73.29 ms
+p95, and 78.78 ms maximum; all 58 requests were below 100 ms. Median process
+CPU time was 241.92 ms, peak RSS 2.57 GiB, and accelerator allocated/reserved
+memory 0.328/0.371 GiB. Latency excludes cold model loading. Candidate quality
+is from the corrected paired comparison above; the full-path script's second
+baseline calculation reused the adapted regressor, so that particular baseline
+field is invalid and was not used. The verified canonical v16 paired MAE is
+from the independent corrected comparison. Artifacts are under
+`/tmp/wave_yolo26s_v3_regdistill_v1/` and
+`/tmp/wave_yolo26s_v3_regdistill_full_eval_v1/`. The candidate remains a
+research result and was not deployed.
+
+### Updated bottleneck and hardware assessment for the v16 path
+
+The current profiling host is an AMD Ryzen AI MAX+ 395 with Radeon 8060S
+(gfx1151, ROCm 7.16, PyTorch 2.14), 16 CPU cores / 32 logical CPUs, 122.7 GiB
+system RAM, and about 48 GiB free shared accelerator memory at idle. The canonical
+v16 request for a 4032 x 3024 HEIC needs 35 Step 1 tiles at 768 pixels, plus one
+small Step 2 tile. The warmed raw-to-prediction request took 11.59 s in the
+instrumented profile; 9.84 s was Step 1 tile-model inference and 0.53 s tile
+preparation. HEIC decode was 0.10 s, while both JPEG writes together were below
+1 ms. CPU time was not collected, so CPU saturation cannot be inferred from
+this trace.
+
+A query of the saved ROCm dispatch database counted 4,608 elementwise
+`direct_copy_kernel_cuda` launches with 6.1 s summed kernel duration and 706
+GEMM launches with 5.9 s summed duration. These are device-kernel durations,
+which can overlap and must not be added as wall time. The kernel name
+`direct_copy_kernel_cuda` does not mean that 6.1 s was host-to-device copying:
+the separate measured explicit transfer total was about 40.5 ms across
+823 MiB. Thus reducing host/device transfers cannot by itself materially close
+the latency gap. This profile points to repeated SegFormer model computation
+and its GPU elementwise work as the main target; it does not yet establish
+which framework operator or kernel fusion opportunity is responsible for the
+elementwise cost.
+
+The under-100-ms goal requires at least a 115x reduction from the 11.59-s
+instrumented raw-to-output request. Even eliminating all decode, preprocessing,
+regression, and file/log overhead would leave roughly 9.84 s of Step 1 forwards.
+Canonical-profile FP16 previously reduced end-to-end latency to about 5.65 s
+median but changed masks and did not establish quality parity; it is far from
+the target. MIGraphX FP32 was about 98 ms for one 768-pixel tile after a long
+compile/load, so multiplying by the canonical 35 tiles still leaves a multi-
+second request. Batching the same tiles was slower and changed two mask pixels.
+These experiments rule out precision-only, transfer-only, compilation-only,
+and naive batching as sufficient solutions.
+
+The evidence-based next path is to profile operator-to-kernel mapping and
+accelerator utilization on a representative warm request, then optimize or
+replace the segmentation computation itself while validating the canonical
+mask/crop and paired waviness MAE. A compact segmentation student or a
+purpose-trained model is the most plausible route to a 100-ms budget, but it
+must pass the quality gate on date-disjoint photos before adoption. The v16
+checkpoint remains configured; no production checkpoint or segmentation
+profile changed as part of this assessment.
+
+### CPU-thread and host-memory check on the configured v16 prediction path
+
+I ran two fresh end-to-end benchmark processes on `IMG_7238.HEIC`, each with
+one cold request and two warm requests. The production prediction entry point
+defaults to one PyTorch intra-op thread. The 32-thread comparison is only a
+benchmark diagnostic; it is not the production setting. Both settings produced
+the identical prediction (0.351297) on this image (label 0.50, absolute error
+0.148703). This single image is not an MAE evaluation.
+
+At one thread, warm raw-to-output latency was 10.787 s median across the two
+requests; Step 1 tile-model time was 9.194 s median. At 32 threads, the same
+figures were 11.216 s and 9.617 s. The one-thread setting was about 3.8% faster
+in this small, single-image comparison; it is already the configured
+production default. `/usr/bin/time -v` measured 121% CPU utilization and
+2.49 GiB peak RSS for the full one-thread benchmark process, versus 131% and
+2.49 GiB for the 32-thread process. These CPU percentages include Python
+startup and all three predictions, are averaged over the process lifetime, and
+do not describe short bursts. No swap or major page faults occurred.
+
+The result confirms that increasing PyTorch CPU threads does not help this
+GPU-heavy route, and the host process RSS is modest relative to available
+system RAM. The 6.81-GiB float32 segmentation accumulator is a GPU allocation,
+not host RSS. The remaining latency is dominated by the 35 sequential GPU
+SegFormer forwards, so CPU/memory tuning is not a plausible path from roughly
+10.8 s to 100 ms. Artifacts:
+`/tmp/wave_v16_cpu_memory_profile_v2/20261028T195133294344Z/` and
+`/tmp/wave_v16_cpu_memory_profile_v3_t1/20261028T195224590517Z/`.
+
+### Zero-overlap v16 tile experiment (rejected on quality and coverage)
+
+I kept the v16 SegFormer checkpoint, 768-pixel tile size, float32 precision,
+full-resolution input, Step 2 path, and regression checkpoint fixed, and changed
+only the Step 1 tile overlap from 25% to zero. This reduced the typical tile
+count from 35 to 24. The experiment ran the complete raw-to-output path on the
+same 58-photo, 12-date holdout used for the YOLO26s candidate and compared
+against archived v16 inputs on the 48 paired photos.
+
+The candidate completed only 52/58 photos; six failed Step 2 crop selection.
+On the 52 successes its MAE was 0.13611 (success-only and therefore
+selection-biased). On the 48 paired successes, candidate MAE was 0.13921
+versus 0.10855 for v16, a +0.03066 absolute delta (+28.2%). Error was worse
+on 29 photos and better on 19; the 11-date cluster-bootstrap 95% interval was
+[+0.00331, +0.04925]. This clearly fails the no-quality-hit gate and the
+coverage gate.
+
+Warm raw-to-flushed-record latency was 7,480 ms median / 7,517 ms p95, with a
+7,770 ms maximum. This is only about a 1.5x end-to-end improvement versus the
+roughly 11-second 35-tile reference, despite removing 11 tile forwards, and it
+remains far above 100 ms. Peak process RSS was 2.97 GiB and peak accelerator
+allocated/reserved memory was 8.31/8.62 GiB. No production settings changed.
+The candidate is discarded. Full per-photo results and the runner are under
+`/tmp/wave_v16_nooverlap_holdout_eval_v1/` and
+`/tmp/wave_v16_nooverlap_holdout_eval_v1.py`.
+
+### Larger overlapping tile-size sweep (rejected on MAE and coverage)
+
+I tested two larger tile sizes with the v16 model, 25% overlap, float32
+precision, the same Step 2 pipeline, and the same regression checkpoint. Each ran
+the full raw-to-flushed-output pipeline on the 58-photo, 12-date holdout and
+used the 48 archived canonical inputs for paired MAE comparison. The 1024-pixel
+variant used 20 tiles on a 4032 x 3024 image; the 960-pixel variant used 24.
+
+The 1024-pixel run succeeded on 55/58 photos. Its success-only all-photo MAE
+was 0.12023; paired MAE was 0.12126 versus 0.10855 for v16 (+0.01271,
++11.7%). Errors were worse on 26 and better on 22; the 11-date bootstrap 95%
+interval for the paired delta was [-0.01874, +0.03410]. Raw-to-flushed-record
+latency was 6,114 ms median / 6,154 ms p95, with a 6,423 ms maximum. Peak RSS
+was 2.94 GiB and accelerator allocated/reserved memory was 8.57/8.78 GiB.
+
+The 960-pixel run succeeded on 54/58 photos. Its success-only MAE was 0.13081;
+paired MAE was 0.13333 versus 0.10855 for v16 (+0.02478, +22.8%). Errors were
+worse on 33 and better on 15; the paired date-bootstrap interval was
+[-0.00629, +0.04709]. Latency was 7,169 ms median / 7,217 ms p95, with a
+7,503 ms maximum. Peak RSS was 3.05 GiB and accelerator allocated/reserved
+memory was 8.50/8.71 GiB.
+
+Neither tile-size change preserves quality or full coverage, and neither is
+close to 100 ms; both are discarded. The larger tile settings also did not
+reduce peak GPU memory. No production settings changed. Artifacts are in
+`/tmp/wave_v16_tile1024_overlap25_holdout_eval_v1/` and
+`/tmp/wave_v16_tile960_overlap25_holdout_eval_v1/`, with runners
+`/tmp/wave_v16_tile1024_overlap25_holdout_eval_v1.py` and
+`/tmp/wave_v16_tile960_overlap25_holdout_eval_v1.py`.
+
+### Water-only logit accumulation (rejected on quality and coverage)
+
+The canonical pipeline only consumes a binary water mask from the 150-class
+SegFormer output, but the overlapping-tile implementation accumulates all
+150 float32 class logits over the full source image. I tested a memory-oriented
+alternative: after each tile's exact bilinear upsample, take the maximum water
+class score and maximum non-water class score, accumulate those two full-image
+planes, then compare the accumulated scores. This keeps the v16 weights,
+float32 model execution, tile size, overlap, and downstream regressor fixed;
+it changes the overlap aggregation because max and averaging do not commute.
+
+On a single image, the water-mask IoU was 0.99968 (1,291 pixels changed) and
+the final waviness score matched exactly. That probe was not enough to establish
+quality. On the 58-photo outer-date run, only 51/58 requests completed; seven
+failed Step 2 crop selection. The success-only MAE was 0.12855 and is
+selection-biased. On the 48 paired successes, candidate MAE was 0.12834 versus
+0.10855 for v16 (+0.01979, +18.2%). Errors were worse on 29 photos and better
+on 18. The date-cluster bootstrap 95% interval for the paired MAE delta was
+[-0.00491, +0.04296]. This fails both the quality and coverage gates.
+
+Warm raw-to-flushed-record latency was 9,874 ms median / 9,910 ms p95, with a
+9,927 ms maximum; no request was under 100 ms. Peak accelerator allocation
+fell from 8.31 GiB in the canonical v16 run to 1.60 GiB, and reserved memory
+fell from 8.62 GiB to 2.22 GiB. Peak host RSS was 2.96 GiB. This is a
+substantial memory reduction but only a small latency improvement, confirming
+that the large accumulator was not the main latency bottleneck. The
+approximation is discarded. No production code or profile changed. Records
+and runner are under `/tmp/wave_v16_binary_accum_holdout_eval_v1/` and
+`/tmp/wave_v16_binary_accum_holdout_eval_v1.py`.
+
+### Exact tiled HEIF decoding on the GPU-standardized B0 candidate
+
+Pillow's full-resolution HEIC decode was a large cost in the B0 candidate path.
+I tested a native libheif tiled decoder that assembles the same BGR frame, then
+converts to RGB before the unchanged B0 preprocessing. Direct comparison showed
+exact RGB pixel equality with the repository's Pillow decoder on the first
+8 held-out HEICs; the end-to-end run below provides a stronger output check.
+Non-HEIF inputs continue through the existing Pillow loader.
+
+I alternated Pillow and native decoding for all 47 validation and 46 test
+photos, warming both branches first. Each timed request included decode, the
+B0/448 GPU-standardized preprocessing and GPU erosion, the 448 Step 2 path,
+regression, model-input JPEG writing, and a flushed JSONL result record. All
+93 requests succeeded. Model-input JPEGs and regression predictions were
+byte-identical between decoders on all 93; aggregate validation+test MAE was
+0.12995 for both, so this decoder change caused no measured MAE shift.
+
+Median full-request latency decreased from 288.25 ms to 248.32 ms, a paired
+saving of 40.62 ms; p95 decreased from 301.46 to 261.81 ms. Peak process RSS
+was 3.10 GiB and accelerator allocated/reserved memory was 0.428/1.322 GiB.
+The native decoder itself took about 19–26 ms on the initial eight-image
+parity probe, versus 94–149 ms for Pillow. On the 32 archived-v16 common rows,
+the B0 GPU-standardized model's previously measured MAE was 0.14207 versus
+0.15674 on validation and 0.12826 versus 0.13284 on test. The native decode
+preserves those B0 predictions exactly on the full 93-row split. Those paired
+B0 scores are better than v16 on these examined subsets, though the new
+contract still requires future-capture confirmation.
+
+This is the strongest exact-output speed improvement in the recent work, but
+248 ms median remains 2.5x above target. The C++ source, compiled library,
+per-image comparison, and report are temporary under `/tmp/wave_heif_tiled_decode_bgr_ctx.cpp`,
+`/tmp/libwave_heif_tiled_bgr_ctx.so`, and
+`/tmp/wave_b0_native_heif_decode_e2e_v3/`. No production decoder or checkpoint
+was changed.
+
+### Strict candidate screen against canonical v16
+
+This screen compares each candidate's waviness MAE directly with canonical
+v16 on the same labeled photos. An optimization that preserves the output of a
+different experimental route does not pass on that basis alone. A point
+estimate within 1% is provisional evidence, not proof of preserved quality;
+for changed preprocessing or model contracts, the quality gate above still
+requires independent date-held-out evidence that rules out a material hit.
+Latency is complete warm raw-image-to-flushed-output time.
+
+| Candidate | MAE: candidate vs canonical v16 on matched photos | Total latency | Status |
+|---|---:|---:|---|
+| **Current pipeline: canonical v16** | **0.10855** on the 48-photo paired reference cohort | **~11,300 ms median** | Current reference and `.env` selection. |
+| MIGraphX FP32 for the complete canonical v16 path | 0.120066 vs 0.120065 on the same 51/58 successful photos (+0.0016%); same 7 failures, 49/51 final JPEGs and predictions exact | 4,969 ms median / 5,030 ms p95 vs PyTorch 10,058 / 10,092 ms; 0/58 below 100 ms | Passes the 1% paired-MAE screen and cuts total latency about 50%; experimental only, needs a separate long-lived engine process and has ~60 s engine startup. |
+| Date-held-out thumbnail YOLO26 + current v16 head | 0.13226 vs 0.12006 on the 51 shared successes (+10.2%); candidate 58/58 vs v16 51/58 | 35.26 ms median / 41.94 ms p95 / 46.88 ms max; v16 10,057.6 ms median | Fails MAE screen despite full coverage and sub-100-ms latency. The 12-date paired MAE interval is [-0.01408, 0.03416]. |
+| Thumbnail-domain YOLO26 + v18 head | 0.11821 vs 0.14349 on the 46-photo test split (−17.6%); on four date-disjoint photos from one day, 0.13984 vs 0.23457 (−40.4%) | 37.32 ms median / 40.04 ms p95 on 46; compiled-selector rerun 15.46 / 17.24 ms | Attractive but date-overlapping point estimates. The corresponding date-held-out student with current v16 head regressed 10.2%; this v18-head variant still needs direct clean-holdout evaluation. Do not adopt. |
+| Thumbnail YOLO26 + MSE-adapted v16 head | 0.11612 vs 0.13284 on 32 shared test photos (−12.6%); full test MAE 0.11829 | 16.33 ms median / 18.25 ms p95 with compiled crop selector | Point estimate passes; same repeatedly examined date-overlapping cohort and wide paired uncertainty. Experimental. |
+| SegFormer-B0 GPU-standardized route with exact native HEIF decode + nearest resize | 0.12826 vs 0.13284 on 32 shared test photos (−3.4%); validation 0.14207 vs 0.15674 on 32 shared photos (−9.4%) | 227.35 ms median / 245.61 ms p95 | Point estimates pass; above 100 ms and not independently confirmed. Experimental. |
+
+The prior version of this ledger incorrectly retained exact-output speed
+optimizations because their MAE matched an experimental route, without first
+checking that route against canonical v16. Those rows are removed from this
+quality-qualified list. For example, the full-resolution YOLO26 route's test
+MAE was 0.14470 versus canonical v16 0.13284 on 32 shared photos (+8.9%), even
+though its resize-only comparison preserved that route's own MAE. It fails the
+requested quality screen. Other experiments above that exceed the 1% v16 MAE
+regression, have incomplete coverage, or lack a matched quality comparison are
+also excluded. No candidate currently has enough independent evidence to
+replace v16 while guaranteeing no quality hit; keep v16 selected.
+
+#### OpenCV exact-nearest resize and combined decoder trial
+
+OpenCV `INTER_NEAREST_EXACT` matched Pillow byte-for-byte on a synthetic
+448-to-4032x3024 class-map probe. I first ran an invalid variant that forced
+Step 2's 224x224 image through a 448x448 logits resize; its outputs differed
+and those timings/MAEs are discarded. The corrected implementation follows the
+existing size rule at both stages. On the actual 93-photo B0 validation+test
+cohort, the resize-only A/B produced byte-identical Step 2 JPEGs and identical
+predictions on all 93. Combined MAE was 0.12995 in both arms. Median total
+raw-to-record latency was 270.15 ms versus 289.87 ms for Pillow resize; p95 was
+288.88 versus 305.43 ms. This isolates an exact OpenCV resize change using the
+same Pillow HEIF decoder on both arms.
+
+I then paired that exact resize with the previously verified native tiled HEIF
+decoder. Again all 93 model-input JPEGs and predictions matched exactly, with
+MAE 0.12995 in both arms. Complete raw-to-flushed-record latency was 227.35 ms
+median / 245.61 ms p95, versus 286.93 / 304.04 ms for the Pillow decoder and
+resize reference. Paired median saving was 59.74 ms. Peak RSS was 3.12 GiB and
+accelerator allocated/reserved memory was 0.428/1.322 GiB. This confirms a
+quality-preserving speed gain for the B0 experimental route, but does not
+establish an adopted v16 replacement and remains 2.27x above the 100 ms target.
+No repository decoder or checkpoint was changed. The 93-photo resize-only and
+combined runners/results are under `/tmp/wave_b0_nearest_resize_only_e2e_v2.py`,
+`/tmp/wave_b0_nearest_exact_resize_only_e2e_v2/`,
+`/tmp/wave_b0_exact_decode_and_resize_e2e_v1.py`, and
+`/tmp/wave_b0_exact_decode_and_resize_e2e_v1/`.
+
+The decoder worker sweep held the exact B0 preprocessing and single-threaded
+PyTorch/OpenCV settings fixed. Sixteen workers reduced median request latency
+by 8.13 ms versus eight workers (242.43 vs 250.88 ms) but increased median
+process CPU time by 29.86 ms (434.48 vs 404.63 ms). Both settings had identical
+outputs for all 93 samples. This is a measured throughput tradeoff rather than
+a universally better thread setting: 16 wins for single-request latency; 8
+uses less CPU. The canonical v16 route has a different profile: 35 SegFormer-B2
+tile forwards dominate its roughly 11-second request, and one versus 32
+PyTorch threads changed the warm median only from 10.79 to 11.22 seconds. CPU,
+shared-memory and thread tuning cannot substitute for reducing segmentation
+compute while retaining canonical quality. For accelerator tuning, AMD's ROCm
+workflow is to profile kernel utilization, bandwidth and occupancy, optimize
+the measured bottleneck, then re-profile; PyTorch likewise cautions against
+unnecessary CPU/GPU synchronization and transfers ([PyTorch tuning guide](https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html),
+[ROCm performance guidelines](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/performance_guidelines.html)).
+
+### Date-grouped out-of-fold calibration for the sub-100-ms YOLO26s route
+
+The full-resolution YOLO26s + teacher-distilled regressor is the only recent
+route below 100 ms without reducing source resolution, but its paired MAE was
+0.12081 versus 0.10855 for v16 on 48 shared photos. I tested whether score
+calibration could correct systematic bias without changing images or adding
+meaningful inference time. To avoid fitting calibration on the outer dates, I
+generated predictions from five capture-date-grouped out-of-fold regressor fits
+using 157 non-outer-date training photos from 39 dates. Each fold held out about
+31–32 photos across dates, trained the same partial EfficientNet fine-tune for
+the previously training-selected 14 epochs, and used the label plus v16
+teacher-score loss where teacher targets existed. Calibration was fitted only
+on OOF predictions; the 58 outer-date photos were not used to estimate it.
+
+Ordinary least-squares affine calibration produced slope 0.9646 and intercept
+0.0123. OOF MAE changed from 0.14808 to 0.14879. On the outer dates, raw MAE
+was 0.12539 and affine-calibrated MAE was 0.12593; on the 48 paired photos the
+figures were 0.12081 and 0.12177. The affine correction worsened both point
+estimates and is rejected. A one-parameter median-residual shift (+0.00585,
+estimated from the same OOF predictions) lowered paired candidate MAE slightly
+to 0.12037, but it remained above v16's 0.10855; candidate-minus-v16 MAE was
++0.01181, with an 11-date-cluster bootstrap 95% interval of [-0.01421,
++0.03715]. This does not establish quality preservation. Applying either
+correction is a pair of scalar operations (<0.01 ms estimated), so the route
+would remain about 64 ms median, but speed does not compensate for the quality
+gap. The outer dates have already been reviewed, so this is exploratory
+evidence, not an independent final test. No checkpoint or production
+configuration changed. OOF predictions, paired outer results and summary are
+in `/tmp/wave_yolo26s_oof_affine_calibration_v2/`; the runner is
+`/tmp/wave_yolo26s_oof_affine_calibration_v2.py`.
+
+### Teacher-loss weight sweep for the fast full-resolution regressor
+
+Because the score calibration did not recover the v16 MAE, I next varied the
+training-time v16 teacher-loss weight while keeping the full-resolution YOLO26s
+input contract and inference graph fixed. Six weights (0, 0.25, 0.5, 1, 2,
+and 4) were selected on the same 39-photo, 13-date inner training validation
+set; the excluded 58-photo outer holdout was not used for selection. The 0.5
+weight gave inner MAE 0.08987 at epoch 11, essentially tied with weight 0
+(0.08988 at epoch 12); weights 1, 2 and 4 scored 0.09061, 0.09957 and 0.10096.
+The small gap between weights 0 and 0.5 is not meaningful evidence that
+distillation helps, especially because the trial used different random seeds
+for each weight.
+
+I refit the training-selected 0.5/11-epoch setting on all 157 non-outer-date
+photos and evaluated the resulting checkpoint on the 58 excluded outer-date
+photos. All 58 completed. Candidate MAE was 0.12541 on all 58 and 0.12197 on
+the 48 photos with archived v16 inputs; v16 MAE on those same photos was
+0.10855. Candidate-minus-v16 MAE was +0.01342, with 24 per-photo errors worse
+and 24 better; the 11-date-cluster bootstrap 95% interval was [-0.01285,
++0.03794]. This refit did not improve on the earlier 0.5-weight candidate
+(paired MAE 0.12081), and neither version establishes no quality hit.
+
+Complete raw-to-flushed-record median/p95/max was 64.74/73.37/80.67 ms, all
+58 requests under 100 ms. Median process CPU time was 242.78 ms, peak RSS
+2.57 GiB, and accelerator allocation/reservation 0.343/0.383 GiB. The
+regressor architecture and inference work are unchanged, so the route remains
+fast while the quality gate still fails. Do not adopt. The corrected outer
+evaluation used the full raw-image path and a separate canonical v16 model for
+the paired baseline. The first sweep runner's training-only selection is
+usable, but its outer-data list was empty because it looked for outer inputs in
+the training cache; its outer metrics are invalid and discarded. Correct
+outer records are under `/tmp/wave_yolo26s_distill_weight_sweep_outer_eval_v1/`
+and the runner is `/tmp/wave_yolo26s_distill_weight_sweep_outer_eval_v1.py`;
+selection logs/checkpoint are under `/tmp/wave_yolo26s_distill_weight_sweep_v1/`.
+
+### Removing the class-map copy after OpenCV resize
+
+The exact OpenCV resize returns a newly allocated contiguous array. I removed
+the subsequent full-resolution `resized.copy()` and wrapped that buffer
+directly with `torch.from_numpy`, which shares its storage. This avoids one
+12.2 MB allocation/copy per 4032 x 3024 class map. On the same combined B0
+decoder+resize route, all 93 model-input JPEGs and predictions remained
+identical; aggregate MAE stayed 0.12995. Median request latency changed from
+228.40 to 226.52 ms, but the paired median saving was only 0.27 ms; p95 was
+243.44 vs 243.26 ms. Median process CPU time changed from 672.63 to 670.86 ms.
+Peak RSS was 2.64 GiB for the combined process, so this run cannot establish a
+separate per-arm RSS reduction. This is safe buffer sharing but too small a
+latency gain to matter to the 100 ms gap. I did not integrate it into the
+production pipeline; the prototype is
+`/tmp/wave_b0_resize_zero_copy_e2e_v1.py` and its records are in
+`/tmp/wave_b0_resize_zero_copy_e2e_v1/`.
+
+### Blend the fast regressor with v16 predictions on the fast inputs
+
+I tested whether a second v16 regressor pass on the already-generated 224x224
+YOLO26s candidate input could recover quality. The blend weight was selected
+only from the 157 date-grouped OOF training predictions (39 dates): 0.75 fast
+candidate and 0.25 v16-on-fast-input. OOF MAE improved from 0.14808 for the
+candidate alone to 0.14658. On the 48-photo matched outer cohort, however,
+blend MAE was 0.12080, essentially unchanged from candidate MAE 0.12081 and
+still above canonical v16 MAE 0.10855. The paired blend-minus-v16 MAE gap was
++0.01225; the capture-date-cluster bootstrap 95% interval was [-0.00808,
++0.03145]. This does not establish quality preservation. The extra v16
+forward's end-to-end latency was not measured, so this variant is rejected
+without a latency claim. Predictions and summary are in
+`/tmp/wave_yolo26s_oof_fasthead_blend_v1/`; runner:
+`/tmp/wave_yolo26s_oof_fasthead_blend_v1.py`.
+
+### 1024-pixel inference for the full-resolution YOLO26s student
+
+To test whether finer student masks would improve the fast full-resolution route,
+I kept the trained YOLO26s checkpoint, raw full-resolution decode, `reducing_gap=3`
+standardization, Step 2, v16 regression checkpoint, and all 58 date-holdout
+photos fixed, and changed only inference `imgsz` from 640 to 1024. This is an
+inference-size override; the model was trained at 640. Ultralytics documents
+`imgsz` as the inference letterbox target and permits overriding it at
+prediction time ([predict arguments](https://docs.ultralytics.com/modes/predict)).
+
+The 1024 route completed 57/58 photos; one failed Step 2 crop selection. On the
+48-photo matched cohort its MAE was 0.13027 versus 0.12624 for the 640 route and
+0.10855 for canonical v16. Candidate-minus-v16 MAE was +0.02171, with an
+11-date-cluster 95% interval of [-0.01766, +0.04871]. The 1024 inference did
+not improve paired quality, and coverage fell from 58/58 to 57/58.
+
+For the 57 successful requests, complete warm raw-to-flushed-record latency was
+71.34 ms median / 91.72 ms p95; 55/57 were below 100 ms. The 857.21 ms maximum
+was one outlier (the third request); median process CPU was 259.48 ms, peak RSS
+2.60 GiB, and accelerator allocated/reserved memory 0.334/0.420 GiB. The
+640-pixel reference on this route was 64.6 ms median / 75.4 ms p95 with 58/58
+successes. Higher inference resolution therefore costs latency and coverage
+without reducing the MAE gap. Reject 1024; no production setting changed.
+Runner and complete per-photo results are under
+`/tmp/wave_yolo26s_fullres_dateholdout_v3_gap3_1024_eval_v1.py` and
+`/tmp/wave_yolo26s_fullres_dateholdout_v3_gap3_1024_eval_v1/`.
+
+### 512-pixel inference for the full-resolution YOLO26s student
+
+I also tested a lower inference size on the same fixed 640-trained checkpoint
+and 58-photo date holdout, changing only `imgsz` to 512. The route completed
+57/58; one photo failed Step 1 water-area selection. On the 48-photo matched
+cohort, MAE was 0.13752 versus 0.12624 at 640 and 0.10855 for v16. The
+candidate-minus-v16 gap was +0.02896 (11-date-cluster 95% interval
+[-0.00245, +0.04804]); 32 paired errors worsened and 16 improved.
+
+Complete warm raw-to-flushed-record latency was 62.14 ms median / 77.93 ms p95
+for 57 successful requests; 56/57 were under 100 ms. Median CPU time was
+239.82 ms, peak RSS 2.63 GiB and accelerator allocated/reserved memory
+0.327/0.352 GiB. Compared with the matching 640-pixel v3 reference (63.95 ms median / 76.27 ms
+p95, 58/58 success), lowering inference resolution made latency 1.82 ms faster
+at the median while worsening paired MAE by 0.01128 and losing one successful
+input. Reject 512. Runner and records are under
+`/tmp/wave_yolo26s_fullres_dateholdout_v3_gap3_512_eval_v1.py` and
+`/tmp/wave_yolo26s_fullres_dateholdout_v3_gap3_512_eval_v1/`.
+
+### Select the YOLO26s student epoch by downstream waviness MAE
+
+The earlier student selected its checkpoint by validation water-mask mIoU. I
+ran a date-grouped selection experiment to align checkpoint choice with the
+actual task: train the same YOLO26s ADE20K student for 30 epochs on 136
+non-outer-date images, save every epoch, then score each epoch through the full
+640-pixel raw-image preprocessing route and frozen v16 regressor on 23 photos
+from five separate inner validation dates. The outer 58 photos were excluded
+from training and epoch selection. This was an independent fresh training run;
+I verified that the saved epoch weights differ and evaluated each checkpoint
+with a fresh model instance. The minimum complete-validation MAE was epoch 26:
+0.10949, versus 0.11208 for the existing mask-mIoU-selected checkpoint on the
+same 23 photos. This is a small inner-set gain, not an outer quality claim.
+
+I refit the selected 26-epoch schedule on all 159 non-outer-date teacher-mask
+images and evaluated it on the 58 outer photos. The route completed 55/58; three
+failed Step 2 crop selection. On the 55 successful rows its MAE was 0.14284,
+versus 0.12839 for the earlier mIoU-selected student on those same 55 rows.
+On the 47 rows paired with archived v16 inputs, candidate MAE was 0.13690
+versus 0.10284 for v16: a +0.03405 gap, with an 11-date-cluster 95% interval
+[+0.00934, +0.04954]. The wave-MAE selection did not transfer across dates;
+this refit is worse than the previous student and clearly fails the quality
+and coverage requirements.
+
+Warm complete raw-to-flushed-record latency was 62.97 ms median / 76.92 ms
+p95; all 55 successful requests were under 100 ms. The mIoU-selected student
+measured 64.26 ms median / 76.39 ms p95 on those same 55 successful photos,
+so the refit is about 1.3 ms faster at the median while substantially
+worsening MAE and losing three requests. No model or pipeline setting changed.
+The 58 outer dates have been examined in earlier research, so these figures are
+exploratory rather than an untouched final test. Training, per-epoch selection
+records, refit checkpoint, and outer evaluation are under
+`/tmp/wave_yolo26s_downstream_mae_select_v1/`; runner scripts are
+`/tmp/wave_yolo26s_downstream_mae_select_train_v1.py`,
+`/tmp/wave_yolo26s_downstream_mae_select_eval_v2.py`,
+`/tmp/wave_yolo26s_downstream_mae_select_refit_v1.py`, and
+`/tmp/wave_yolo26s_downstream_mae_select_outer_eval_v1.py`.
+
+### YOLO26m semantic student, selected on downstream waviness MAE
+
+I tested whether a larger semantic student could improve the mask and final
+score without exceeding the request budget. Ultralytics' ADE20K table lists
+YOLO26m-sem at 47.4 mIoU and 4.7 ms model time versus 45.6 and 4.2 ms for
+YOLO26s-sem on an RTX 3090; these published values are not predictions for
+this sea-photo task or the Radeon host ([semantic model table](https://docs.ultralytics.com/tasks/semantic)). As a local preflight, the unadapted ADE20K models were compared with canonical binary teacher masks on 23 inner-date photos. Mean mask IoU was 0.7500 for s and 0.7559 for m. For these 150-class models, BGR input to full source-sized semantic mask output took 91.58 ms median / 94.99 ms p95 for s and 98.01 / 108.59 ms for m; raw decode and all remaining pipeline stages were not included. The slight mask gain and high output cost did not alone justify this model size.
+
+I nevertheless fine-tuned YOLO26m from ADE20K on the same 136 training images, saved each of 30 epochs, and selected by complete candidate-path waviness MAE on the same 23 photos across five inner validation dates. The best complete epoch was 12, with MAE 0.10090 and 23/23 successes; YOLO26s' best score was 0.10949 on the same inner photos. I refit the selected 12-epoch schedule on all 159 non-outer teacher-mask images and evaluated the 58 outer photos.
+
+The refit completed 56/58. On those 56 successful photos its MAE was 0.15518, versus 0.12815 for the existing YOLO26s refit on the exact same successful cohort. Against archived canonical v16 on 47 paired successes, m MAE was 0.14323 versus 0.10327 for v16, a +0.03996 gap; the 11-date-cluster 95% interval was [+0.00421, +0.06240]. The model was worse than v16 on 31 photos and better on 16. The apparent inner-validation gain did not transfer and this larger student is rejected.
+
+Warm complete raw-to-flushed-record latency was 69.26 ms median / 83.07 ms p95, with 56/56 successful requests under 100 ms. The matching YOLO26s reference measured 64.26 / 76.39 ms on the same successful photos. Median CPU time was 248.32 ms, peak RSS 2.60 GiB, and accelerator allocated/reserved memory 0.358/0.416 GiB. No pipeline or checkpoint changed. The outer dates have been examined in prior experiments and are not an untouched final test. Training and evaluation artifacts are under `/tmp/wave_yolo26m_downstream_mae_select_v1/`; preflight artifacts are under `/tmp/wave_yolo26m_sem_preflight_v1/`. Runners: `/tmp/wave_yolo26m_downstream_mae_select_train_v1.py`, `/tmp/wave_yolo26m_downstream_mae_select_eval_v1.py`, `/tmp/wave_yolo26m_downstream_mae_select_refit_v1.py`, and `/tmp/wave_yolo26m_downstream_mae_select_outer_eval_v1.py`.
+
+### Five-fold date-grouped YOLO26m epoch check
+
+The prior YOLO26m refit scored well on one small inner split (MAE 0.10090
+on 23 photos from five dates) but regressed on its outer evaluation. To check
+whether the epoch choice was split-specific, I trained five YOLO26m folds on
+127–128 photos each and held out all photos from 39 non-outer capture dates,
+then evaluated each of 12 checkpoints per fold through the complete candidate
+preprocessing and frozen-v16 regression path. Training took 875.7 seconds in
+total; evaluation took about 35 seconds per fold. This is grouped cross-
+validation inside the existing development dates, not a pristine test set.
+
+Pooled out-of-fold results are:
+
+| Epoch | Successful photos | Pooled MAE | Coverage |
+|---:|---:|---:|---:|
+| 1 | 159/159 | 0.19392 | 100% |
+| 2 | 156/159 | 0.17223 | 98.1% |
+| 3 | 158/159 | 0.15516 | 99.4% |
+| 4 | 159/159 | 0.16716 | 100% |
+| 5 | 158/159 | 0.16213 | 99.4% |
+| 6 | 158/159 | 0.15131 | 99.4% |
+| 7 | 159/159 | 0.17880 | 100% |
+| 8 | 159/159 | 0.16095 | 100% |
+| 9 | 159/159 | 0.15558 | 100% |
+| 10 | 159/159 | 0.15301 | 100% |
+| 11 | 159/159 | 0.15405 | 100% |
+| 12 | 159/159 | 0.14749 | 100% |
+
+Epoch 12 has the lowest pooled MAE among complete-coverage checkpoints, but
+its MAE is still materially worse than the canonical v16 MAE 0.10855 previously
+measured on a separate 48-photo paired cohort. Those are different cohorts, so
+the difference is indicative rather than a matched regression estimate. The
+prior YOLO26m outer result also had MAE 0.14323 versus v16 0.10327 on 47 paired
+photos (+38.7%), with 56/58 complete requests. The pooled date-grouped result
+does not support refitting or deployment. The previously measured full raw-to-
+output latency for the YOLO26m route was 69.26 ms median / 83.07 ms p95; no new
+latency measurement was made in this epoch-selection run. The candidate is
+rejected by the requested 1% MAE regression screen. No repository model or
+runtime configuration changed.
+
+Fold split, checkpoints, per-epoch predictions, failures, and pooled results
+are under `/tmp/wave_yolo26m_date_oof_v1/`; training and evaluation runners are
+`/tmp/wave_yolo26m_date_oof_train_v1.py` and
+`/tmp/wave_yolo26m_date_oof_eval_v1.py`.
+
+### NumPy tile views instead of copying PIL crops on the v16 route
+
+I tested whether `SegformerImageProcessor` could consume NumPy views into the
+already decoded RGB image instead of allocating a new PIL crop for each of the
+35 Step 1 tiles. For all 35 tiles of `IMG_7238.HEIC`, the processor's output
+tensors were bit-identical. In an alternating six-repeat processor-only loop,
+median preparation time fell from 205.5 ms to 189.7 ms (15.8 ms saved before
+GPU transfer and model execution).
+
+I then alternated four full raw-to-output requests per arm in the same process,
+using the official v16 models and writing prediction records to `/tmp`. The
+final Step 2 JPEG SHA-256 and v16 prediction matched exactly on every request.
+Median total latency was 10,206.9 ms for PIL crops and 10,225.8 ms for NumPy
+views; the 18.9 ms difference is a small regression and does not show an
+end-to-end gain. This is one source photo, so it does not produce a meaningful
+MAE estimate; exact output equality on this photo gives an absolute error of
+0.14870 (label 0.50), but that is not an MAE cohort. I did not integrate the
+view-based path. The measured bottleneck remains tile-model compute, which is
+about 9 seconds of the roughly 10-second request. No model, CPU thread setting,
+or memory policy changed.
+
+Tensor checks and the full request records are under
+`/tmp/wave_v16_tile_view_bench.py`,
+`/tmp/wave_v16_tile_view_full_bench.py`,
+`/tmp/wave_v16_tile_view_alt_ab.py`, and
+`/tmp/wave_v16_tile_view_alt_ab.json`.
+
+### Lower-half-only segmentation screen (rejected on quality)
+
+The project guidance says waviness is usually most visible in the lower part of
+the sea, so I screened a bottom-half Step 1 region on one photo from each of 11
+capture dates. The model and all downstream v16 steps were unchanged; omitted
+pixels were assigned non-water class 0 and the candidate mask was restored to
+the original image dimensions. This reduced Step 1 from 35 tiles to 21.
+
+Ten of 11 photos completed; one failed preprocessing. On the 10 shared
+successes, candidate MAE was 0.13636 versus 0.09921 for canonical v16 on those
+same photos (+0.03715 absolute, +37.4%). Complete raw-to-prediction latency,
+including preview and prediction-record writes, was 6,031.5 ms median / 6,491.6
+ms p95 across the 10 successes. This is a large latency reduction but clearly
+fails the quality and coverage gates, so the crop is rejected. The MAE is
+success-only and may be optimistic because one photo failed. No code or profile
+changed. Per-photo results are in `/tmp/wave_bottom_half_screen_with_output.json`;
+the temporary runner is `/tmp/wave_bottom_half_screen_with_output.py`.
+
+### Bottom-80%-only segmentation screen (rejected by the 1% MAE gate)
+
+I repeated the lower-region check while excluding only the top 20% of each
+source photo, using one image from each of the same 11 capture dates. The full
+v16 model and downstream pipeline stayed fixed; the segmentation grid used
+28–30 tiles for these inputs, compared with 35 tiles for the standard
+4032x3024 image. All 11 requests completed.
+
+On these 11 photos, candidate MAE was 0.09714 versus canonical v16 MAE 0.09055
+on the same rows, a +0.00658 absolute / +7.3% regression. Complete
+raw-to-prediction latency, including preview and prediction-record writes, was
+8,594.3 ms median / 9,193.7 ms p95. This gentler crop preserves coverage and
+saves some segmentation work, but still exceeds the requested 1% quality limit
+and remains far from 100 ms. It is rejected without a larger run. Results are
+in `/tmp/wave_bottom_80pct_screen_with_output.json`; runner:
+`/tmp/wave_bottom_80pct_screen.py`.
+
+### Reuse the canonical Step 1 water mask for Step 2 (rejected by the 1% MAE gate)
+
+I screened the existing projected-mask path with the canonical v16 B2
+preprocessor and regressor on one photo from each of the same 11 capture dates.
+This removes Step 2's second SegFormer call by projecting the first raw-image
+mask into Step 1's standardized image coordinates. All 11 requests completed.
+The projected mask reproduced the archived v16 prediction exactly on only 4/11
+photos; median absolute prediction shift was 0.0100 and maximum shift was
+0.0453. Candidate MAE was 0.09616 versus canonical v16 MAE 0.09055 on the same
+11 photos (+0.00560, +6.2%), beyond the permitted 1% regression.
+
+The Step 2 stage fell from roughly 0.29 s to 0.02–0.04 s on these inputs, but
+complete raw-to-prediction latency for the projected route was 9,915.1 ms
+median / 10,400.4 ms p95. That stage saving cannot approach the 100 ms target,
+and the changed Step 2 crops fail the quality gate. Reject; no runtime or
+checkpoint changed. Per-photo outputs and complete prediction records are in
+`/tmp/wave_projected_mask_reuse_screen.json` and
+`/tmp/wave_projected_mask_reuse_screen/`; runner:
+`/tmp/wave_projected_mask_reuse_screen.py`.
+
+### Ryzen AI NPU availability and runtime check
+
+I rechecked the host's NPU because the canonical B2 tile forwards, not CPU
+copying, dominate current latency. `/dev/accel/accel0` is present as
+`RyzenAI-npu5`; `xrt-smi validate` passed its generic GEMM, latency, and
+throughput checks, reporting 51.0 TOPS and 72 microseconds average latency for
+its built-in latency test. Those figures are hardware diagnostics, not model
+inference measurements, and do not establish that this pipeline can run under
+100 ms.
+
+No Ryzen AI ONNX execution provider or model compiler is installed in the
+project environment. The host has XRT 2.21.75, while AMD's current Linux guide
+uses XRT 2.25.37 plus the matching XDNA plugin and a separately downloaded
+Ryzen AI 1.8 package; it specifies Python 3.12 for the runtime (available on
+this host). AMD documents Linux NPU flows for CNN INT8/BF16 and selected BF16
+encoder models, but does not document SegFormer as a supported Linux NPU
+example. The official runtime download redirects to AMD account access here,
+so I have not installed or changed the system runtime. The official RyzenAI-SW
+1.8.0 GitHub release has no runtime assets; its Linux guide directs users to
+the gated AMD download. The public XDNA driver source supports Ubuntu >=22.04
+and kernel >=6.10, which matches this host, but that alone is not the model
+compiler/execution provider. Local package inventory confirms the same gap:
+XRT libraries and `xrt-smi` are installed, while the project virtual environment
+has neither ONNX Runtime nor a VitisAI execution provider. A runtime version
+change would also need a separately controlled compatibility evaluation; I
+did not replace the working host XRT/driver stack.
+
+The NPU is therefore a credible future experiment for a CNN water-mask student,
+but no speed or MAE claim is available yet. Any NPU run must measure complete
+raw-to-record latency and compare MAE against the current v16 checkpoint; the
+built-in NPU TOPS result must not be used as a substitute. Sources:
+[AMD Ryzen AI Linux installation and runtime guide](https://github.com/amd/ryzen-ai-documentation/blob/main/docs/linux.rst),
+[AMD XDNA Linux driver requirements](https://github.com/amd/xdna-driver).
+
+### Date-disjoint check of the sub-100-ms thumbnail v18 route
+
+I audited the existing 46-photo thumbnail-domain v18 test records against EXIF
+capture dates and the training/selection data before using them as quality
+evidence. The full test set was not date-independent: 26 of its 27 dates
+appeared in v18 regression or thumbnail-student train/validation data. However,
+four test photos from 2026-08-24 formed one date absent from the v16 training
+split, the v18 regression train/validation rows, and the thumbnail student
+train/validation rows.
+
+On those four date-disjoint photos, the thumbnail YOLO26 + v18 route had MAE
+0.13984 and RMSE 0.18036; canonical v16 on the same photos had MAE 0.23457 and
+RMSE 0.28342. The candidate reduced absolute error on 3/4 photos. The Python
+crop selector run measured 31.21 ms median / 38.55 ms p95. The later compiled
+selector rerun produced the same four predictions exactly and measured 15.63
+ms median / 16.65 ms p95 / 16.71 ms maximum; all four requests were below 100
+ms. Across the full, date-overlapping 46-photo test set, the
+route had MAE 0.11821 vs v16 0.14349 and latency 37.32 ms median / 40.04 ms p95;
+that aggregate is exploratory because most capture dates overlap training.
+
+This is positive but very limited evidence: four photos come from one capture
+date and cannot establish performance across days, spots, or sea conditions.
+The route is the strongest current speed candidate, but it is not yet cleared
+as a quality-preserving replacement. Keep v16 as the production selection and
+repeat this paired MAE/latency gate as new labeled capture dates arrive. Exact
+per-photo records are in
+`/tmp/wave_yolo26_student_thumbnail_teacher_heif_test_eval/results.csv` and
+`/tmp/wave_canonical_v16_full_split_comparison_detailed.json`; the date audit
+used the v16/v18 split manifests and the thumbnail student train/validation
+image lists.
+
+### Compiled crop selector on the thumbnail v18 route
+
+I reran the 46-photo test split through both the Python Step 2 crop selector
+and its compiled C++ implementation, with the same thumbnail-domain YOLO26
+student and v18 regression checkpoint. All 46 crop boxes and all 46 final
+predictions were identical. Both arms therefore had MAE 0.11821; this is
+unchanged from the Python reference and remains 17.6% lower than canonical v16
+(MAE 0.14349) on the same date-overlapping test split.
+
+Complete warm raw-to-flushed-output latency was 37.52 ms median / 39.75 ms p95
+with Python crop selection and 15.46 ms / 17.24 ms with the compiled selector,
+a 58.8% lower median. All 46 requests in each arm completed below 100 ms. This
+is the strongest measured end-to-end result so far, with exact output
+preservation. Median process CPU time fell from 38.04 to 15.66 ms; peak RSS
+remained 2.31 GiB and PyTorch accelerator allocated/reserved memory remained
+0.119/0.152 GiB. The quality caveat remains: most test capture dates overlap
+training, and the separate date-disjoint evidence is only four photos from one
+day. On those four photos, the compiled route retained MAE 0.13984 versus
+canonical v16's 0.23457 and completed in 15.63 ms median / 16.65 ms p95; this
+is encouraging but too small a sample to establish quality preservation. This
+optimization has not been integrated into the production pipeline;
+v16 remains selected. Per-photo compiled-arm results are in
+`/tmp/wave_thumbnail_cppcrop_test_eval/results.csv`; Python-arm results are in
+`/tmp/wave_yolo26_student_thumbnail_teacher_heif_test_eval/results.csv`.
+
+### In-place RGB decode: exact-output end-to-end check (2026-10-28)
+
+To validate the current `load_rgb_image()` copy reduction against the prior
+`ImageOps.exif_transpose(...).convert("RGB")` path, I compared both decoders
+on all 58 raw images in the date-grouped holdout. HEIF decode used 16 workers;
+JPEG inputs remained on the same Pillow path. All 58 oriented RGB pixel buffers
+were byte-identical. In separate processes, decode median/p95 fell from
+68.76/82.82 ms to 57.11/63.90 ms. Median process CPU time fell from
+189.31 to 175.52 ms per image, and peak process RSS fell from 720,764 to
+679,728 KiB (about 40 MiB). This supports a modest decode and memory benefit;
+it does not reduce the dominant segmentation work.
+
+I then ran the complete warmed canonical v16 raw-to-output path on the first
+six same-date-holdout rows, alternating decoder order by image. Each timed
+request included both 35-tile Step 1 segmentation and Step 2, model inference,
+model-input JPEG persistence, and a flushed/fsynced prediction record. All six
+final Step 2 JPEGs and waviness predictions matched exactly. MAE was 0.13558
+with either decoder on these six photos; this small subset is a parity check,
+not a new quality estimate. Median total latency was 10,038.3 ms with the old
+decoder and 10,023.9 ms with in-place decode; paired median saving was 13.1 ms
+(about 0.13%). The six-request p95s were 10,067.9 and 10,045.0 ms; neither arm
+had a request below 100 ms. This is a measured exact-output improvement, but
+far too small to close the target gap. Full per-image records and runner are in
+`/tmp/wave_inplace_decode_e2e_ab_v1/` and `/tmp/wave_inplace_decode_e2e_ab.py`;
+the 58-image isolated decode records are in
+`/tmp/wave_inplace_decode_bench_old.json` and
+`/tmp/wave_inplace_decode_bench_new.json`.
+
+### CPU tile prefetch while SegFormer runs (rejected; 2026-10-28)
+
+I prototyped one-tile-ahead CPU crop/processor work in a worker thread while
+keeping the canonical FP32 model forward, all tile coordinates, interpolation,
+logit accumulation order, and Step 1/Step 2 JPEG contracts unchanged. On the
+same first six date-holdout photos, Step 2 JPEGs and final predictions were
+identical; both arms had MAE 0.13558. However, complete warm raw-to-fsynced-
+output median latency increased from 9,909.9 ms to 9,930.4 ms, a 20.5 ms paired
+median slowdown. The six-photo p95 was 9,938.1 vs 9,951.9 ms, and none of the
+requests met 100 ms. Median process CPU time rose from 10,205 to 10,752 ms.
+Peak RSS for the mixed run was 2.93 GiB and accelerator allocation/reservation
+was 8.31/8.62 GiB. Threaded image processing did not overlap usefully on this
+workload; I did not integrate it. The first prototype attempt omitted
+`inference_mode` and retained autograd graphs; that run's OOM is discarded.
+The corrected run and records are under
+`/tmp/wave_v16_tile_prefetch_e2e_ab_v1.py` and
+`/tmp/wave_v16_tile_prefetch_e2e_ab_v1/`.
+
+### Fused SDPA for canonical FP32 SegFormer attention (rejected; early stop)
+
+PyTorch 2.14 on ROCm 7.16 reports its memory-efficient scaled-dot-product
+attention backend as available for the canonical FP32 attention tensor shape.
+I patched SegFormer attention in a temporary runner to use
+`scaled_dot_product_attention`, forced that FP32 backend, and left weights,
+inputs, tiling, precision, and downstream processing unchanged. On the first
+two matched raw photos, both final JPEGs and waviness predictions were exactly
+the same as baseline; the paired two-photo MAE was 0.09145 in both arms. The
+first two total raw-to-flushed-output latencies were 10,106.8 and 10,065.2 ms
+for baseline, versus 10,293.6 and 10,241.8 ms with fused SDPA. That is a
+181.7 ms median slowdown on these two pairs. I stopped the run because the
+candidate was consistently slower, so this is an early rejection rather than a
+full cohort result; no production source or checkpoint changed. An exact
+attention output does not ensure a speed gain: PyTorch dispatches among fused
+and math kernels according to supported tensor shapes and backend, so the
+measured device result controls. PyTorch reference:
+[scaled-dot-product attention](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html).
+The runner is `/tmp/wave_v16_sdpa_e2e_ab_v1.py`; partial metrics are in
+`/tmp/wave_v16_sdpa_e2e_ab_v1/partial_results.json`, with exact Step 2 JPEGs
+and records under `/tmp/wave_v16_sdpa_e2e_ab_v1/`.
+
+### MIGraphX FP32 for the full canonical v16 request (2026-10-28)
+
+The prior MIGraphX check covered one SegFormer tile. I now ran the complete
+baseline-v16 raw-to-output request through a persistent ONNX Runtime 1.29 /
+MIGraphX 2.18 FP32 server, with the unchanged PyTorch v16 regressor. All 768 x
+768 Step 1 and Step 2 segmenter calls used MIGraphX; Pillow decode, processor
+inputs, all 35 overlapping Step 1 tiles, bilinear logit interpolation and
+accumulation order, water-mask extraction, crop selection, JPEG round trips,
+regression, preview persistence, and flushed/fsynced prediction records stayed
+on the canonical path. Every tile's input and output crossed a loopback socket
+because the installed ROCm PyTorch and MIGraphX runtimes cannot safely share a
+process. The measured request includes that bridge. MIGraphX session creation
+and graph compilation took 60.4 seconds at service startup and are reported
+separately from warmed raw-to-output latency.
+
+On the complete 58-photo, 12-capture-day cohort, both routes succeeded on the
+same 51 photos and failed the same seven Step 2 crops. On the 51 paired
+successes, canonical PyTorch MAE was 0.12006452 and MIGraphX MAE was 0.12006648:
+a +0.00000196 absolute delta, or +0.0016%. The 12-day cluster bootstrap 95%
+interval for the MAE delta was [-0.00000494, +0.00000862]. Forty-nine of 51
+final model-input JPEGs and predictions were byte/value identical. The two
+remaining predictions shifted by +0.0000724 (lower absolute error) and
+-0.0001723 (higher absolute error); their JPEGs differed at 196 and 417 RGB
+pixels, with maximum channel difference 5. The paired MAE change is far below
+the 1% screen, and the failure count is unchanged.
+
+Complete warm raw-to-flushed-output median latency was 10,057.6 ms for
+PyTorch and 4,969.3 ms for MIGraphX, a 2.02x speedup and 5,075.5 ms paired
+median saving. The p95 was 10,092.3 vs 5,030.3 ms; no request in either route
+was below 100 ms. MIGraphX's model-only median was 91.6 ms per 768 tile across
+2,088 measured calls. Client process median CPU time was 1,725.9 ms; server
+process CPU and memory were not captured, so client CPU and memory do not
+represent total service resource use. Client peak RSS was 2.79 GiB and
+PyTorch accelerator allocation/reservation was 7.62/7.67 GiB, excluding the
+MIGraphX server.
+
+This is the strongest measured full-resolution, quality-preserving speedup so
+far, but it remains about 50x slower than the 100 ms target and has a costly
+60-second engine startup plus a separate-process bridge. I have not integrated
+or selected it in production. Full per-image records and final JPEGs are under
+`/tmp/wave_v16_migraphx_outer58_v2/`; the one-tile ONNX model is
+`/tmp/wave-segformer-768.onnx`, the server is `/tmp/migraphx_server_768.py`,
+and the full evaluator is `/tmp/wave_v16_migraphx_outer58_v1.py`.
+
+### Static batch-2 MIGraphX tile inference (rejected; 2026-10-28)
+
+I exported a fixed batch-2 FP32 SegFormer graph and compared two real 768 x 768
+tiles against the existing PyTorch checkpoint on the same Radeon. The
+upsampled class masks were identical for both tiles; maximum absolute logit
+difference was 8.01e-5. MIGraphX took 188.1 ms per two-tile batch (94.0 ms per
+tile), slightly slower per tile than the 91.6 ms batch-1 model-only median.
+Including the same-process-boundary loopback input/output transfer, the pair
+took 262.9 ms median. PyTorch batch-2 took 1,778.4 ms per pair on this run.
+Peak PyTorch accelerator allocation/reservation was 3.05/3.85 GiB; the
+MIGraphX server's memory is separate and was not measured. The fixed-batch
+engine took 126.8 seconds to initialize and compile. The two-tile output
+parity probe has no ground-truth waviness predictions, so MAE is unknown; no
+full pipeline or quality claim follows from this microbenchmark. Batch-2 does
+not improve tile throughput and is rejected. Export, server, and probe are
+`/tmp/wave_export_segformer_768_batch2.py`,
+`/tmp/wave-segformer-768-batch2.onnx`,
+`/tmp/migraphx_server_768_batch2.py`, and
+`/tmp/wave_migraphx_batch2_probe.py`.
+
+### Send MIGraphX tile inputs directly from the processor (2026-10-28)
+
+The MIGraphX bridge currently receives each tile after it has been copied from
+the processor's CPU tensor to the PyTorch GPU and then back to CPU for socket
+serialization. I measured 43 warmed requests of a representative 768 x 768
+tile through a persistent MIGraphX server. Median socket round-trip was
+106.26 ms, while the server-reported model median was 90.88 ms; the difference
+was 15.38 ms per tile for host serialization, loopback transfer, and response
+handling. The payload was 7.08 MB in and 22.12 MB of logits out. This identifies
+avoidable work, but not all of that difference is attributable to tensor
+copies.
+
+I then ran the full 58-photo, 12-date cohort with processor tensors sent
+directly from CPU to the MIGraphX server, retaining canonical FP32 tile inputs,
+tile order, bilinear interpolation, GPU logit accumulation, crop selection,
+regression, and output writes. Both the original bridge and direct-host-input
+route succeeded on the same 51 photos and failed the same seven crops. On the
+paired successes, canonical v16 MAE was 0.12006452; original MIGraphX MAE was
+0.12006648 (+0.0016%); direct-host-input MAE was 0.12006773 (+0.0027%). This
+remains within the 1% screen. Fifty of 51 final JPEG inputs matched canonical
+v16 byte-for-byte and 48 of 51 final predictions matched exactly; the only
+prediction change versus original MIGraphX was -0.00006396.
+
+However, full raw-to-flushed-output latency did not improve: direct-host-input
+median/p95 was 5,028.4/5,091.8 ms versus 4,969.3/5,030.3 ms for the original
+bridge, a 59.7 ms paired median slowdown. Median client CPU time fell by
+22.7 ms, but MIGraphX's per-tile median increased from 91.57 to 93.44 ms in
+the separate runs, more than offsetting the host CPU saving. No request was
+under 100 ms. The change is not adopted. This confirms that avoiding the
+PyTorch device round trip is not, by itself, a reliable end-to-end speedup;
+removing the per-tile logits return and accumulating them within the serving
+process is a distinct, larger experiment that would need full pixel-output and
+MAE validation before consideration. Runner, records, and model-input JPEGs:
+`/tmp/wave_v16_migraphx_hostinput_v3.py` and
+`/tmp/wave_v16_migraphx_hostinput_v3/`. The transport microbenchmark used the
+MIGraphX server in `/tmp/migraphx_server_768.py`.
+
+### MIGraphX FP16 runtime for the canonical v16 pipeline (2026-10-28)
+
+The official ONNX Runtime MIGraphX provider exposes an FP16 quantization mode;
+I enabled it with `ORT_MIGRAPHX_FP16_ENABLE=1` while keeping the exported
+768-pixel graph, input images, tile geometry, accumulation, crop rules, and
+v16 regressor unchanged. The persistent engine initialized in 70.2 seconds.
+The full raw-to-flushed-output request was then measured on the same 58-photo,
+12-capture-day cohort used for canonical v16 and MIGraphX FP32.
+
+| Route | Paired MAE (51 successes) | Change vs v16 | Total latency, median / p95 |
+|---|---:|---:|---:|
+| Canonical PyTorch v16 | 0.12006452 | baseline | 10,057.6 / 10,092.3 ms |
+| MIGraphX FP32 | 0.12006648 | +0.0016% | 4,969.3 / 5,030.3 ms |
+| MIGraphX FP16 | 0.12059531 | +0.4421% | 2,623.0 / 2,697.3 ms |
+
+FP16 had the same 51/58 successes and the same seven Step 2 crop failures as
+v16. Its 12-capture-day cluster-bootstrap 95% interval for the paired MAE
+change was [-0.00412, +0.00569], or [-3.61%, +5.07%] relative to v16. Absolute
+error was lower on 19 photos, higher on 31, and tied on one. The FP16 point
+estimate is within the 1% screen, and its 33.16 ms model-only median per tile
+cut full-request median latency by 73.9% relative to canonical PyTorch. No
+request was below 100 ms. Median client CPU time was 1,431.7 ms; server process
+CPU and memory were not captured.
+
+The confidence interval still permits a material quality regression, so this
+does not establish the requested no-quality-hit condition and is not adopted.
+The prior date cohort has also been examined repeatedly; confirmation needs
+new capture dates that were not used for candidate development. Keep `.env`
+and the production selection on v16. Per-image records, JPEGs, and runner are
+under `/tmp/wave_v16_migraphx_fp16_outer58_v1/` and
+`/tmp/wave_v16_migraphx_fp16_outer58_v1.py`.
+
+### Selective FP16 with FP32 normalization and softmax (rejected)
+
+To see whether FP16's small point-estimate MAE increase could be reduced while
+retaining its speed, I converted the ONNX graph to mixed precision, keeping
+LayerNormalization, Softmax, Resize, and the graph inputs/outputs in FP32 while
+converting eligible operations and weights to FP16. MIGraphX loaded the mixed
+graph without its FP16 quantization mode. The engine startup took 46.8 seconds.
+
+| Route | Paired MAE (51 successes) | Change vs v16 | Total latency, median / p95 |
+|---|---:|---:|---:|
+| Canonical PyTorch v16 | 0.12006452 | baseline | 10,057.6 / 10,092.3 ms |
+| MIGraphX FP32 | 0.12006648 | +0.0016% | 4,969.3 / 5,030.3 ms |
+| MIGraphX FP16 | 0.12059531 | +0.4421% | 2,623.0 / 2,697.3 ms |
+| Mixed: FP16 ops, FP32 normalization/softmax/resize | 0.12178872 | +1.436% | 6,543.3 / 6,643.3 ms |
+
+Mixed precision had the same 51/58 successes and same seven Step 2 failures as
+v16, but its MAE regressed by more than the 1% limit. Its 138.31 ms median
+model time per tile was slower than both MIGraphX FP32 (91.57 ms) and all-FP16
+(33.16 ms); full request latency was also worse than both. This blocklist
+configuration is rejected and not adopted. The trial confirms that preserving
+selected operators in FP32 can add costly graph casts or execution partitions
+without restoring waviness quality. The conversion and evaluator are
+`/tmp/wave_convert_mixed_segformer.py`,
+`/tmp/wave_v16_migraphx_mixed_outer58_v1.py`, and
+`/tmp/wave_v16_migraphx_mixed_outer58_v1/`. Conversion followed ONNX Runtime's
+documented mixed-precision conversion with an operator blocklist:
+[Float16 and mixed precision models](https://onnxruntime.ai/docs/performance/model-optimizations/float16.html).
+
+### MIGraphX exhaustive kernel tuning startup screen (stopped)
+
+The official provider also offers exhaustive kernel tuning, which preserves
+the FP32 graph while searching for faster operator kernels. I started the
+same canonical 768-pixel graph with `ORT_MIGRAPHX_EXHAUSTIVE_TUNE=1`. After
+15 minutes 12 seconds it had not created a serving session (`READY_SOCKET` was
+never emitted), so I stopped the process. During the attempt it used roughly
+24–29 CPU cores and peaked at about 6.6 GiB resident memory. No prediction was
+run, so MAE and end-to-end latency are **not measured**. The ordinary FP32
+MIGraphX initialization took about 60 seconds, making exhaustive tuning's
+startup cost disproportionate without evidence of a large serving-time gain.
+No model or runtime configuration changed. I am not pursuing this setting
+further on the current host. The screen used the existing
+`/tmp/migraphx_server_768.py` server.
+
+### Independently seeded YOLO26 segmentation students and majority vote (rejected)
+
+To test whether segmentation-mask variation was limiting the fast student, I
+trained two additional YOLO26n semantic students (seeds 43 and 44) using the
+same 127-image training and 22-image validation split as the clean seed-42
+student. The split excluded all 58 outer-date photos from student training;
+the 12 outer capture dates have nevertheless been consulted in previous
+experiments and are exploratory, not an untouched final test. I ran each
+student with the unchanged v16 regression head, then evaluated a strict
+three-student majority-vote mask with the same head. Candidate MAE below is
+paired with canonical v16 on the same successful images; latency is the full
+warm raw-image-to-output request. Canonical v16 had 51/58 successful images.
+
+| Experiment | Paired MAE (candidate / v16) | MAE change | Successes | Total latency, median / p95 |
+|---|---:|---:|---:|---:|
+| Canonical raw pipeline, v16 (first row) | 0.12006452 / 0.12006452 | baseline | 51/58 | 10,057.6 / 10,092.3 ms |
+| YOLO26n clean student, seed 42 | 0.13226026 / 0.12006452 | +10.16% | 58/58 | 35.26 / 41.90 ms |
+| YOLO26n clean student, seed 43 | 0.15185293 / 0.12006452 | +26.48% | 57/58 | 35.94 / 41.08 ms |
+| YOLO26n clean student, seed 44 | 0.14554423 / 0.12026580 | +21.02% | 56/58 | 35.91 / 41.65 ms |
+| Three-student majority vote | 0.15471237 / 0.12006452 | +28.86% | 58/58 | 42.25 / 47.63 ms |
+
+The low-resolution student route is substantially faster but every variant is
+over the 1% MAE regression screen, so none qualifies as a quality-preserving
+improvement or replaces v16. Majority voting also worsened MAE and added about
+7 ms median versus seed 42. These results do not meet the requested quality
+gate. Keep all candidates experimental and keep `.env` on v16. Training,
+evaluation, and per-image artifacts are under `/tmp/wave_yolo26_holdout_student_ensemble_v1/`
+and `/tmp/wave_yolo26_clean_capture_holdout_eval_v1/`; the outer v16 reference
+is `/tmp/wave_v16_canonical_outer58_raw_eval_v1/results.csv`.
+
+### TorchInductor and ROCm layout/launcher screen for canonical SegFormer-B2
+
+I checked AMD's current ROCm inference guidance and PyTorch's compiler
+recommendations. AMD highlights TorchInductor weight freezing, the C++ launcher,
+layout optimization/NHWC, and `max-autotune`; PyTorch cautions that compilation
+has a one-time cost and must be measured after warmup. I screened the fixed
+768x768 B2 tile forward on the Radeon 8060S with PyTorch 2.14.0+rocm10.1. The
+warm eager reference was 274.65 ms/tile in the first run. With Inductor's
+`freezing=True`, compilation took 25.94 s, logits differed by at most
+5.15e-5, and the low-resolution argmax mask was identical. Warm compiled
+latency was 280.96 ms/tile (2.3% slower); peak host RSS rose from 2.14 to 2.69
+GiB and accelerator allocation/reservation peaked at 1.55/1.82 GiB.
+
+A second default-mode run added the ROCm C++ wrapper, layout optimization, and
+`PYTORCH_MIOPEN_SUGGEST_NHWC=1`. It compiled in 36.32 s and retained an
+identical low-resolution argmax (maximum logit difference 7.44e-5), but was
+309.15 ms/tile versus 263.65 ms eager in that paired process (17.3% slower).
+The documented `max-autotune` configuration did not produce an inference
+result within a five-minute screen. Eight compile workers used about eight CPU
+cores and roughly 8–9 GiB combined resident memory; I stopped it at five
+minutes. No model prediction MAE or full-request latency is measured for these
+compile-only screens. These settings are not adopted.
+
+I also captured a PyTorch profiler trace of one warmed eager 768 tile. The
+profile reported 259.6 ms aggregate device time: MIOpen convolutions accounted
+for 89.0 ms, `aten::copy_` kernels for 80.5 ms, matrix multiply for 15.6 ms,
+depthwise convolution for 15.2 ms, and bilinear upsampling for 11.7 ms. The
+largest copies moved stage tensors of shape `[1,768,192,192]` (36.0 ms) and
+`[1,256,192,192]` (19.0 ms), consistent with internal layout/materialization
+costs. This is operator time under profiler instrumentation, not a substitute
+for the external tile latency. Previous full-request NCHW/channels-last B2
+comparison was effectively neutral (10.598 s vs 10.578 s median), so the
+profiler evidence alone does not justify changing memory format. The default
+Inductor screen runner and profile are in `/tmp/wave_v16_inductor_tile_screen.py`,
+`/tmp/wave_v16_inductor_rocm_flags_tile_screen.py`,
+`/tmp/wave_v16_inductor_maxautotune_tile_screen.py`,
+`/tmp/wave_v16_tile_operator_profile.py`, and
+`/tmp/wave_v16_tile_copy_profile.py`.
+
+The documented guidance consulted was AMD's [ROCm workload optimization and
+TorchInductor tuning](https://rocm.docs.amd.com/en/docs-7.2.4/how-to/rocm-for-ai/inference-optimization/workload.html),
+PyTorch's [`torch.compile` reference](https://docs.pytorch.org/docs/stable/generated/torch.compile),
+and [where to apply `torch.compile`](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.where_to_apply_compile.html).
+
+### MIGraphX FP32 probe for SegFormer-B0/448 (model-only; no MAE)
+
+I used the existing FP32 B0/448 ONNX graph with ONNX Runtime 1.29 and
+MIGraphX 2.18 on the same Radeon. The server started in 19.34 s. For one real
+448x448 tile, eager PyTorch inference had a 12.25 ms median; MIGraphX server
+execution was 9.23 ms median, while the client-observed socket round trip was
+12.84 ms. The maximum logit difference was 4.39e-5, the 448-resolution
+argmax was exact, the projected source class map had zero changed pixels, and
+water-mask IoU was 1.0. This is a one-image model-only parity/speed probe; no
+waviness prediction or MAE was measured, and server memory was not captured.
+Because client round-trip time was already slightly slower than local PyTorch,
+I did not run a full cohort or integrate the extra process boundary. Runner and
+server are `/tmp/wave_compare_migraphx_b0_448.py` and
+`/tmp/migraphx_server_b0_448.py`; the ONNX graph is
+`/tmp/wave-segformer-b0-448.onnx`.
+
+### OpenVINO FP32 CPU inference for the B0/448 route (no end-to-end gain)
+
+The Ryzen AI Max+ CPU supports FP32 inference in OpenVINO. I installed
+OpenVINO 2026.4.1 in an isolated temporary environment, imported the existing
+B0/448 ONNX graph, and measured a fixed input. With latency mode and 16 CPU
+threads, warm model-only latency was 11.05 ms median; 32 threads measured
+10.78 ms. The same model took 12.25 ms on local PyTorch/Radeon. A PyTorch CPU
+fallback was much slower (123.1 ms at one thread, 286.7 ms at two, and 641.9 ms
+at four); higher-thread CPU PyTorch became slower still. This reinforces the
+importance of benchmarking runtime/thread settings on the actual CPU instead
+of increasing threads by default.
+
+I then compared the complete B0 raw-to-output path on 93 labeled photos. Both
+arms used the same exact native HEIF decoder, B0 GPU-standardization contract,
+GPU erosion, B0 regression head, persisted model-input JPEG, and flushed plus
+fsynced prediction record. The original OpenVINO route returned logits to
+PyTorch for bilinear resize and argmax. It produced exact JPEGs and predictions
+on all 93, so both arms had MAE 0.12995, but full request latency was slower:
+253.21 ms median / 271.51 ms p95 versus 218.78 / 235.87 ms for PyTorch GPU.
+The CPU interpolation and whole-request path erased the model-only advantage.
+Peak process RSS was 2.83 GiB; accelerator allocated/reserved memory was
+0.428/1.375 GiB. No request was under 100 ms.
+
+| Experiment | MAE (candidate / v16) | Total raw-to-output latency, median / p95 |
+|---|---:|---:|
+| **Current pipeline: raw → v16** (outer-date reference, 51 successes) | **0.12006** | **10,057.6 / 10,092.3 ms** |
+| B0 PyTorch GPU, exact native decode (MAE paired on 32 archived test photos; latency on 93) | 0.12826 / 0.13284 (−3.45%) | 248.71 / 262.94 ms |
+| B0 OpenVINO CPU, logits returned to PyTorch (same 32 paired photos; latency on 93) | 0.12826 / 0.13284 (−3.45%) | 253.21 / 271.51 ms |
+| B0 OpenVINO CPU, fused resize plus argmax (same 32 paired photos; latency on 93) | 0.12729 / 0.13284 (−4.18%) | 250.05 / 261.81 ms |
+
+MAE and latency sample counts differ in these rows because archived canonical
+v16 predictions are available for only 32 of the 46 B0 test photos; the latency
+run covered all 93 validation and test photos. These are exploratory point
+estimates, and most test capture dates have been examined in previous work.
+
+To avoid materializing the large 150-channel resized logit tensor in Python, I
+fused bilinear resize and argmax in the OpenVINO graph, returning a 448x448
+class map. On the one-image parity probe and 77/93 end-to-end photos, the
+resulting Step 2 JPEGs/predictions were exact; 16/93 changed. Across the full
+93-image split its MAE was 0.12662 versus 0.12995 for PyTorch B0, and on the
+46-image test split it was 0.12696 versus 0.12763. On the 32 test photos with
+archived canonical v16 results, the fused route had MAE 0.12729 versus v16
+0.13284 (-4.18%); PyTorch B0 had 0.12826 versus 0.13284 (-3.45%). These are
+point estimates on the previously examined split, not independent date-heldout
+proof. The changed outputs mean this fused implementation is not output
+identical, and it did not speed up the complete request: 250.05 ms median /
+261.81 ms p95 versus 248.71 / 262.94 ms for PyTorch GPU in the same paired
+run. It is not adopted.
+
+This experiment confirms that CPU runtime choice alone is not enough: CPU
+inference can be faster per forward while full-resolution mask handling and
+standardization still dominate the request. It also shows that fusing resize
+and argmax needs numerical parity checks at the final-mask and prediction
+boundaries; a single-photo exact mask did not predict full-cohort parity. The
+runners and outputs are `/tmp/wave_b0_cpu_inference_sweep.py`,
+`/tmp/wave_b0_openvino_cpu_screen.py`,
+`/tmp/wave_b0_openvino_cpu_e2e_v1.py`,
+`/tmp/wave_b0_openvino_fused_mask_screen.py`, and
+`/tmp/wave_b0_openvino_fusedmask_e2e_v1.py`. The OpenVINO CPU plugin and
+benchmark guidance is documented at [OpenVINO CPU device](https://docs.openvino.ai/nightly/openvino-workflow/running-inference/inference-devices-and-modes/cpu-device.html)
+and [the OpenVINO benchmark tool](https://docs.openvino.ai/nightly/get-started/learn-openvino/openvino-samples/benchmark-tool.html).
+
+### ROCm TunableOp GEMM tuning screen for canonical v16 (rejected)
+
+PyTorch's TunableOp can compare registered rocBLAS and hipBLASLt GEMM
+implementations for the shapes used by a workload. Since the v16 tile profile
+reported substantial GEMM time, I enabled TunableOp for the canonical 768-pixel
+SegFormer tile, capped tuning at 10 ms per operation and three iterations, and
+measured warm tile inference before and after. It tuned 27 entries. Baseline
+median tile latency was 247.5 ms; steady TunableOp latency was 254.9 ms (3.0%
+slower). The tuning pass itself took 26.9 seconds, including a 26.4-second
+first tuned invocation. The maximum logit delta was 4.01e-5. **Waviness MAE is
+unknown** because this was a one-tile model screen, not a full prediction
+cohort. The result does not justify a full end-to-end run or enabling TunableOp.
+
+This is consistent with the profiling rule: a library offering more algorithm
+choices is not automatically faster for the model's actual shapes. The earlier
+`cudnn.benchmark` trial also did not improve full-request latency. Artifacts:
+`/tmp/wave_v16_tunableop_tile_screen.py`,
+`/tmp/wave_v16_tunableop_tile_screen.json`,
+`/tmp/wave_v16_tunableop_tile_screen.log`, and
+`/tmp/wave_v16_tunableop_results.csv`. API reference:
+[PyTorch TunableOp](https://docs.pytorch.org/docs/2.14/cuda.tunable.html).
+
+### MIOpen immediate mode and decoder-copy trace (no speed improvement)
+
+To follow the large-copy profile with a concrete backend screen, I compared
+PyTorch's `torch.backends.miopen.immediate` disabled and enabled for the same
+warmed canonical v16 SegFormer tile. Median model latency was 264.0 ms with the
+default mode and 265.4 ms with immediate mode; the candidate's final two samples
+also rose to 276.3 and 280.8 ms. The 7 logits were bit-identical between modes
+(maximum difference 0; identical argmax). **Waviness MAE is unknown** because
+this is a single-tile screen. This mode did not improve the measured tile and
+is not enabled.
+
+A separate TorchDispatch trace tied the largest materialization shapes to the
+model path: 35.4 ms aggregate profiled device time at `[1,768,192,192]`, 19.2
+ms across three copies at `[1,256,192,192]`, and 18.2 ms across four copies at
+`[1,512,96,96]`. The corresponding execution path includes SegFormer depthwise
+convolution and decoder bilinear resizing/concatenation. These profiler totals
+are kernel time under instrumentation, not wall time, and dispatch tracing does
+not prove each copy can be removed without changing the operators or numeric
+results. A global channels-last experiment was already neutral end to end; this
+trace narrows the next exact-kernel investigation to the repeated layout
+transitions in the model rather than host-side image buffers.
+
+Artifacts: `/tmp/wave_v16_miopen_immediate_tile_screen.py`,
+`/tmp/wave_v16_miopen_immediate_tile_screen.json`,
+`/tmp/wave_v16_miopen_immediate_tile_screen.log`, and
+`/tmp/wave_v16_tile_copy_dispatch_shapes.py` plus its log. PyTorch documents
+immediate mode in its [MIOpen backend settings](https://docs.pytorch.org/docs/2.14/backends.html).
+
+### Targeted SegFormer depthwise-convolution layout screen (no gain)
+
+The copy trace highlighted the high-resolution depthwise-convolution path, so I
+captured the actual stage-0 activation (`[1,36864,256]`, 192x192 spatial) and
+compared the stock convolution with two layout candidates: a channels-last
+weight tensor, and an explicit contiguous NCHW input before the convolution.
+Both candidates returned bit-identical outputs. Across eight warm calls, stock
+median was 7.966 ms, channels-last weights 7.963 ms, and explicit NCHW input
+7.964 ms. These differences are negligible and do not support a full-pipeline
+run or model modification. **Waviness MAE is unknown** because this isolated
+layer probe did not produce a prediction cohort.
+
+This screen suggests the large profiled copy totals are spread across several
+operators/layout boundaries rather than removable by changing this depthwise
+convolution's tensor format. Full trace and probe artifacts are
+`/tmp/wave_v16_tile_copy_dispatch_shapes.py`,
+`/tmp/wave_v16_tile_copy_dispatch_shapes.log`,
+`/tmp/wave_v16_dwconv_weight_layout_screen.py`, and
+`/tmp/wave_v16_dwconv_weight_layout_screen.json`.
+
+### Split SegFormer decoder fusion to avoid the wide concatenation
+
+The profiler showed large high-resolution layout copies in the decoder. I
+replaced the decoder's `cat` of projected features followed by one 1x1
+convolution with the algebraically equivalent sum of 1x1 convolutions over the
+same feature groups and the same slices of the original trained weight tensor.
+Weights, FP32 precision, tile grid, and interpolation settings are unchanged.
+This avoids materializing the wide concatenated feature tensor. The measured rewrite is enabled by `_enable_split_segformer_decode_fusion()`
+for ROCm inference in `step_1_a_water_segmentation.py`; CPU and other GPU
+backends retain their framework implementation until they are measured.
+
+An interleaved raw-to-output A/B on 12 images across five capture dates produced
+bit-identical predictions and identical MAE (0.1253717 on this 12-image timing
+cohort). Median request latency fell from 10,180.9 to 8,957.6 ms; all 12 paired
+requests were faster, with median paired saving of 1,218.2 ms. The p95 values
+were 10,213.0 and 9,000.7 ms. The run included source decode, both segmentation
+stages, JPEG round trips, regression, and flushed prediction-record writes.
+
+I then ran the integrated loader on the complete 58-photo date-grouped outer
+cohort. Both versions had the same 51 successes and same seven Step 2 failures.
+On those 51 shared successes, canonical MAE was 0.1200645 and the integrated
+candidate MAE was 0.1200658, a +0.0000013 absolute change (+0.0010% relative,
+inside the 1% gate); RMSE changed from 0.1564493 to 0.1564496. Fifty of 51
+Step 2 JPEGs and regression predictions were byte/value identical. The one
+changed prediction moved by 0.000064; its effect on aggregate MAE was
+negligible. Candidate median/p95 total latency was 9,342.7/9,372.5 ms versus
+10,057.6/10,092.3 ms for the archived baseline run. This separate-process
+measurement is noisier than the interleaved A/B, which establishes the cleaner
+speed estimate. Peak process RSS was 2.89 GiB versus 2.91 GiB, and peak
+accelerator allocated/reserved memory was 8.21/8.60 GiB versus 8.31/8.62 GiB.
+Neither run approaches the 100-ms goal; this is a measured 12% paired latency
+reduction while preserving the MAE gate, not a complete solution.
+
+The tile-only screen measured 252.2 ms median for the stock decoder and 228.1
+ms for split fusion (about 9.6% lower); argmax matched on all eight paired
+tiles, with maximum logit delta 3.43e-5. The full-cohort results above are the
+quality evidence. Artifacts:
+`/tmp/wave_v16_decoder_split_fusion_screen.py`,
+`/tmp/wave_v16_decoder_split_fusion_screen.json`,
+`/tmp/wave_v16_decoder_split_fusion_prod_outer58_v1.py`,
+`/tmp/wave_v16_decoder_split_fusion_prod_outer58_v1/`, and
+`/tmp/wave_v16_decoder_split_fusion_interleaved12.py` with its `_v1/` outputs.
+
+### Stream decoder projection into fusion to cut peak activation memory (rejected for latency)
+
+After the split-fusion change, I tested a streaming variant that projects,
+upsamples, and fuses one decoder feature at a time, using in-place accumulation
+so the other full-resolution projected maps do not remain live together. On six
+warm 768-pixel tile calls, the streaming and current split-fusion outputs were
+bit-identical (maximum logit difference 0; identical argmax). Peak allocated
+GPU memory in the isolated model screen fell from 1.069 to 0.545 GiB, but median
+tile latency increased from 232.7 to 240.6 ms (+3.4%). **Waviness MAE is
+unknown** because this was a one-tile screen. The memory reduction is real, but
+the latency regression means this alternative is not integrated. Artifacts:
+`/tmp/wave_v16_decoder_streamed_fusion_screen.py` and
+`/tmp/wave_v16_decoder_streamed_fusion_screen.json`.
+
+### `torch.compile` on the split decoder only (rejected)
+
+I screened Inductor on just the split-fusion SegFormer decoder, keeping the
+encoder eager. Compilation took 9.10 seconds on the first invocation. Warm tile
+latency increased from 232.7 ms eager to 291.6 ms compiled (+25.3%); argmax was
+identical on the one tile, with maximum logit delta 1.53e-5. **Waviness MAE is
+unknown** because this was a single-tile screen. The compiled decoder is not
+used. Runner and output: `/tmp/wave_v16_split_decoder_compile_screen.py` and
+`/tmp/wave_v16_split_decoder_compile_screen.json`.
+
+### Fold decoder BatchNorm into split-fusion weights (exact, no end-to-end gain)
+
+I folded the decoder's inference BatchNorm into the existing 1x1 fusion weights
+and branch bias, removing the standalone BatchNorm operation. A tile screen
+showed identical argmax and a 2.8-ms lower median, so I measured the complete
+58-photo outer cohort. Compared directly with the current split-fusion
+implementation, the folded route had the same 51/58 successes, identical seven
+failures, byte-identical Step 2 JPEGs and predictions on all 51 successes, and
+identical waviness MAE/RMSE (0.1200658/0.1564496). However, separate full-cohort
+medians were 9,382.4 ms folded versus 9,342.7 ms current; p95 was 9,416.5 versus
+9,372.5 ms. Peak allocated accelerator memory was 8.13 GiB in both runs. The
+tile-only gain did not translate to an end-to-end speedup, so the BatchNorm
+fold is not integrated. Artifacts:
+`/tmp/wave_v16_decoder_fused_bn_screen.py`,
+`/tmp/wave_v16_decoder_fused_bn_screen.json`,
+`/tmp/wave_v16_decoder_split_bn_outer58_v1.py`, and
+`/tmp/wave_v16_decoder_split_bn_outer58_v1/`.
+
+### Current pipeline checkpoint (2026-10-29)
+
+The `.env` checkpoint selection has now been changed to v18, as previously
+requested. The speed/quality comparisons below were measured before that
+selection change and compare the split-fusion implementation with canonical
+v16; they do not establish v18 end-to-end latency. The v18 checkpoint reports
+validation MAE 0.1357 in its training artifact, which is not directly
+comparable to the v16 outer-cohort MAE. A matched raw-to-output v18 baseline
+measurement is still needed. The ROCm-only split decoder-fusion rewrite is
+enabled in the segmentation path. On the 58-photo, 12-capture-day outer cohort, it completed
+51 rows and had the same seven Step 2 failures as stock v16. On the 51 paired
+successes, waviness MAE was 0.1200658 versus 0.1200645 for stock v16
+(+0.0010%, well within the 1% regression limit). The interleaved 12-photo,
+five-date raw-to-output A/B produced identical predictions and MAE (0.1253717
+in both arms); median latency fell from 10,180.9 to 8,957.6 ms and p95 from
+10,213.0 to 9,000.7 ms, with all 12 paired requests faster. This is the
+strongest recent quality-qualified optimization, but it remains roughly 90x
+above the 100-ms target. The full-cohort candidate median/p95 was 9,342.7 /
+9,372.5 ms; the interleaved comparison is the cleaner speed estimate.
+
+The NPU check confirmed hardware visibility but did not produce a model result:
+`xrt-smi examine` reports Ubuntu 26.04.1 and XRT 2.21.75, while AMD's current
+[Ryzen AI Linux 1.8 installation instructions](https://ryzenai.docs.amd.com/en/latest/linux.html)
+specify Ubuntu 24.04 XRT 2.25.37 driver packages, a matching XDNA plugin, and
+a separate Ryzen AI runtime package. The guide documents CNN INT8/BF16 and
+encoder-based BF16 flows, but does not list SegFormer as a Linux example.
+Therefore NPU inference latency and waviness MAE remain unknown. No host driver
+or runtime was changed. `xrt-smi`'s built-in 51 TOPS / 72-microsecond device
+diagnostic is not a model inference result.
+
+| Experiment | Waviness MAE (candidate vs stock v16) | Total raw-to-output latency, median / p95 | Result |
+|---|---:|---:|---|
+| **Current `.env` checkpoint: raw → v18 fast-v1** | **0.11660** on the matched 46-photo test run; training validation MAE was 0.13567 | **310.2 / 333.4 ms** stock fusion, interleaved full-request benchmark | Selected checkpoint; 0/46 requests under 100 ms. |
+| v16 with split decoder fusion (experimental comparison) | 0.1200658 vs stock v16 0.1200645 (+0.0010%), 51 shared successes; same 7 failures | 8,957.6 / 9,000.7 ms interleaved 12-photo A/B; 9,342.7 / 9,372.5 ms full-cohort candidate run | Quality gate passes against v16; about 12% lower paired median; still far above 100 ms. |
+| Stock raw → v16 reference | 0.1200645, 51/58 successes | 10,180.9 / 10,213.0 ms interleaved A/B; archived separate-run median/p95 10,057.6 / 10,092.3 ms | Reference. |
+| MIGraphX FP32 full canonical v16 | 0.12006648 vs 0.12006452 (+0.0016%), same 7 failures | 4,969.3 / 5,030.3 ms | Passes point-estimate gate; separate service and ~60 s startup; no requests under 100 ms. |
+| MIGraphX FP16 full canonical v16 | 0.12059531 vs 0.12006452 (+0.4421%), same 7 failures | 2,623.0 / 2,697.3 ms | Point estimate passes; date-cluster interval allows material regression; not adopted. |
+
+The table keeps MAE attached to matched cohorts and reports complete request
+latency, not tile-only engine time. Candidates with more than 1% MAE
+regression are excluded from this quality-qualified summary; exploratory
+results without a matched waviness MAE are not treated as quality-preserving.
+
+### Correct v18 raw-to-output baseline and exact-resize checks (2026-10-29)
+
+I measured the selected v18 checkpoint with the fast-v1 contract from its
+2026-10-28 split snapshot. The production entry point applies the profile
+before constructing the segmenter; the evaluator likewise configured the
+448-pixel FP16 Step 1 processor and 384-pixel Step 2 processor before loading
+the model. On all 46 held-out test photos, stock SegFormer fusion completed
+46/46, with waviness MAE 0.116597, median raw-to-output latency 310.2 ms, and
+nearest-rank p95 333.4 ms. No request was under 100 ms. Timings include raw
+HEIC/JPEG decode, both segmentation passes, both JPEG byte round trips,
+regression, and temporary preview/record writes. Model-load and first-call
+warm-up are excluded. This is the first correctly matched raw-to-output
+baseline for the currently selected checkpoint/profile.
+
+The initial v18 profile comparison loaded the segmenter before applying the
+profile, so Step 1 silently retained its default 768-pixel processor. Its
+latency and MAE records are invalid and must not be used. Reordering profile
+configuration before model load corrected the setup and is covered by the
+corrected benchmark runner. This reinforced that each benchmark must assert
+the processor's actual input size rather than infer it from the profile
+configuration alone.
+
+I then compared the integrated split decoder fusion with stock fusion on the
+same 46 test photos and identical 448/384 fast-v1 inputs. Stock fusion MAE was
+0.116597; split fusion MAE was 0.118038 (+1.236%, beyond the 1% limit). Only
+31/46 final Step 2 JPEGs and predictions were identical. The split route saved
+1.74 ms paired median latency (310.2 to 308.0 ms) and did not lower p95
+(333.4 to 333.9 ms). The rewrite had passed on v16's 768-pixel FP32 profile,
+but it is rejected for v18 fast-v1. I gated it in
+`step_1_a_water_segmentation.py` to the overlapping-tile FP32 profile where
+the quality-qualified evidence exists; fast-v1 now uses stock decoder fusion.
+
+I tested Pillow nearest-neighbor expansion of the 448-pixel class map against
+OpenCV `INTER_NEAREST_EXACT` and `torch.from_numpy` on the resulting owned
+buffer. All 46 Step 2 JPEGs and predictions matched byte/value exactly and MAE
+stayed 0.116597. In the interleaved run, however, OpenCV median/p95 latency was
+335.0/347.0 ms versus 321.6/338.2 ms for Pillow (paired median 12.2 ms slower).
+The identical output proves the buffer-sharing replacement is safe, but it is
+not faster on this workload and is not integrated. The existing OpenCV resize
+result on the B0 candidate did not transfer to the v18 fast-v1 profile.
+
+Finally, I recomputed the existing thumbnail YOLO26 + v18 head result against
+the actual v18 fast-v1 baseline, on the same 46 filenames and labels. Its MAE
+was 0.118214 versus 0.116597 for current v18, a +1.386% regression. The older
+comparison used v16 and suggested improvement; that is not the correct gate
+after v18 became selected. This route remains under 100 ms but fails the
+current 1% quality limit and is not adopted.
+
+The corrected full-run A/B data, resize comparison, and component profile are
+under `/tmp/wave_v18_fusion_ab_v1/`, `/tmp/wave_v18_cv2_nearest_ab_v1/`, and
+`/tmp/wave_v18_substage_profile_v1/`; runners are in `/tmp`. The eight-image
+component profile found median decode 51.0 ms, Step 1 segmentation 103.9 ms,
+Step 1 standardization 72.0 ms, Step 2 32.4 ms, and regression forward about
+5 ms. Median process CPU time was 421.5 ms per request, peak RSS 2.60 GiB, and
+peak PyTorch allocated/reserved memory 0.59/0.62 GiB. Component measurements
+are diagnostic and must not be summed as an end-to-end latency estimate.
+
+### Embedded-thumbnail B2 route with adapted v18 head (2026-10-29)
+
+I tested a lower-cost route that starts from the embedded 320-pixel HEIC
+thumbnail (or a 320-pixel JPEG draft), runs the full Step 1 SegFormer-B2 sea
+segmentation, then runs the full Step 2 SegFormer-B2 preprocessing at 224
+pixels, and finally predicts with the v18 EfficientNet-B0. This preserves both
+segmentation passes while changing their input scale and the Step 2 output
+distribution. It is therefore a new preprocessing contract, not a drop-in
+backend optimization.
+
+With the original v18 head this route had test MAE 0.118178 versus 0.116597
+for current raw-to-output v18 (+1.36%), so it failed the 1% quality gate. I
+then adapted only the small regression head using candidate-preprocessed
+training data: 148 fit images and a 61-image capture-date holdout from 209
+successful training preprocesses. The held-out dates selected the head
+settings; validation and test labels were not used for selection. On 46 shared
+validation photos, candidate MAE was 0.131680 versus 0.138591 for the current
+pipeline on the same photos (−4.99%). On the 46-photo test snapshot, candidate
+MAE was 0.115703 versus 0.116597 (−0.77%); paired recomputation confirms the
+same comparison. This passes the point-estimate 1% gate, but the test snapshot
+is image-random and capture dates overlap training dates, so it is not an
+independent future-date confirmation.
+
+The adapted route was rerun end to end over the full 93-photo snapshot,
+including prediction and record writes. Validation median/p95/max latency was
+68.47/70.98/71.18 ms and test was 73.67/76.08/76.24 ms. All 46 successful
+requests in each split were under 100 ms. The route still failed Step 1 on
+IMG_7565.jpg (46/47 validation coverage); all 46 test photos succeeded. On
+the 46 shared successes, validation MAE was 0.131680 versus 0.138591 current
+(−4.99%); test MAE was 0.115703 versus 0.116597 current (−0.77%). A
+20,000-resample capture-date cluster bootstrap for candidate-minus-current
+MAE gave [−0.02421, +0.00879] on validation and [−0.01658, +0.01306] on test.
+Both intervals allow a meaningful regression, and test dates overlap training
+dates, so this is a promising point estimate rather than confirmation of
+preserved quality. Peak RSS was 2.45 GiB; peak GPU allocated/reserved memory
+was 0.588/0.615 GiB. The `.env` selection remains the current v18 pipeline.
+
+| Experiment | Waviness MAE on matched test photos | Total raw-to-output latency, median / p95 | Decision |
+|---|---:|---:|---|
+| Current v18 fast-v1, stock fusion | 0.116597 (46 photos) | 310.2 / 333.4 ms | Current reference; 0/46 under 100 ms. |
+| Embedded thumbnail + full B2 Step 1 + B2 Step 2 at 224 + adapted v18 head | 0.115703 (46 shared test photos; −0.77% vs current) | 73.67 / 76.08 ms test; 68.47 / 70.98 ms validation (median / p95, adapted artifact) | Best sub-100-ms point estimate; 46/46 test and 46/47 validation succeeded. Bootstrap intervals include regression; date overlap prevents an independent quality claim. |
+
+Training artifact and per-split outputs are under
+`/tmp/wave_v18_thumbnail_b2_head_224_v1/`; the route timing and preview
+records are under `/tmp/wave_v18_embedded_b2_thumbnail_step2_224_v1/`. The
+paired quality recomputation is `/tmp/wave_v18_thumbnail_b2_224_paired_quality.py`.
+
+### Post-hoc date-disjoint check of the adapted thumbnail B2 route
+
+I separately reran the four 2026-08-24 test photos, a date absent from the
+current checkpoint's train split and the adapted head's fit/selection dates.
+The candidate and current route both succeeded on all four photos. Each photo
+was timed five times in randomized paired order; each request included raw
+decode, preprocessing, prediction, and output writes.
+
+| Route | MAE on the four photos | Total raw-to-output latency, median / p95 | Under 100 ms |
+|---|---:|---:|---:|
+| Current exact v18 route | 0.148265 | 285.82 / 312.49 ms | 0/20 requests |
+| 320-pixel thumbnail + B2 at 224 + adapted v18 head | 0.146572 (−1.14%) | 69.83 / 84.26 ms | 20/20 requests |
+
+Candidate MAE was lower by 0.00169, with lower absolute error on two photos
+and higher absolute error on two; JPEGs and predictions differed on all four.
+This date is disjoint from training, but the subset was identified from prior
+test-set inspection, and it is only one date with four photos. A date-cluster
+bootstrap is not informative with a single cluster. Treat this as exploratory
+evidence, not quality-preservation confirmation or grounds for adoption. The
+complete repeated timings and outputs are in
+`/tmp/wave_v18_thumbnail_b2_date_disjoint_eval_v1/`; the runner is
+`/tmp/wave_v18_thumbnail_b2_date_disjoint_eval.py`.
+
+### Nested capture-date CV for the adapted thumbnail B2 input contract
+
+Because the adapted thumbnail head's available validation/test dates overlap
+training dates, I ran a nested, five-fold capture-date CV on the 217-photo
+training split. The 209 photos for which thumbnail preprocessing succeeded
+were shared between both input domains; their 50 capture dates were assigned
+to five outer folds. Each fold fit a canonical-input regression head using
+only its outer-training dates, then adapted a second head from that
+fold-specific canonical head using the corresponding thumbnail inputs. Inner
+capture-date groups selected epochs and the teacher/regularization settings.
+No outer-fold labels were used for fitting or selection. The EfficientNet-B0
+backbone was frozen and identical in both branches.
+
+| Input contract and fold-fitted head | MAE on 209 out-of-fold photos | Relative MAE delta | Total request latency context |
+|---|---:|---:|---:|
+| Current full-resolution Step 2 inputs, fold-fitted head | 0.155035 | Reference | Not timed in this CV; current deployed v18 route is about 287–289 ms median on the 93-photo labeled snapshot. |
+| Embedded thumbnail + B2 Step 2 at 224, fold-adapted head | 0.157662 | +1.69% | The same thumbnail pipeline and model architecture measured 68.47 ms validation / 73.67 ms test median in the separate full-route rerun. |
+
+The paired date-cluster bootstrap 95% interval for candidate-minus-canonical
+MAE was [−0.00893, +0.01400] across 50 capture dates, so it includes a
+meaningful regression. The candidate preprocessing also failed on 8/217
+training photos (3.7%), which are not represented in this shared-success MAE.
+The CV heads were trained from fold-specific data, so their absolute MAE is not
+the deployed checkpoint's score; this is a controlled comparison of the two
+input contracts under date-held-out head fitting. It does not clear the
+thumbnail route's quality gate. Runner, folds, and per-photo OOF predictions
+are under `/tmp/wave_v18_thumbnail_b2_matched_nested_cv_v1/` and
+`/tmp/wave_v18_thumbnail_b2_matched_nested_cv.py`.
+
+### Pillow staged Lanczos reduction on the current v18 path (2026-10-29)
+
+I profiled the current 448/384 `fast-v1` predictor and tested Pillow's
+`reducing_gap` option only for large Lanczos downscales (at least a 3x reduction
+on both axes). Raw image decode, segmentation model and precision, processor
+resolutions, crop/mask logic, JPEG quality, regressor checkpoint, and output
+writes were held fixed. This is a CPU resampling implementation change; it
+does not skip a pipeline stage or use lower-resolution source thumbnails.
+Pillow describes this option as a staged integer reduction followed by the
+requested resampler; smaller values are faster and values of 3 or above are
+usually indistinguishable from direct resampling ([official Pillow resize
+documentation](https://pillow.readthedocs.io/en/latest/reference/Image.html)).
+
+The `reducing_gap=2` candidate was run in alternating order against the stock
+resize on the full 47-photo validation snapshot and all 46 test photos. MAE
+was 0.135168 versus 0.135669 on validation (−0.37%), and 0.117383 versus
+0.116597 on test (+0.67%). Both point-estimate regressions are below the
+project's 1% screening limit, and all photos completed in both arms. On the
+same run, including preview and prediction-record writes, median/p95 latency
+fell from 331.6/345.2 to 289.8/302.9 ms on validation and from 330.7/342.6
+to 292.0/299.9 ms on test. The paired median saving was 36.5 ms on validation
+and 37.0 ms on test. No request was under 100 ms. Peak RSS
+was about 2.91 GiB and PyTorch allocated/reserved accelerator memory was
+0.588/0.615 GiB in both arms.
+
+The confidence intervals remain too wide to claim no possible material MAE
+regression: capture-date-cluster bootstrap 95% intervals for candidate-minus-
+stock absolute error were [-0.00764, +0.00850] on validation (31 dates) and
+[-0.00419, +0.00643] on test (27 dates). The test split shares capture dates
+with model training and is not a clean future-date assessment. Thus this is a
+promising point-estimate quality/speed tradeoff, not yet a proven
+quality-preserving production change. Exact model-input JPEGs and predictions
+changed, as expected from a different resampling algorithm; no code or active
+profile was changed.
+
+The more aggressive `reducing_gap=3` was rejected: its test MAE improved by
+4.19%, but validation MAE regressed by 2.67%. This split disagreement is why
+the candidate cannot be selected from test performance alone. Artifacts and
+runners and complete request records are under `/tmp/wave_v18_pillow_reducing_gap_ab_v1/`,
+`/tmp/wave_v18_pillow_reducing_gap_2_full_request_test/`,
+`/tmp/wave_v18_pillow_reducing_gap_v3_validation_v1/`, and
+`/tmp/wave_v18_pillow_reducing_gap_2_full_request_validation/`.
+
+### Parallel libheif tile decode on the current v18 pipeline (exact pixels)
+
+I tested the existing experimental C++ libheif tile decoder against
+`pillow-heif` on the complete validation/test source set. It reconstructs
+oriented RGB pixels from HEIF grid tiles using 16 independent libheif contexts
+and writes into one contiguous output buffer. The decoded RGB array matched
+`load_rgb_image` byte-for-byte on all 92 HEIC/HEIF sources. Decode-only median
+latency was 51.9 ms versus 73.2 ms for Pillow; p95 was 63.3 versus 112.6 ms.
+
+I then substituted that decoder in the complete v18 448/384 path, leaving both
+SegFormer calls, mask/crop operations, JPEG round trips, checkpoint, and
+prediction-record writes unchanged. All 93 validation/test requests completed.
+Every final Step 2 JPEG and waviness prediction matched exactly (93/93), so MAE
+was unchanged: 0.135669 validation and 0.116597 test. Median/p95 total latency
+fell from 320.2/339.9 to 303.3/315.1 ms on validation and 326.3/339.1 to
+305.4/319.1 ms on test; the paired median saving was 17.8 ms. No request met
+100 ms. Peak RSS was 2.98 GiB and GPU allocated/reserved memory was
+0.588/0.615 GiB. Median process CPU time rose from about 440 to 494–497 ms,
+reflecting the parallel decoder's additional CPU work. Concurrent-request
+resource contention was not tested.
+
+This is an exact-output speed improvement, not a quality tradeoff. I have not
+integrated it: the prototype links against Pillow-Heif's bundled libheif
+binary through a temporary shared library, and would need a supported build
+and packaging path before it is suitable for the pipeline. Even if integrated,
+it removes only about 18 ms and does not approach the 100-ms target. Full-run
+records are under `/tmp/wave_v18_heif_tiled_decode_ab_v1/`; the temporary
+decoder implementation is `/tmp/wave_heif_tiled_decode_bgr_ctx.cpp`.
+
+### Combine exact HEIF decode with staged Lanczos (full paired run)
+
+I combined the pixel-exact HEIF decoder with `reducing_gap=2` and measured the
+complete route against stock v18 on the same 47 validation and 46 test photos.
+All 93 requests completed in both arms. The combined route's final Step 2 JPEGs
+and predictions matched the standalone `reducing_gap=2` candidate on all 93
+photos, confirming that the decoder substitution adds no further input or
+prediction change. Relative to stock v18, combined MAE was 0.135168 versus
+0.135669 on validation (−0.37%) and 0.117383 versus 0.116597 on test (+0.67%),
+the same quality results as the resize candidate.
+
+Complete raw-to-output latency, including preview and prediction-record writes,
+was 263.6 ms median / 276.6 ms p95 on validation and 268.8 / 276.3 ms on test.
+The paired median saving was 58.0 ms across 93 photos, about 18–19% versus
+stock. Median process CPU time increased by about 10–13 ms, and no request was
+under 100 ms. This is the best current-v18 full-route speed result that stays
+within the 1% point-estimate MAE screen on both existing splits, but its
+capture-date bootstrap intervals remain too wide to establish a strict
+no-regression claim. It remains experimental; the HEIF component also still
+needs a supported build/package approach. Results are in
+`/tmp/wave_v18_heif_tiled_gap2_ab_v1/paired.json`.
+
+### Compile the complete fast-v1 SegFormer for fixed shapes
+
+The earlier compiler screen targeted a single 768-pixel decoder path and was
+slower. I tested a distinct setup: compile the complete SegFormer-B2 with
+`torch.compile(dynamic=False)` for the current fast-v1 fixed 448-pixel Step 1
+and 384-pixel Step 2 inputs. Compilation and warm-up were outside the timed
+request; both shapes were warmed before the paired 93-photo run.
+
+On the same validation/test splits, eager versus compiled results were:
+
+| Split | Eager MAE | Compiled MAE | Eager latency median / p95 | Compiled latency median / p95 |
+|---|---:|---:|---:|---:|
+| Validation, 47 photos | 0.135669 | 0.133432 (−1.65%) | 328.6 / 342.4 ms | 306.5 / 322.2 ms |
+| Test, 46 photos | 0.116597 | 0.116534 (−0.05%) | 332.8 / 349.5 ms | 311.1 / 321.2 ms |
+
+All 93 requests succeeded. The paired median latency saving was 24.0 ms; 38/93
+Step 2 JPEGs and predictions were byte/value identical. The capture-date
+cluster bootstrap 95% intervals for candidate-minus-eager absolute error were
+[-0.00505, -0.00010] on validation (31 dates) and [-0.00184, +0.00155] on
+test (27 dates). Validation favored compilation; test includes zero and its
+upper endpoint is a 1.33% relative MAE increase, so strict no-regression is
+not proved. Median process CPU time fell by roughly 21–24 ms per request.
+Combined peak process RSS was 3.33 GiB and PyTorch reserved accelerator memory
+reached 0.916 GiB; these peaks include both eager and compiled model instances.
+No request was under 100 ms.
+
+The fixed-shape compile probe measured 38.9 ms eager versus 25.4 ms compiled
+median model forward, with 99.992% per-pixel argmax agreement and maximum
+logit delta 0.0469. The first uncached 448-pixel compiled invocation took
+9.72 seconds. PyTorch notes that initial calls pay JIT compilation costs and
+static shape specialization can compile again for new shapes ([compile
+documentation](https://docs.pytorch.org/docs/stable/generated/torch.compile.html),
+[compile-time guidance](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.reducing_compile_time.html)).
+This remains a warm-service optimization candidate, not a cold-start result or
+a solution to the 100-ms target. No pipeline code or checkpoint was changed.
+Records and the runner are under
+`/tmp/wave_v18_compile_fastv1_full_ab_v1/` and
+`/tmp/wave_v18_compile_fastv1_full_ab.py`.
+
+### Ryzen AI NPU feasibility recheck (2026-10-29)
+
+The NPU is visible as `RyzenAI-npu5`, but the installed host is Ubuntu 26.04.1
+with XRT 2.21.75; no ONNX Runtime or Ryzen AI Python runtime is installed.
+AMD's current Linux setup page specifies Ubuntu 24.04 packages with XRT
+2.25.37 and Ryzen AI Linux 1.8, and documents CNN INT8/BF16 plus encoder-based
+BF16 examples, not SegFormer semantic segmentation ([AMD Linux setup](https://github.com/amd/ryzen-ai-documentation/blob/main/docs/linux.rst),
+[model deployment](https://github.com/amd/ryzen-ai-documentation/blob/main/docs/modelrun.rst)).
+No compatible isolated runtime is present to benchmark, and I made no system
+driver changes. This does not rule out a future NPU route, but the current
+installation cannot provide evidence that it will run SegFormer or meet the
+latency/MAE gates.
+
+### Compiled SegFormer + exact HEIF decode + `reducing_gap=2`
+
+I combined the three measured fast-v1 candidates and compared them with the
+stock eager v18 pipeline on all 47 validation and 46 test photos. Both arms
+completed every request. The combined route scored MAE 0.134523 on validation
+versus 0.135669 stock (−0.84%) and 0.117448 on test versus 0.116597 stock
+(+0.73%). These point estimates meet the 1% screen. Date-cluster 95% intervals
+for paired absolute-error change were [-0.00872, +0.00806] on validation
+(31 dates) and [-0.00387, +0.00630] on test (27 dates); they do not rule out a
+material regression.
+
+Full raw-to-output latency including output writes fell from 317.8/332.2 ms
+median/p95 to 220.2/228.3 ms on validation, and from 319.4/334.9 to
+221.6/228.0 ms on test. Paired median saving was 96.5 ms across the 93 photos,
+about 31% at the median. No request was under 100 ms. Median process CPU time
+fell by about 24–27 ms. Peak RSS was 3.35 GiB, PyTorch allocated/reserved GPU
+memory was 0.588/0.766 GiB. The compile cache was warm before timing; model
+compile startup is excluded. This is the best speed result for the current
+v18 full-resolution input route, but the broad confidence intervals, compile
+startup, and temporary libheif dependency keep it experimental. The route has
+not been integrated. Per-request records are in
+`/tmp/wave_v18_fastest_full_ab_v1/paired.json`.
+
+### FP16 versus BF16 SegFormer screen
+
+On the Radeon 8060S, BF16 was supported. At 448 pixels, a single eager B2
+forward measured 37.3 ms BF16 versus 39.0 ms FP16, but their class argmax maps
+agreed on only 99.904% of pixels. At 384 pixels, BF16 was slower (32.2 ms
+versus 28.3 ms) and argmax agreement was 99.924%. Logit deltas reached 0.56 and
+0.47 respectively. Because BF16 was slower for Step 2 and altered many class
+pixels, I stopped before full-route waviness evaluation and did not change the
+profile. Measurements are in `/tmp/wave_v18_precision_screen.py`.
+
+### CPU and copy-reduction follow-up on the compiled full-resolution route
+
+A synchronized eight-photo diagnostic of the compiled + HEIF + `reducing_gap=2`
+route found median raw decode 25.4 ms, Step 1 124.7 ms (27.5 ms SegFormer
+forward, 97.9 ms remaining image/mask work), Step 2 44.7 ms (19.2 ms forward,
+25.1 ms remaining crop/mask work), and regression 4.8 ms. JPEG encode/decode
+round trips were each below 0.3 ms in this diagnostic. Median process CPU time
+was 376.5 ms and peak RSS/GPU allocation/reservation were 2.82/0.583/0.621
+GiB. Synchronizing model calls for attribution changes timing, so these are
+stage diagnostics from eight images, not request latency estimates. They show
+that further JPEG or regressor tuning cannot close the remaining gap; source
+resolution Step 1 image/mask work dominates.
+
+I screened OpenCV thread counts 1, 4, and 8 on 12 test photos. Final JPEGs and
+predictions were identical in all three settings. Median end-to-end times were
+241.8, 242.5, and 240.4 ms, while median process CPU time rose from 417.8 ms
+at one thread to 432.3 and 439.3 ms. This is no repeatable latency gain for
+extra CPU use; keep one OpenCV thread for this single-image workload.
+
+I also replaced the Pillow ROI crop with a NumPy view before applying the same
+OpenCV mask and Pillow resizer. On the 12-image screen, Step 2 JPEGs and
+predictions matched exactly, but median latency changed only from 240.54 to
+240.21 ms. This removes an allocation without a demonstrated request speedup.
+Finally, direct Pillow BGR-to-RGB decoding via `Image.frombytes` reproduced
+the same oriented RGB bytes on all 92 HEIC/HEIF sources as the existing
+`cv2.cvtColor` route. In a 12-request paired full-pipeline screen, JPEGs and
+predictions matched 12/12; median latency was effectively unchanged (241.25
+versus 241.20 ms), while median process CPU time fell about 5.5 ms. These small
+copy/thread experiments do not materially advance the 100-ms target and were
+not integrated. Temporary artifacts are under
+`/tmp/wave_v18_fastest_substage_profile_v1/`,
+`/tmp/wave_v18_fastest_cv_threads_screen_v1/`,
+`/tmp/wave_v18_roi_view_screen_v1/`, and
+`/tmp/wave_v18_decoder_rgb_conversion_ab_v1/`.
+
+### GPU nearest-exact expansion of the Step 1 class mask (2026-10-29)
+
+I tested moving the 448×448 Step 1 class map to the GPU, expanding it to the
+source photo dimensions with `torch.nn.functional.interpolate(mode="nearest-exact")`,
+then transferring the full-resolution uint8 mask back to the CPU. The operation
+supports uint8 and used about 12 MiB for a 3024×4032 output. It is not
+pixel-equivalent to the existing Pillow nearest resize: on an initial eight
+HEIC sample, six masks differed, by 45–846 pixels each.
+
+I then ran the candidate through the full compiled-v18 + parallel HEIF decode
++ staged Lanczos pipeline on the same 93 labeled validation/test photos. MAE
+was 0.135256 on validation versus 0.134523 for the prior combined candidate
+(+0.54%), and 0.116713 on test versus 0.117448 (−0.63%). These point estimates
+are within 1%, but 40/93 final JPEGs and predictions matched the prior route.
+The candidate's separate run measured 241.4 ms median / 256.8 ms p95 on
+validation and 243.1 / 256.7 ms on test, compared with 220.2 / 228.3 ms and
+221.6 / 228.0 ms in the prior combined run. Since those latency measurements
+were not interleaved, treat the cross-run difference as indicative rather than
+a paired estimate. The candidate shows no demonstrated speed gain and changes
+segmentation outputs, so it is not adopted. Full records and runner are under
+`/tmp/wave_v18_gpu_mask_ab_v1/`. The initial pixel-parity counts are recorded
+above; the per-request full-pipeline comparisons are in `records.json`.
+
+### CV and runtime performance-principles screens (2026-10-29)
+
+I checked the current implementation against primary framework guidance before
+choosing follow-up experiments. PyTorch recommends inference mode, avoiding
+unnecessary host/device synchronization and copies, and benchmarking memory
+formats on the actual model/backend; it cautions that manual pinning has setup
+cost and can be slower than a direct transfer. This path already uses
+`torch.inference_mode()`, CPU-side OpenCV/Pillow mask processing, and only moves
+the resized SegFormer tensors to the accelerator; prediction serialization
+requires the final scalar on the CPU. AMD documents ROCm support for CUDA graphs,
+and PyTorch's `reduce-overhead` mode uses them for fixed-shape calls, at the
+cost of extra memory and warm-up. OpenCV recommends `INTER_AREA` for image
+decimation, while Pillow's `reducing_gap` accelerates a resize by staging an
+integer reduction before the final filter ([PyTorch tuning guide](https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html),
+[PyTorch transfer guidance](https://docs.pytorch.org/tutorials/intermediate/pinmem_nonblock.html),
+[PyTorch compile modes](https://docs.pytorch.org/docs/stable/generated/torch.compile.html),
+[ROCm/PyTorch support](https://rocm.docs.amd.com/en/docs-6.3.3/compatibility/pytorch-compatibility.html),
+[OpenCV resize guidance](https://docs.opencv.org/5.0/main_modules/imgproc_transform.html),
+[Pillow reducing-gap behavior](https://pillow.readthedocs.io/en/latest/reference/Image.html)).
+
+I measured channels-last with production FP16 autocast and inference mode on the
+Radeon 8060S. The 448 pass changed median model time from 37.02 to 36.76 ms;
+the 384 pass changed 24.79 to 25.40 ms. Both produced bit-identical logits on
+the probe input. The combined saving is under 1 ms and negative for the second
+pass, so this memory-format change is not worth adopting. Full raw-to-output
+MAE was not evaluated because the model outputs were identical on the synthetic
+probe only. A prior full-request v16 channels-last run is also effectively
+neutral; it is recorded earlier in this document.
+
+I checked the rectangular erosion as a pair of one-dimensional erosions. It
+was pixel-exact on eight real masks, but took 4.34 ms median versus 3.30 ms for
+the existing 25×25 OpenCV erosion. I also restricted erosion to the detected
+water bounding box plus the 12-pixel kernel radius. This reproduced the full
+mask and Step 1 RGB output exactly on eight photos, but saved only 0.26 ms
+median because the water bounding box occupied a median 75% of the frame. MAE
+was not recomputed for these exact-output screens; they did not justify a full
+pipeline run or code change.
+
+The output-standardization resize is a much larger CPU cost. I compared
+OpenCV `INTER_AREA` to Pillow Lanczos on eight real masks: it cut that Step 1
+substage from 73.4 to 37.2 ms median, but changed every output. On the complete
+interleaved 93-photo raw-to-output run, validation MAE improved from 0.135669
+to 0.133991 (−1.24%), while test MAE regressed from 0.116597 to 0.121015
+(+3.79%). Median total latency fell from 330.5/332.4 to 291.6/299.8 ms on
+validation/test, with 0/93 requests below 100 ms. This fails the 1% MAE screen
+and is rejected.
+
+I also tested OpenCV `INTER_LANCZOS4`, a closer filter-family replacement. It
+saved 47.9 ms median in the paired raw-to-output run, but MAE regressed by
+4.48% on validation (0.141752 vs 0.135669) and 13.55% on test (0.132397 vs
+0.116597). Total latency was 281.3/297.3 ms on validation and 285.1/293.4 ms
+on test; no request was below 100 ms. This filter is rejected for quality.
+
+Pillow's staged reduction on the SegFormer processor's large bilinear input
+resize (`reducing_gap=3`) changed fewer input values than OpenCV's resize and
+saved 8.9 ms median in a paired 93-photo run. Validation MAE improved to
+0.134786 (−0.65%); test MAE regressed to 0.119727 (+2.68%). The candidate
+changed final JPEGs and predictions on 92/93 photos and remains above 100 ms
+(323.0/336.9 ms validation; 328.8/338.9 ms test). It fails the 1% screen and
+is rejected. This is distinct from the earlier `reducing_gap=2` candidate on
+the Step 1/Step 2 Lanczos resizes, which passed the point-estimate screen on
+both splits but is still experimental.
+
+I screened `torch.compile(mode="reduce-overhead")` on the two fixed model
+shapes, under inference mode. Eager versus compiled medians were 37.17 vs
+27.13 ms at 448 and 27.98 vs 19.56 ms at 384. Class argmax agreed on the
+synthetic probe; maximum logit difference was 0.03125. Warm compile/capture
+took about 2.9 s for 448 and 9.0 s for 384. This was no better than the
+previous default compiled model's measured forward times (about 25.4 and
+19.2 ms); no full-request MAE was measured, so the mode was not advanced.
+
+The separate `max-autotune-no-cudagraphs` screen took about 200 s to warm its
+448 shape and measured 28.07 ms versus 39.73 ms eager on one probe, slower
+than the default compiled 448 result. It showed exact argmax on that probe
+(maximum logit delta 0.03125). I stopped before compiling 384 or measuring
+full-request MAE because the first shape already lost to the default compiled
+route and had high startup cost. These compiler-mode probes did not change
+pipeline files or the selected checkpoint.
+
+Artifacts are under `/tmp/wave_v18_channels_last_screen.json`,
+`/tmp/wave_v18_roi_erode_screen.json`,
+`/tmp/wave_v18_erode_separable_screen.json`,
+`/tmp/wave_v18_area_resize_full_ab_v1/`,
+`/tmp/wave_v18_lanczos4_resize_full_ab_v1/`,
+`/tmp/wave_v18_processor_gap3_full_ab_v1/`,
+`/tmp/wave_v18_compile_reduce_overhead_screen.json`, and
+`/tmp/wave_v18_compile_autotune_screen.py`.
+
+### Full-resolution SegFormer-B0 route with compiled inference and exact HEIF decode (2026-10-29)
+
+I compared the selected v18 B2 pipeline against a full-resolution candidate
+that keeps both segmentation passes and the complete 448/384 model-input
+profiles. The candidate swaps in pretrained SegFormer-B0, compiles the models
+with the default `torch.compile` mode, uses the exact native HEIF tiled
+decoder, and applies Pillow staged Lanczos reduction (`reducing_gap=2`). No
+source pixels or pipeline stages were skipped. Both routes ran in interleaved
+order on the same 93 labeled raw photos; latency includes processing through
+the flushed prediction output.
+
+| Route | MAE, validation (47) | MAE, test (46) | Median total latency, validation | Median total latency, test | Requests under 100 ms |
+|---|---:|---:|---:|---:|---:|
+| Current v18 B2 | 0.135669 | 0.116597 | 300.25 ms | 310.19 ms | 0/93 |
+| Full-resolution B0 combo | 0.134233 (−1.06%) | 0.111422 (−4.44%) | 188.13 ms | 188.54 ms | 0/93 |
+
+The paired median latency saving was 121.64 ms. The candidate changed the final
+JPEG and prediction for all 93 photos. A 20,000-resample capture-date cluster
+bootstrap (31 validation dates and 27 test dates) estimated candidate-minus-
+baseline absolute-error deltas of −0.00144 on validation (95% interval
+−0.02800 to +0.02194) and −0.00518 on test (−0.02206 to +0.01177). The
+intervals include regressions, so the lower point-estimate MAEs are encouraging
+but do not establish that quality is preserved. This remains experimental.
+
+Printed stage timings on the candidate had median decode 30 ms, Step 2
+lower-water preprocessing 34 ms, and model inference 5 ms. These diagnostics
+do not sum to the end-to-end latency because they omit other pipeline work and
+timing boundaries overlap. Peak resident memory was 3.26 GiB; peak PyTorch GPU
+allocated/reserved memory was 0.60/0.63 GiB. No request met the 100 ms target.
+
+An earlier screen found PyTorch `nearest` and `nearest-exact` did not reproduce
+Pillow's mask enlargement on all tested masks. OpenCV `INTER_NEAREST_EXACT`
+did reproduce all eight masks byte-for-byte. In the full 93-photo interleaved
+run, however, it preserved all final JPEGs and predictions but saved only
+2.31 ms paired median latency. That is not a material end-to-end gain and was
+not adopted. A microbenchmark that had suggested a much larger Pillow cost
+included pending GPU synchronization from an earlier inference; its latency
+attribution was invalid and should not be used.
+
+The paired data, date bootstrap, logs, and predictions are in
+`/tmp/wave_v18_b0_combo_full_ab_v1/`; the runner is
+`/tmp/wave_v18_b0_combo_full_ab.py`.
+
+### Apply the water-class lookup before full-resolution nearest expansion (2026-10-29)
+
+In the fast single-image profile, SegFormer first produces a 448-pixel class
+map. The existing path expands that class map to the source dimensions, copies
+the full-resolution array into a tensor, then scans it to make a binary water
+mask. I moved the same class-ID lookup to the 448-pixel map and nearest-resized
+the binary mask directly. Pointwise class lookup commutes with nearest-neighbor
+sampling, so the full-resolution water mask should remain identical while
+avoiding the intermediate class-map allocation and full-frame lookup pass.
+
+I compared the change in two interleaved full raw-to-prediction runs, with
+the same checkpoint, model, decoder, resize behavior, and 93 labeled photos.
+The v18 B2 run is the production-relevant result:
+
+| Route | MAE, validation (47) | MAE, test (46) | RMSE, validation | RMSE, test | Total latency, validation (median / p95 / max) | Total latency, test (median / p95 / max) | Under 100 ms |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Current v18 B2 path | 0.135669 | 0.116597 | 0.170880 | 0.149327 | 333.64 / 346.64 / 360.27 ms | 337.09 / 351.01 / 356.59 ms | 0/93 |
+| v18 B2 lookup before expansion | 0.135669 | 0.116597 | 0.170880 | 0.149327 | 323.64 / 341.66 / 351.07 ms | 328.70 / 342.31 / 345.13 ms | 0/93 |
+
+The paired median saving was 9.59 ms; median process CPU time fell by about
+6.6–10.5 ms depending on split. Peak process RSS was 2.93 GiB and peak GPU
+allocated/reserved memory was 0.588/0.615 GiB. The absolute timings were slower
+than some earlier runs, so the paired saving within this run is the relevant
+comparison. This exact-output change is integrated into
+`step_1_a_water_segmentation.py`, `step_1_b_preprocess_water_inputs.py`, and
+`step_2_a_reduce_black_water_area.py`; overlapping-tile profiles retain their
+existing path.
+
+All 93 requests succeeded in both arms; prediction delta was exactly zero on
+all 93 photos, so paired MAE and RMSE deltas were both zero.
+
+Within this run, printed stage medians were 56–57 ms for raw decode, 200–211
+ms for Step 1 segmentation and standardization, and 59 ms for Step 2. These
+stage timers are diagnostic and should not be added to derive total latency.
+They show that eliminating one full-resolution intermediate is useful but
+small beside the remaining segmentation and crop work.
+
+### Numba-compile the exact Step 2 crop search (2026-10-29)
+
+The Python crop selector took about 9.9 ms on representative 224×224 masks.
+I kept its candidate rules and tie ordering, but moved the loops and summed
+area calculations into a Numba nopython kernel. A vectorized NumPy rewrite was
+slower (12.6 ms versus 9.9 ms across the same 20-mask screen), so it was
+discarded. The compiled kernel matched the Python `CropMetrics` on 100
+synthetic masks, and the first full v18 B2 run matched all 93 final JPEGs and
+predictions exactly.
+
+I then integrated the JIT kernel as `step_2_b_crop_selector.py`, kept the
+readable Python implementation as a reference, and warmed the fixed bool-mask
+signature during segmentation-model initialization so compilation is outside
+the per-photo timer. The complete interleaved run used the same 93-photo
+snapshot, checkpoint, raw decoder, early water-mask lookup, and both
+segmentation passes:
+
+| Crop selector | MAE, validation / test | RMSE, validation / test | Total latency, validation (median / p95 / max) | Total latency, test (median / p95 / max) |
+|---|---:|---:|---:|---:|
+| Python reference | 0.135669 / 0.116597 | 0.170880 / 0.149327 | 321.33 / 333.64 / 342.21 ms | 324.14 / 339.41 / 342.97 ms |
+| Numba kernel | 0.135669 / 0.116597 | 0.170880 / 0.149327 | 301.15 / 314.52 / 318.01 ms | 303.46 / 321.03 / 322.14 ms |
+
+All 93 requests succeeded in both arms. JPEGs and predictions matched 93/93;
+the maximum prediction delta was zero, so MAE and RMSE were unchanged. Paired
+median latency saving was 19.13 ms; median process CPU time fell about 18–20
+ms. No request was under 100 ms. Peak process RSS was 3.07 GiB and peak GPU
+allocated/reserved memory was 0.588/0.615 GiB. With a fresh Numba cache, model
+initialization warmed the selector in 0.126 s; that one-time startup cost is
+excluded from raw-to-output latency. The cache allows later process starts to
+reuse the compiled kernel.
+
+The implementation and dependency are integrated in `step_2_b_crop_selector.py`,
+`step_2_a_reduce_black_water_area.py`, `step_1_a_water_segmentation.py`, and
+`requirements-common.txt`. Numba's official guidance supports compiled loops
+in nopython mode and documents Python 3.14 compatibility in the current
+release series ([performance tips](https://numba.readthedocs.io/en/stable/user/performance-tips.html),
+[version compatibility](https://numba.readthedocs.io/en/stable/user/installing.html)).
+The full paired records and runner are under
+`/tmp/wave_v18_b2_numba_integrated_full_ab_v1/` and
+`/tmp/wave_v18_b2_numba_integrated_full_ab.py`.
+
+### Combined exact-output changes against the unmodified v18 B2 path (2026-10-29)
+
+I also ran one interleaved 93-photo comparison from the original v18 B2 path
+against the combined current changes: class-to-water lookup before nearest
+expansion plus the Numba crop selector. The baseline used the original
+full-resolution class-map expansion and Python crop search. Both arms used the
+same checkpoint, decoder, model settings, two segmentation passes, and output
+writes. This was the v18 checkpoint and the 2026-10-28 validation/test split
+snapshot (`20261028T081606614158Z`). The labeled evaluation data was not used
+to design or tune either exact-output transformation. The Numba signature was
+warmed during model initialization.
+
+| Route | MAE, validation / test | RMSE, validation / test | Total latency, validation (median / p95 / max) | Total latency, test (median / p95 / max) |
+|---|---:|---:|---:|---:|
+| Original v18 B2 | 0.135669 / 0.116597 | 0.170880 / 0.149327 | 335.87 / 355.96 / 356.01 ms | 337.20 / 357.66 / 359.89 ms |
+| Combined exact-output changes | 0.135669 / 0.116597 | 0.170880 / 0.149327 | 300.67 / 317.81 / 327.23 ms | 302.99 / 325.69 / 330.02 ms |
+
+All 93 requests succeeded in both arms. JPEGs and predictions matched 93/93;
+maximum prediction delta was zero, so MAE and RMSE were unchanged. The paired
+median saving was 28.53 ms, and median process CPU time fell about 30–35 ms.
+No request was below 100 ms. Peak process RSS was 3.04 GiB; peak GPU
+allocated/reserved memory was 0.588/0.615 GiB. These timings are a same-run
+comparison; stage and historical medians vary with system load. The complete
+records and runner are under `/tmp/wave_v18_b2_exact_combined_full_ab_v1/` and
+`/tmp/wave_v18_b2_exact_combined_full_ab.py`.
+
+### Integrated native HEIF decoder plus exact v18 optimizations (2026-10-29)
+
+I added an optional Linux build for the parallel libheif tile decoder and
+connected it to shared image loading. `python step_0_b_build_native_heif.py`
+builds an ignored local library against the libheif bundled with the installed
+Pillow-Heif package. If the helper is not built or a file fails native decode,
+the loader uses Pillow. The decoder matched Pillow's oriented RGB pixels on
+all 318 HEIF files in the current raw-data folder.
+
+The interleaved full-route comparison used the same v18 B2 checkpoint and
+2026-10-28 93-photo split snapshot as above. The candidate combines this
+integrated native decoder with the two exact transformations: low-resolution
+class-to-water lookup and Numba crop selection. Both arms used two segmentation
+passes and the same output writes.
+
+| Experiment | MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Current v18 B2 pipeline | 0.135669 / 0.116597 | 328.09 / 340.07 ms | 329.07 / 342.91 ms |
+| Integrated native HEIF + exact optimizations | 0.135669 / 0.116597 | 286.33 / 300.38 ms | 286.18 / 308.76 ms |
+
+All 93 requests succeeded in both arms. Final JPEGs and predictions matched
+93/93, so MAE was unchanged. Paired median latency saving was 37.33 ms. No
+request was under 100 ms. The decoder uses additional CPU: median process CPU
+time increased from 448 to 477 ms on validation and 447 to 471 ms on test.
+Peak RSS was 3.08 GiB; peak GPU allocated/reserved memory was 0.588/0.615 GiB.
+This improves end-to-end latency with exact output parity, but the median still
+misses the 100-ms target by about 186 ms. The native helper source, build
+command, and Python wrapper are `native/libheif/step_0_a_tiled_decode.cpp`,
+`step_0_b_build_native_heif.py`, and `step_0_a_native_heif_decoder.py`. Public
+libheif headers and the LGPL license notice are included under `native/libheif/`.
+Full records and runner: `/tmp/wave_v18_b2_native_integrated_full_ab_v1/` and
+`/tmp/wave_v18_b2_native_integrated_full_ab.py`.
+
+### Native HEIF tile-worker count on the exact v18 route
+
+I compared 4, 8, and 16 parallel tile workers in the integrated native libheif
+decoder on the 92 HEIF/HEIC photos in the labeled 93-photo snapshot. Decoded
+RGB pixels matched the 16-worker output byte-for-byte for all photos at each
+setting. Decode-only median latency was 49.46 ms at 4 workers, 31.58 ms at 8,
+and 24.59 ms at 16; median process CPU time rose from 152.76 to 161.38 and
+187.33 ms. Thus 4/8 workers save CPU but slow the decode, while 16 is the best
+latency setting in this sweep.
+
+I then compared 16 versus 24 workers in an interleaved complete raw-to-output
+run over all 93 labeled photos. Both settings used the same native decoder,
+exact mask/crop path, model, and output writes:
+
+| Experiment | MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Current exact route, 16 HEIF workers | 0.135669 / 0.116597 | 288.86 / 299.53 ms | 288.30 / 306.69 ms |
+| 24 HEIF workers | 0.135669 / 0.116597 | 285.26 / 300.25 ms | 290.38 / 312.53 ms |
+
+All 93 requests succeeded and JPEGs/predictions matched 93/93. Paired median
+latency saving was 1.98 ms, but mean process CPU time increased 41.61 ms and
+p95 latency worsened on both splits. Peak RSS was 2.56 GiB and accelerator
+allocation/reservation was 0.588/0.615 GiB. I kept 16 workers: 24 offers a
+small median-only improvement at higher CPU cost and worse tails. Records and
+runner are under `/tmp/wave_v18_native_heif_16_24_full_ab_v1/` and
+`/tmp/wave_v18_native_heif_16_24_full_ab.py`; the 4/8/16 exact-pixel screen is
+in `/tmp/wave_native_heif_workers_screen_v1/`.
+
+### Split SegFormer decoder fusion on the selected fast-v1 profile
+
+The selected v18 profile uses fixed 448/384-pixel FP16 Segmenter calls. I
+tested the existing inference-only split-fusion rewrite in this profile; the
+same algebraically equivalent rewrite had previously been tried only on the
+older 768-pixel FP32 tiled profile. The model inputs, precision, preprocessing,
+checkpoint, and output writes were fixed in an interleaved 93-photo comparison.
+
+| Experiment | MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Current eager decoder fusion | 0.135669 / 0.116597 | 284.36 / 300.78 ms | 289.23 / 306.01 ms |
+| Split decoder fusion | 0.135713 / 0.118038 (+0.03% / +1.23%) | 283.23 / 302.42 ms | 287.69 / 300.98 ms |
+
+All 93 requests succeeded. Final JPEGs and predictions matched on only 66/93
+photos; the altered FP16 summation order changed the remaining 27. Paired
+median latency saving was 1.27 ms and process CPU time fell 2.08 ms on
+average, but test MAE regressed 1.23%, beyond the 1% quality gate. Peak RSS
+was 2.52 GiB; accelerator allocation/reservation was 0.588/0.643 GiB. I
+rejected this rewrite for fast-v1. Records and runner are under
+`/tmp/wave_v18_fastv1_split_fusion_full_ab_v1/` and
+`/tmp/wave_v18_fastv1_split_fusion_full_ab.py`.
+
+### Profile the remaining exact-route bottleneck; CPU-side FP16 transfer screen
+
+The 93-photo route logs identify the work still dominating after native decode:
+median decode was 41 ms, Step 1 segmentation/standardization 199 ms, Step 2
+37 ms, both JPEG round trips about 2 ms combined, and regression inference
+4 ms. A one-image PyTorch/ROCm profiler capture was instrumented and therefore
+is not a latency benchmark; it showed host time in `hipMemcpyWithStream` and
+`hipMalloc` around both segmentation calls. This points to Step 1 image
+standardization and accelerator input/temporary-buffer handling as the next
+targets, rather than the regression head. PyTorch's tuning guide recommends
+avoiding unnecessary host/device synchronization and transfers, and AMD's
+ROCm profiler can trace copies and kernel activity ([PyTorch tuning guide](https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html),
+[ROCm profiling](https://rocm.docs.amd.com/projects/rocprofiler/en/latest/how-to/using-rocprof.html)).
+
+I tested casting the normalized Step 1 processor tensor to FP16 on the CPU
+before transfer. The checkpoint already uses FP16 autocast. The cast preserved
+the water mask on a 10-photo screen, then I ran an interleaved full comparison
+on the same 93 labeled photos. It matched every final JPEG and prediction, so
+MAE was unchanged, but wall latency did not improve:
+
+| Experiment | MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Current exact native-decoder route | 0.135669 / 0.116597 | 286.90 / 302.34 ms | 288.63 / 307.25 ms |
+| CPU FP16 input for Step 1 only | 0.135669 / 0.116597 | 285.98 / 299.92 ms | 290.09 / 308.02 ms |
+
+The paired median saving was −1.62 ms (the candidate was slower); no request
+was under 100 ms. Median process CPU time fell by only about 1 ms, and peak RSS
+was 2.52 GiB with GPU allocated/reserved memory 0.588/0.615 GiB. I did not
+adopt the cast. Full records and runner are in
+`/tmp/wave_v18_b2_cpu_fp16_firstpass_full_ab_v1/` and
+`/tmp/wave_v18_b2_cpu_fp16_firstpass_full_ab.py`.
+
+### Exact Step 1 CPU substage profile (93-photo snapshot)
+
+I timed the canonical Step 1 operations separately on all 93 labeled raw
+photos, synchronizing only around the GPU segmentation call. The manually
+assembled Step 1 output JPEG matched the canonical function on 93/93 photos.
+Median segmentation/mask generation was 102.63 ms (p95 108.02); erosion was
+3.53 ms; bounding box and area checks 0.57 ms; Pillow ROI crop 2.21 ms; ROI
+array conversion 4.11 ms; OpenCV masking 3.89 ms; and Pillow Lanczos resize
+46.19 ms (p95 54.94). The complete isolated Step 1 function measured 170.71 ms
+median / 193.83 ms p95. Earlier full-route logs measured about 200 ms for Step
+1 under the interleaved prediction benchmark, so these isolated component
+times are diagnostic and should not be added to full-route timings. No code
+changed and no new regression MAE was calculated; pixel equality at Step 1 was
+exact. The profile data is `/tmp/wave_step1_substage_profile_93_with_full.json`.
+
+The next useful work is therefore in segmentation execution and the large
+Lanczos reduction. The other measured Step 1 CPU operations together are about
+14 ms median, leaving little opportunity in erosion or crop bookkeeping.
+
+### Fixed-shape HIP graph replay for the two SegFormer calls (2026-10-29)
+
+AMD and PyTorch guidance recommend reducing host/device launch overhead when
+small inference workloads leave gaps between kernels, while reusing fixed
+buffers for repeated shapes. This Ryzen AI Max+ system uses an integrated
+Radeon 8060S and the prediction profile makes two fixed-shape B2 calls (448
+and 384 pixels), so I screened PyTorch's `torch.cuda.CUDAGraph` HIP path. The
+graph runner copied each processor tensor into a persistent input buffer and
+replayed captured model forwards; weights, precision, resize, mask, crop,
+JPEGs, and regression checkpoint were unchanged. This follows the graph and
+launch-overhead recommendations in the official [PyTorch HIP semantics and
+CUDA interface notes](https://docs.pytorch.org/docs/main/notes/hip.html),
+[PyTorch graph performance notes](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_cudagraph_trees.html),
+and [AMD HIP performance guidelines](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/performance_guidelines.html).
+
+An isolated synchronized screen showed eager versus graph-replay medians of
+38.71 versus 37.71 ms at 448 and 28.66 versus 26.58 ms at 384, including the
+copy into persistent graph inputs. Captured logits were bit-identical on the
+screened input. I then ran an interleaved, complete 93-photo comparison of
+graph replay against eager inference with the same current exact decoder,
+mask, crop, JPEG, and output-record route:
+
+| Route | MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Current exact route with eager SegFormer | 0.135669 / 0.116597 | 291.74 / 302.50 ms | 296.10 / 310.88 ms |
+| Fixed-shape HIP graphs for SegFormer | 0.135669 / 0.116597 | 295.00 / 306.30 ms | 297.34 / 316.78 ms |
+
+All 93 requests succeeded. Final Step 2 JPEGs and waviness predictions matched
+93/93 exactly, so MAE was unchanged. Graph replay was 3.31 ms slower by paired
+median and increased process CPU time by 4.0 ms on average. The graph run
+reached 1.57 GiB allocated / 2.13 GiB reserved accelerator memory, compared
+with about 0.59 / 0.62 GiB for the existing eager route. The isolated model
+forward reduction did not carry through the complete request: processor
+tensor copies, graph memory pools, and surrounding CPU work outweighed the
+launch savings. I rejected graph replay and made no production change.
+
+Two preliminary full-route attempts were discarded before analysis because
+the harness left the shared processor at 384 pixels after graph capture,
+causing Step 1 to run at the wrong configured size. The result above restores
+the profile's 448-pixel Step 1 size and passes the 93/93 JPEG and prediction
+parity check against the current reference. Runner and full paired records:
+`/tmp/wave_v18_hip_graph_full_ab_v3.py` and
+`/tmp/wave_v18_hip_graph_full_ab_v3/`.
+
+### Per-image pinned host inputs for HIP transfers (2026-10-29)
+
+PyTorch commonly recommends pinned host memory when a data loader can prepare
+the next batch while the GPU handles the current one. This pipeline serves one
+photo at a time on an integrated Radeon, so there is no independent batch to
+overlap. I tested pinning each SegFormer processor tensor and transferring it
+with `non_blocking=True`, compared with the existing pageable tensor transfer.
+Decoder, model inputs and precision, both segmentation calls, exact mask/crop
+logic, JPEGs, regression checkpoint, and output writes were held fixed in an
+interleaved 93-photo run.
+
+| Route | MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Existing pageable input transfer | 0.135669 / 0.116597 | 286.42 / 298.65 ms | 286.59 / 304.73 ms |
+| Per-image pin + nonblocking transfer | 0.135669 / 0.116597 | 286.30 / 299.05 ms | 284.18 / 307.14 ms |
+
+All 93 outputs matched exactly. The paired median latency saving was −0.02 ms,
+and median CPU time changed by less than 1 ms. Pinning did not improve the
+single-photo request and produced a noisier p95, so the existing transfer path
+remains. The summary-writing code failed after the paired records were saved,
+so peak host/GPU memory was not retained for this run. Per-image records and
+the runner are `/tmp/wave_v18_pinned_input_full_ab_v1/paired.json` and
+`/tmp/wave_v18_pinned_input_full_ab.py`.
+
+### Shareable RGBX buffer for native HEIF decoding (not adopted)
+
+I screened a Pillow-compatible RGBX buffer to avoid the temporary Python-bytes
+copy in the native HEIF decoder. The prototype decoded to a four-channel buffer
+and converted it directly to RGB; all 318 raw-folder HEIF images matched the
+existing loader byte-for-byte. This decoder-only test did not rerun prediction
+or MAE (current full-route reference MAE is 0.135669 validation / 0.116597
+test; exact decoded pixels imply unchanged inputs if the route is used).
+
+| Decoder | MAE, validation / test | Decode-only latency (median / p95) |
+|---|---:|---:|
+| Current native RGB path | 0.135669 / 0.116597 (full-route reference) | 32.25 / 42.43 ms |
+| RGBX bridge prototype | Not remeasured; source pixels exact | 30.12 / 42.71 ms |
+
+Paired median decode saving was only 1.18 ms, while p95 was 0.28 ms slower.
+Because the extra four-channel buffer adds memory traffic for a marginal median
+gain, I did not integrate it. Runner and measurements are in
+`/tmp/wave_heif_rgbx_decode_ab.py` and `/tmp/wave_heif_rgbx_decode_ab.json`;
+the temporary prototype is `/tmp/wave_heif_tiled_decode_rgbx.cpp`.
+
+I also repeated the isolated transformation on the experimental full-resolution
+B0 combo. It matched all 93 JPEGs and predictions exactly, preserved that
+candidate's MAE (0.134233 validation / 0.111422 test), and saved 11.31 ms
+paired median latency. A first wrapper version omitted `torch.inference_mode()`
+and changed model logits; those measurements were discarded. Both reported
+runs use inference mode. The B2 paired records and logs are under
+`/tmp/wave_v18_b2_earlymask_full_ab_v1/`; the runner is
+`/tmp/wave_v18_b2_earlymask_full_ab.py`. The B0 repeat is under
+`/tmp/wave_v18_b0_binary_mask_full_ab_v1/`.
+
+### Exact low-resolution erosion lookup screen (not advanced)
+
+I screened whether the full-resolution nearest-expanded binary mask could be
+eroded directly from its 448×448 source mask using a small summed-area table.
+For each output pixel, the method queried the exact low-resolution source
+rectangle that maps into the replicated-border erosion window. On eight
+synthetic 3024×4032 masks with the production 25×25 kernel, all 8 eroded masks
+matched OpenCV byte-for-byte. After warm-up, however, the Numba lookup took
+9.15 ms median versus 0.40 ms for OpenCV erosion alone; it also has to build
+source-index maps. The OpenCV path remains faster, so this optimization was
+rejected without a full pipeline run. This is a mask-equivalence screen, not a
+waviness-quality or end-to-end latency result. The prototype is in
+`/tmp/wave_lowmask_erode.py`.
+
+### OpenCV `INTER_LINEAR_EXACT` for SegFormer input resize (experimental)
+
+The Hugging Face SegFormer processor uses bilinear image resizing, rescaling,
+and ImageNet normalization. I screened OpenCV's `INTER_LINEAR_EXACT` before
+normalization; OpenCV documents it as bit-exact bilinear interpolation, but
+its output is not bit-identical to Pillow's resize in this pipeline
+([SegFormer processor](https://huggingface.co/docs/transformers/model_doc/segformer),
+[OpenCV interpolation flags](https://docs.opencv.org/4.x/da/d54/group__imgproc__transform.html)).
+On all 93 raw photos, every normalized 448-pixel input tensor differed from
+Pillow's tensor, although the maximum normalized-value delta was 3.24 on the
+normalized scale. A one-image pre-normalization check found a maximum raw
+channel difference of 74 levels (428,119 of 602,112 channel values differed),
+consistent with the different downsampling filters rather than a rounding-only
+change. The processor stage median fell from 40.67 to 3.05 ms in isolation.
+
+I then ran the full interleaved comparison with the selected v18 B2 checkpoint,
+the exact native decoder, exact mask lookup/crop selector, and the same two
+segmentation passes. The candidate uses OpenCV bilinear resize for both
+SegFormer input sizes and keeps the processor's rescale/normalization steps.
+
+| Experiment | MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Current exact v18 B2 route | 0.135669 / 0.116597 | 284.63 / 303.58 ms | 287.88 / 312.68 ms |
+| OpenCV `INTER_LINEAR_EXACT` processor resize | 0.136720 / 0.108323 | 252.51 / 267.56 ms | 255.60 / 276.94 ms |
+
+All 93 requests succeeded. Final JPEGs and predictions changed on all 93.
+Validation MAE increased 0.77%; test MAE improved 7.10%. The paired median
+latency saving was 32.52 ms, and median process CPU time fell about 32–35 ms.
+No request was under 100 ms. Peak RSS was 2.52 GiB; GPU allocated/reserved
+memory was 0.588/0.615 GiB.
+
+A 20,000-resample capture-date cluster bootstrap gives candidate-minus-current
+MAE intervals of [−0.01512, +0.01720] on validation and [−0.02412, +0.00611]
+on test. Both include regression, so the point estimates do not establish
+quality preservation. The candidate is not adopted; it is also still about
+153 ms above the median target. Full records, bootstrap, and runner are under
+`/tmp/wave_v18_b2_cv_linear_exact_full_ab_v1/` and
+`/tmp/wave_v18_b2_cv_linear_exact_full_ab.py`; the input-tensor screen is
+`/tmp/wave_segformer_resize_equivalence.json`.
+
+I also screened the antialiasing-oriented OpenCV `INTER_AREA` for the
+4032-to-448 downscale, retaining `INTER_LINEAR_EXACT` for the 224-to-384
+upscale. This follows OpenCV's guidance that area resampling is generally
+suited to decimation. On the same 93-photo full-route snapshot:
+
+| Experiment | MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Current exact v18 B2 route | 0.135669 / 0.116597 | 281.21 / 301.02 ms | 282.91 / 305.20 ms |
+| OpenCV area downscale + linear upscale | 0.139559 / 0.118194 | 266.59 / 286.09 ms | 267.09 / 288.63 ms |
+
+The paired median saving was 14.77 ms and median process CPU time fell about
+14–18 ms. Validation MAE regressed 2.87% and test MAE 1.37%, failing the 1%
+screen; no request was under 100 ms. The route is rejected. Peak RSS was
+2.52 GiB and GPU allocated/reserved memory 0.588/0.615 GiB. No bootstrap was
+run after it failed the point-estimate gate. Full records and runner are in
+`/tmp/wave_v18_b2_cv_area_exact_full_ab_v1/` and
+`/tmp/wave_v18_b2_cv_area_exact_full_ab.py`.
+
+### OpenVINO CPU screen for the selected B2 fast-v1 model (2026-10-29)
+
+The earlier OpenVINO CPU evaluation covered SegFormer-B0, so I screened the
+already-exported fixed-shape B2 graphs before considering an end-to-end route
+change. I compiled the 448 and 384 inputs for OpenVINO CPU FP32, latency mode,
+and one stream, and measured warm inference at 8, 16, and 32 inference threads.
+The best medians were 54.14 ms at 448 and 39.63 ms at 384, both at 32 threads
+(93.77 ms for the two model calls alone). At 16 threads they were 54.49 and
+39.75 ms; 8 threads were slower at 74.07 and 54.16 ms. The existing selected
+ROCm FP16 path measured 38.71 and 28.66 ms for the corresponding model calls
+in the HIP graph screen. Thus even the best CPU-only B2 model result is about
+39% slower before CPU image resizing, mask handling, decoding, JPEG round
+trips, regression, or output writing. It would also compete with those CPU
+stages for cores. I stopped at the model-only gate; no full-request A/B was
+run because the candidate already loses on the measured model portion.
+
+| Route | Waviness MAE (validation / test) | Total raw-to-output latency |
+|---|---:|---:|
+| Current v18 fast-v1 reference | 0.135669 / 0.116597 | 286.33 ms validation / 286.18 ms test median in the integrated native-decoder comparison |
+| OpenVINO CPU B2 screen | Not measured; no full pipeline was run | Not measured; model-only screen was slower than the selected ROCm route |
+
+This does not change the selected runtime. Model-only timings are diagnostic
+and are not presented as prediction latency. The screen ran with synthetic
+input tensors and did not evaluate masks, predictions, or waviness MAE. Its
+records were printed by the short-lived runner; the fixed ONNX graphs are
+`/tmp/wave-segformer-448.onnx` and `/tmp/wave-segformer-384.onnx`.
+
+### Pillow RGB buffer sharing check for native HEIF output (2026-10-29)
+
+I checked whether the installed Pillow can directly share the native decoder's
+three-channel RGB buffer. On a mutable `ctypes` buffer, `Image.frombuffer("RGB",
+...)` returned a non-shared image (`readonly=0`; changing the source buffer did
+not change the pixel). Pillow's `RGBX` mode did share the source buffer
+(`readonly=1`), but converting it back to the pipeline's required RGB mode
+allocates another image and carries a fourth channel through memory. That
+means it does not provide a safe, zero-copy RGB image to this pipeline. The
+earlier end-to-end-adjacent RGBX decoder screen also found only 1.18 ms median
+decode saving with a 0.28 ms p95 regression, so I did not change the decoder.
+No prediction or MAE rerun was justified by this API check; the current full
+route reference remains MAE 0.135669 / 0.116597 and total raw-to-output median
+286.33 / 286.18 ms on validation / test.
+
+### Skip redundant same-mode RGB copies before SegFormer preprocessing (2026-10-29)
+
+Pillow's `Image.convert("RGB")` returns a distinct pixel buffer even when the
+source is already RGB. The native HEIF loader and Step 1 JPEG decoder both
+provide RGB images, so the selected single-image route copied a full-resolution
+image before each SegFormer processor call. I compared the current calls with
+reusing the input when its mode is RGB, retaining conversion for all other
+modes. This changes no pixel values and leaves processor resizing,
+normalization, models, masks, crops, JPEGs, and regression checkpoint intact.
+
+The interleaved full-route comparison covered the same 93-photo validation and
+test snapshot, including decode, both preprocessing passes, regression, and
+output writes. It removed no pipeline stage. Every final JPEG and prediction
+matched (93/93), so MAE was exactly unchanged:
+
+| Route | Waviness MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Existing same-mode RGB conversion | 0.135669 / 0.116597 | 282.84 / 299.20 ms | 286.93 / 306.98 ms |
+| Reuse existing RGB image buffer | 0.135669 / 0.116597 | 264.77 / 282.01 ms | 270.59 / 289.16 ms |
+
+Paired median latency fell by 16.03 ms. Median process CPU time fell by
+16.76 ms on validation and 16.99 ms on test. Peak RSS was 2.52 GiB and peak
+GPU allocated/reserved memory was 0.588/0.615 GiB. No request was under
+100 ms, so this is an exact speed improvement but does not meet the latency
+target. The selected single-image route now skips the redundant copy for RGB
+inputs. Full per-image records and runner are in
+`/tmp/wave_v18_rgb_copy_elision_full_ab_v1/` and
+`/tmp/wave_v18_rgb_copy_elision_full_ab.py`.
+
+### Full-resolution mask array copy removal screen (2026-10-29)
+
+`np.asarray(resized_mask, dtype=np.uint8)` already returns a read-only NumPy
+view backed by a live `bytes` owner. OpenCV erosion accepts this read-only
+input, and the crop-search implementation explicitly creates its own writable
+lower-water mask before editing. I screened dropping the following `.copy()`
+in `run_water_mask`, leaving all segmentation and image operations unchanged.
+The candidate preserved JPEGs and predictions exactly on the same 93-photo
+full-route comparison, but it did not improve speed:
+
+| Route | Waviness MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Writable copied mask | 0.135669 / 0.116597 | 267.66 / 278.88 ms | 269.92 / 286.74 ms |
+| Read-only NumPy mask view | 0.135669 / 0.116597 | 269.40 / 284.25 ms | 271.26 / 291.28 ms |
+
+MAE was unchanged and all 93 JPEGs and predictions matched, but paired median
+latency was 1.61 ms slower with the view; median process CPU time rose by
+about 3.4 ms and peak memory was effectively unchanged. Keep the `.copy()`;
+the downstream OpenCV path sees no end-to-end advantage from removing it.
+Records and runner are in `/tmp/wave_v18_mask_copy_elision_full_ab_v1/` and
+`/tmp/wave_v18_mask_copy_elision_full_ab.py`.
+
+### Resize RGB PIL inputs before full-resolution NumPy conversion (2026-10-29)
+
+The Hugging Face SegFormer processor normally converts each full-resolution
+PIL image to a NumPy array, then its Pillow resize helper converts that array
+back to a PIL image before resizing. I measured a path that passes an existing
+RGB PIL image directly into the same Pillow resize and applies the processor's
+unchanged rescale, normalization, and channel-order steps afterward. This
+avoids the full-frame NumPy allocation and conversion back to PIL while
+retaining the same resampling operation. It does not change model inputs or
+skip preprocessing.
+
+Before the full run, the resulting 448×448 processor tensors matched the stock
+processor exactly on eight raw images. I then ran an interleaved comparison
+over the complete 93-photo validation/test snapshot. All requests succeeded;
+all 93 final JPEGs and predictions were byte/value identical, leaving waviness
+MAE unchanged:
+
+| Route | Waviness MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Existing processor NumPy-first path | 0.135669 / 0.116597 | 263.98 / 273.75 ms | 266.01 / 284.34 ms |
+| Direct Pillow resize before NumPy conversion | 0.135669 / 0.116597 | 240.34 / 254.06 ms | 242.16 / 257.27 ms |
+
+The paired median saving was 24.54 ms. Median process CPU time fell by
+26.05 ms on validation and 24.83 ms on test. Peak RSS was 2.55 GiB; peak GPU
+allocated/reserved memory was 0.588/0.615 GiB. No request was under 100 ms.
+The exact-resize path is installed on the shared SegFormer processor; non-RGB
+inputs and calls with resizing disabled retain the library implementation.
+Full records and the comparison runner are under
+`/tmp/wave_v18_processor_pil_first_full_ab_v1/` and
+`/tmp/wave_v18_processor_pil_first_full_ab.py`.
+
+### Vectorized exact Pillow nearest-neighbor mask expansion (2026-10-29)
+
+The single-image path expands its 448×448 binary mask to the source dimensions
+with Pillow nearest-neighbor, then copies the result into a writable NumPy
+array. I screened two direct implementations. A Numba parallel row loop was
+byte-exact and saved 4.02 ms paired median, but raised median process CPU time
+by about 69 ms per request and worsened test p95 from 263.25 to 269.91 ms; I
+did not adopt it. A vectorized alternative builds small cached x/y source-index
+maps by resizing encoded coordinate ramps with Pillow itself, then uses
+`np.take` to produce the writable full-size mask. This preserves Pillow's
+fixed-point nearest mapping, including its rounding, while avoiding a PIL
+full-frame result plus an additional full-frame copy.
+
+I checked the expansion byte-for-byte for landscape, portrait, 448×448, and
+other source dimensions, then ran an interleaved 93-photo full-route comparison.
+Every final JPEG and prediction matched. MAE was unchanged:
+
+| Route | Waviness MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Pillow resize and NumPy copy | 0.135669 / 0.116597 | 237.10 / 252.96 ms | 240.05 / 257.43 ms |
+| Cached Pillow-coordinate maps + `np.take` | 0.135669 / 0.116597 | 237.40 / 247.41 ms | 238.97 / 254.56 ms |
+
+The paired median saving was 2.60 ms; p95 improved by 5.55 ms on validation
+and 2.88 ms on test. Median CPU time fell by 1.14 ms and 0.87 ms,
+respectively. Peak RSS was 2.52 GiB and peak GPU allocated/reserved memory was
+0.588/0.615 GiB. No request was under 100 ms. I integrated the vectorized
+exact path and left the Numba parallel alternative out. Records and runner are
+under `/tmp/wave_v18_exact_mask_expand_full_ab_v3/` and
+`/tmp/wave_v18_exact_mask_expand_full_ab.py`.
+
+### Persistent FP16 SegFormer weights under ROCm autocast (2026-10-29)
+
+I screened persistent FP16 weights as a way to avoid recasting the model for
+each call. Converting the entire model to FP16 made model forwards faster,
+but changed 3/8 source-resolution class maps in the initial real-image probe.
+The valid full-route comparison with separate, immutable model copies reduced
+median latency by 27.38 ms; MAE changed from 0.135669 / 0.116597 to 0.135496 /
+0.116901 on validation / test. Test MAE increased 0.26%, and 58/93 final
+JPEGs/predictions changed. I did not adopt the full-FP16 route because it
+introduced a measured test-quality hit. An earlier interleaved run that
+converted one shared model half and back to float was discarded: the round
+trip quantized the baseline weights and contaminated its later predictions.
+The valid separate-copy runner and per-image records are under
+`/tmp/wave_v18_persistent_fp16_full_ab_v2/` and
+`/tmp/wave_v18_persistent_fp16_full_ab.py`.
+
+I then kept LayerNorm, BatchNorm, and other operations on the existing
+autocast path and stored only Conv1d/2d/3d and Linear weights in FP16. The
+logits were bit-identical on eight real 448-pixel inputs. The complete
+interleaved 93-photo comparison also matched every JPEG and prediction:
+
+| Route | Waviness MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| FP32 weights with ROCm FP16 autocast | 0.135669 / 0.116597 | 243.59 / 254.73 ms | 246.34 / 263.88 ms |
+| Persistent FP16 Conv/Linear weights under autocast | 0.135669 / 0.116597 | 242.88 / 250.74 ms | 243.63 / 261.41 ms |
+
+MAE and outputs were unchanged across all 93 requests. Paired median latency
+fell by 3.10 ms; median CPU time fell by 3.37 ms on validation and 2.50 ms on
+test. No request was under 100 ms. The selected ROCm fast-v1 model now stores
+only autocast Conv/Linear weights in FP16; the CPU fallback converts the model
+back to FP32 before retrying. Full records and runner are under
+`/tmp/wave_v18_mixed_weight_fp16_full_ab_v1/` and
+`/tmp/wave_v18_mixed_weight_fp16_full_ab.py`.
+
+### Parallel destination-strip Lanczos on the current v18 route (2026-10-29)
+
+I rechecked the earlier eight-strip Pillow Lanczos experiment on the current
+v18 fast-v1 pipeline. Only the final Step 1 image resize was split across up to
+eight destination-width strips, using Pillow Lanczos and source boxes for each
+strip. Full-resolution decoding, both SegFormer passes, mask/erosion and crop
+rules, JPEG quality, regression checkpoint, and prediction logic were held
+fixed. The comparison interleaved both routes across the same 47 validation
+and 46 test photos. Each timed request included raw decode, preprocessing,
+regression, and writing a preview and result record; model loading and warm-up
+were excluded.
+
+| Route | Waviness MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Current v18 standard Lanczos | 0.135669 / 0.116597 | 238.72 / 259.94 ms | 241.27 / 256.30 ms |
+| Eight-strip destination-parallel Lanczos | 0.135602 / 0.116569 | 212.86 / 221.85 ms | 213.66 / 225.96 ms |
+
+All 93 requests succeeded. Paired median latency fell by 25.13 ms. The
+candidate used more CPU: median process CPU time increased by 22.28 ms per
+request, while peak RSS was 2.53 GiB and peak accelerator allocation/reservation
+was 0.53/0.56 GiB. No request was under 100 ms. The final JPEG and prediction
+were identical on 73/93 images; on the other 20, sparse one-level Lanczos
+rounding differences changed the prediction by at most 0.00149.
+
+Candidate MAE improved by 0.049% on validation and 0.024% on test. A
+20,000-resample capture-date-cluster bootstrap gave candidate-minus-reference
+MAE intervals of [-0.000156, +0.000009] on validation (31 dates) and
+[-0.000116, +0.000051] on test (27 dates). Thus this run provides no measurable
+MAE hit and its upper interval bounds are below a 1% regression, although the
+test dates overlap training dates and do not establish quality on future
+captures. The resize is not integrated: it changes the image-input contract
+slightly, increases CPU use, and needs fresh-date confirmation before becoming
+the canonical training/inference resize. Full paired records, resource summary,
+bootstrap, and runner are under
+`/tmp/wave_v18_parallel_lanczos_full_ab_v1/` and
+`/tmp/wave_v18_parallel_lanczos_full_ab.py`.
+
+### Lanczos strip worker-count screen (2026-10-29)
+
+I compared four, eight, and sixteen destination-strip workers on the same
+93-photo fast-v1 v18 validation/test snapshot. Each run used the same strip
+algorithm and complete request boundary as the preceding experiment. Four vs
+eight and eight vs sixteen were measured in separate interleaved paired runs;
+the eight-worker absolute timings differ slightly between runs, so paired
+deltas are the stronger comparison.
+
+| Worker setting | MAE, validation / test | Total latency, validation median / p95 | Total latency, test median / p95 | Median process CPU, validation / test |
+|---|---:|---:|---:|---:|
+| Four strips | 0.135674 / 0.116562 | 212.75 / 222.02 ms | 212.87 / 228.74 ms | 429.0 / 426.2 ms |
+| Eight strips | 0.135602 / 0.116569 | 210.85 / 223.01 ms | 210.65 / 222.06 ms | 439.0 / 432.9 ms |
+| Sixteen strips | 0.135639 / 0.116568 | 214.12 / 225.72 ms | 215.18 / 228.41 ms | 459.3 / 455.3 ms |
+
+Four and eight workers were close: eight saved 1.90 ms paired median and had
+better test p95 in that run, at a median CPU cost about 9.3 ms higher. Sixteen
+workers did not improve on eight (paired median saving -0.02 ms, i.e. slightly
+slower) and used about 7.5 ms more median CPU. All arms completed all 93
+requests; no request was under 100 ms. MAE remained within 0.05% of the stock
+v18 reference on both splits for every setting. The 16-worker option is
+rejected; eight is the latency choice for this single-request experiment,
+while four is a reasonable lower-CPU alternative when host contention matters.
+These worker settings remain experimental until the resize contract is
+validated on future capture dates. Runs and summaries are under
+`/tmp/wave_v18_parallel_lanczos_4v8_full_ab_v1/`,
+`/tmp/wave_v18_parallel_lanczos_8v16_full_ab_v1/`, and their paired runner
+files in `/tmp/`.
+
+### Bottleneck interpretation for the current hardware
+
+The full-resolution B0 route's logged stage medians were about 30 ms to decode
+the raw image, 115 ms for Step 1 segmentation plus standardization, 34 ms for
+Step 2 lower-water preprocessing, and 5 ms for regression. The B0 route's
+complete request median was about 188 ms, with MAE 0.134233 validation /
+0.111422 test against current v18's 0.135669 / 0.116597. These stage medians
+are diagnostic and not additive because timers have different boundaries.
+Peak RSS was 3.26 GiB and accelerator allocation/reservation 0.60/0.63 GiB.
+The data point to CPU decode and preprocessing as the primary opportunity;
+regression inference and accelerator memory are not the limiting stages.
+
+This matches AMD's profiling-first guidance: trace the application, identify
+whether work is compute-, memory-, or overhead-bound, optimize the measured
+bottleneck, then profile again. AMD also recommends reducing unnecessary
+host/device movement and reusing allocations, while noting that the specific
+tradeoff must be measured on the target hardware ([HIP performance guidelines](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/performance_guidelines.html),
+[GPU performance analysis](https://rocm.docs.amd.com/projects/HIP/en/develop/understand/performance_optimization.html)).
+On this integrated Radeon, pinned inputs, HIP graph replay, and a CPU-side FP16
+cast were already measured and did not improve full-request latency; the
+strip resize is the current CPU-side candidate with a repeatable end-to-end
+gain, at the cost of additional host CPU.
+
+### Reuse the raw Step 1 mask for Step 2 on v18 (rejected on validation MAE)
+
+I reran the projected-mask optimization on the selected v18 checkpoint and
+fast-v1 profile. Step 1 still ran on the original full-resolution image. Its
+eroded sea mask was projected through the Step 1 crop/resize and supplied to
+Step 2, skipping only Step 2's second SegFormer call; Step 2 still performed
+the black-region check and lower-water crop selection. This was an interleaved
+93-photo comparison with the same checkpoint, decoder, and output writes.
+
+| Route | MAE, validation / test | Total raw-to-output latency, validation median / p95 | Total raw-to-output latency, test median / p95 |
+|---|---:|---:|---:|
+| Current v18 Step 1 + Step 2 segmentation | 0.135669 / 0.116597 | 237.35 / 248.16 ms | 238.86 / 257.44 ms |
+| Reuse projected Step 1 mask in Step 2 | 0.142570 / 0.115892 | 208.39 / 221.93 ms | 210.31 / 229.87 ms |
+
+The candidate completed all 93 requests and saved 28.56 ms paired median;
+median process CPU time fell 28.90 ms and peak RSS was 2.52 GiB (accelerator
+allocation/reservation 0.53/0.56 GiB). However, validation MAE regressed 5.09%,
+so the candidate fails the no-quality-hit requirement despite test MAE
+improving 0.60%. JPEGs and predictions matched only 42/93. No request was
+under 100 ms. I rejected this route and did not adapt the regression head or
+change the pipeline: a test improvement cannot compensate for the validation
+quality loss, and the measured speed gain alone would still leave the route
+above target. Full per-image records, summary, and runner are under
+`/tmp/wave_v18_projected_mask_reuse_full_ab_v1/` and
+`/tmp/wave_v18_projected_mask_reuse_full_ab.py`.
+
+### Full-resolution B0 with exact processor-copy removal (2026-10-29)
+
+I remeasured the full-resolution SegFormer-B0 candidate using the current
+shared image loader and crop/mask optimizations. Both Step 1 and Step 2 still
+run segmentation on their complete canonical inputs. The B0 model was compiled
+for the same fixed 448/384 profile, kept the v18 regression checkpoint, used
+the full-resolution native HEIF decoder, and used Pillow's staged Lanczos
+reduction (`reducing_gap=2`). I also installed the already-validated PIL-first
+processor resize on the B0 processor. It produced the same Step 2 JPEGs as the
+prior B0 route on all 93 photos, while avoiding the processor's full-resolution
+NumPy round trip. This is a model-backbone candidate, not a change to the
+selected v18 checkpoint.
+
+| Route | MAE, validation / test | Total raw-to-output latency, validation median / p95 | Total raw-to-output latency, test median / p95 |
+|---|---:|---:|---:|
+| Current v18 B2 reference | 0.135669 / 0.116597 | 238.72 / 259.94 ms | 241.27 / 256.30 ms |
+| Full-resolution B0 + staged Lanczos + exact PIL-first processor | 0.134233 / 0.111422 | 142.53 / 150.64 ms | 140.99 / 152.10 ms |
+| Same B0 route + eight-strip Lanczos | 0.132327 / 0.109505 | 139.90 / 151.20 ms | 139.11 / 148.32 ms |
+
+The B0 runs completed 93/93 requests, with no request under 100 ms. Eight-strip
+Lanczos saved only 1.30 ms paired median versus the same B0 route, while adding
+9.80 ms median process CPU time; I would not use the strip variant on this
+route. Relative to v18, the B0 point-estimate MAE is lower by 1.06% / 4.44%
+on validation / test; the strip variant is lower by 2.46% / 6.08%. However,
+the capture-date-cluster bootstrap intervals for candidate-minus-v18 absolute
+error were [-0.02912, +0.02211] validation and [-0.02239, +0.01181] test for
+B0 without strips. They allow material regression, and the test dates overlap
+training dates, so the lower point estimates do not establish preserved
+quality. Peak RSS was 2.75 GiB and accelerator allocation/reservation was
+0.24/0.32 GiB for the paired B0 run. Keep this candidate experimental pending
+independent date quality evidence; its 141 ms median also remains above the
+100-ms goal. Records and bootstrap are under
+`/tmp/wave_v18_b0_parallel_lanczos_full_ab_v4/`; the earlier B0 comparison is
+under `/tmp/wave_v18_b0_combo_full_ab_v1/`.
+
+### Copy the native HEIF buffer directly into Pillow (exact, current loader)
+
+The native HEIF decoder returned an RGB allocation that the Python wrapper
+first copied into a temporary `bytes` object with `ctypes.string_at`, then
+copied again into Pillow's owned image buffer. I replaced the temporary bytes
+copy with a ctypes array view over the same native allocation and pass that
+buffer directly to `Image.frombytes`. Pillow still makes the single owned
+image copy synchronously; the view remains valid until that operation returns,
+then the native allocation is freed as before. This uses the standard ctypes
+buffer protocol and does not depend on Python 3.14's `ctypes.memoryview_at`.
+
+On the 318 HEIF/HEIC files in `step-0-raw-data`, decoded RGB pixels matched the
+old path exactly on 318/318. Interleaved decode-only median was 27.73 ms for
+the old wrapper and 23.26 ms for the direct-buffer wrapper, with 4.98 ms paired
+median saved. I then measured the full-resolution B0 + v18-regressor request
+on the 93 labeled photos, including both preprocessing passes and output
+writes:
+
+| Route | MAE, validation / test | Total raw-to-output latency, validation median / p95 | Total raw-to-output latency, test median / p95 |
+|---|---:|---:|---:|
+| B0 with temporary `bytes` copy | 0.134233 / 0.111422 | 140.44 / 153.63 ms | 142.07 / 155.22 ms |
+| B0 with direct ctypes buffer | 0.134233 / 0.111422 | 131.85 / 148.13 ms | 132.57 / 142.83 ms |
+
+All 93 JPEGs and predictions matched exactly; MAE was unchanged. Paired median
+latency fell by 9.23 ms and median process CPU time fell by 8.18 ms. No request
+was under 100 ms. Peak RSS was 2.74 GiB and accelerator allocation/reservation
+was 0.24/0.32 GiB. This exact copy reduction is integrated into
+`step_0_a_native_heif_decoder.py`; the B0 backbone itself remains experimental
+because its date-cluster MAE intervals versus v18 allow material regression.
+The direct-buffer result improves that candidate but does not establish the
+quality gate or meet the latency target. Full records and runner:
+`/tmp/wave_v18_b0_heif_buffer_full_ab_v1/` and
+`/tmp/wave_v18_b0_heif_buffer_full_ab.py`; 318-image decode comparison:
+`/tmp/wave_heif_memoryview_decode_ab.json`.
+
+### Use an RGB array view for the Step 1 water ROI (exact)
+
+The Step 1 standardizer previously called `Image.crop()` to copy the full
+water bounding box, then converted that crop to a NumPy view before applying
+the binary mask. For RGB inputs, I compared slicing the same ROI from
+`np.asarray(image)` instead. The source PIL image remains alive for the view;
+OpenCV still writes the same masked RGB result, which Pillow resizes with the
+same Lanczos filter. Non-RGB inputs retain the prior crop-and-convert path.
+
+The interleaved comparison used the full-resolution B0 segmentation route,
+v18 regressor, direct-buffer HEIF decoder, staged Lanczos, and all 93 labeled
+photos. Each request included decode, both segmentation/preprocessing passes,
+regression, and output writes:
+
+| Route | MAE, validation / test | Total raw-to-output latency, validation median / p95 | Total raw-to-output latency, test median / p95 |
+|---|---:|---:|---:|
+| Current v18 B2 reference | 0.135669 / 0.116597 | 238.72 / 259.94 ms | 241.27 / 256.30 ms |
+| B0 with copied water ROI | 0.134233 / 0.111422 | 131.94 / 145.24 ms | 133.43 / 140.64 ms |
+| B0 with RGB NumPy ROI view | 0.134233 / 0.111422 | 129.53 / 139.47 ms | 129.68 / 140.44 ms |
+
+All 93 final JPEGs and predictions matched exactly, so MAE was unchanged.
+Paired median latency fell 0.95 ms and median process CPU time fell 2.62 ms;
+peak RSS was 2.74 GiB and accelerator allocation/reservation 0.24/0.32 GiB.
+No request was under 100 ms. I integrated the RGB-only view in
+`step_1_b_preprocess_water_inputs.py`; other image modes keep the existing
+conversion behavior. The B0 route remains experimental because its quality
+uncertainty versus v18 is unresolved, and the measured route is still above
+the latency target. Full per-image records and runner:
+`/tmp/wave_v18_b0_roi_view_full_ab_v1/` and
+`/tmp/wave_v18_b0_roi_view_full_ab.py`.
+
+### Profile and exact-mask implementation screen (2026-10-29)
+
+I profiled the full-resolution B0 Step 1 path on 16 raw HEIC images. Median
+Step 1 time was 67.62 ms: B0 mask inference 41.27 ms, erosion 3.55 ms,
+bounding-box/count work 0.65 ms, ROI extraction plus masked RGB construction
+15.61 ms, Lanczos resize 6.12 ms, and canvas placement 0.03 ms. This is a
+small diagnostic sample and the stage timings are not a full-request latency
+measurement. The path itself is the previously measured B0 + v18 regressor
+route (MAE 0.134233 validation / 0.111422 test; total raw-to-output median
+129.53 ms after exact decoder and ROI changes).
+
+I compared four exact array masking implementations on the same 16 image
+ROIs. The existing OpenCV `bitwise_and` was both fastest among the tested
+mask operators (2.91 ms median over repeated operations) and pixel-exact.
+NumPy `where` was 34.14 ms and exact; multiplication and bitwise broadcasting
+were 23.61 ms and 23.19 ms but did not match exact output. Since the OpenCV
+operation itself is only a small part of the 15.61 ms ROI stage, these
+alternatives are rejected. MAE is unchanged for the tested existing route;
+no full end-to-end rerun was needed for unchanged pixels. Profile and screen
+outputs: `/tmp/wave_b0_step1_substage_profile.json` and
+`/tmp/wave_mask_ops_ab.json`.
+
+### B0 ROCm FP16-weight storage (rejected by the 1% MAE gate)
+
+PyTorch's tuning guidance recommends benchmarking inference memory formats,
+`torch.compile`, and reduced precision on the target backend; our selected v18
+loader already stores convolution and linear weights in FP16 under ROCm FP16
+autocast. The experimental B0 full-request harness constructed SegFormer
+models directly and did not use that loader optimization. I compared the
+existing FP32-weight + FP16-autocast B0 route with the production-style
+FP16-stored convolution/linear weights. Both used the same B0 checkpoint,
+fixed fast-v1 448/384 inputs, compiler, exact preprocessing, v18 regression
+head, direct HEIF decoder, and all 93 labeled photos. The arms were paired and
+interleaved; this is a runtime optimization comparison, not a changed input
+resolution or skipped stage.
+
+| Route | MAE, validation / test | Total raw-to-output latency, validation median / p95 | Total raw-to-output latency, test median / p95 |
+|---|---:|---:|---:|
+| B0 FP32 stored weights + FP16 autocast | 0.134233 / 0.111422 | 120.05 / 128.62 ms | 119.78 / 126.83 ms |
+| B0 FP16 stored conv/linear weights + FP16 autocast | 0.136433 / 0.113367 | 117.37 / 127.15 ms | 117.93 / 127.17 ms |
+
+The candidate saved 3.00 ms paired median and 2.84 ms median process CPU time,
+but validation MAE regressed 1.64% and test MAE 1.75%. Final JPEGs matched on
+27/93 photos and predictions matched on 27/93. It fails the 1% MAE gate and is
+rejected; I made no production code change. Both arms completed all 93
+requests, peak RSS was 3.10 GiB (the comparison kept both model instances
+resident), and the candidate had one validation request but no test requests
+under 100 ms. This is a measured quality/speed regression, not a viable
+candidate. Records and runner:
+`/tmp/wave_b0_fp16_weights_full_ab_v1/summary.json`,
+`/tmp/wave_b0_fp16_weights_full_ab_v1/paired.json`, and
+`/tmp/wave_b0_fp16_weights_full_ab.py`.
+
+### MIGraphX B0 with zero-copy HEIF input and OpenCV preprocessing (2026-10-29)
+
+I ran the full-resolution SegFormer-B0 candidate with MIGraphX execution,
+direct NumPy access to the native HEIF RGB allocation, OpenCV `INTER_AREA`
+downscaling, and four OpenCV CPU threads. Both segmentation passes, original
+image resolution, mask processing, JPEG round trips, v18 regressor, and output
+writes were retained. The input allocation remained alive for each request;
+model compilation and loading were excluded from warm request latency. This
+candidate was an isolated `/tmp` runner and did not change the selected
+pipeline.
+
+| Route | MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Current v18 B2 reference | 0.135669 / 0.116597 | 238.72 / 259.94 ms | 241.27 / 256.30 ms |
+| MIGraphX B0, zero-copy RGB, OpenCV area / 4 threads | 0.131625 / 0.114461 | 81.27 / 89.18 ms | 83.60 / 87.43 ms |
+
+All 93 labeled requests succeeded. The candidate's point-estimate MAE was lower
+by 2.98% on validation and 1.83% on test, and its median total latency was
+below 100 ms on both splits. However, the capture-date cluster-bootstrap 95%
+intervals for candidate-minus-v18 MAE were [-0.03183, +0.02064] on validation
+(31 dates) and [-0.02142, +0.01517] on test (27 dates); both include a material
+regression. The test dates overlap training dates. Therefore this is a strong
+speed result, but it does not establish quality preservation and is not
+adopted. One validation request exceeded 100 ms (128.88 ms total); 46/47
+validation and 46/46 test requests were under 100 ms. The slow request,
+`img_7565`, was a JPEG whose decode stage took 63.71 ms. Peak RSS was 3.02 GiB;
+MIGraphX session compilation/loading took 22.57 and 21.18 seconds, outside
+warm request timings. Records, runner, and quality bootstrap are under
+`/tmp/wave_migraphx_b0_area_cv4_zero_copy_full_eval_v1/`,
+`/tmp/wave_migraphx_b0_area_cv4_zero_copy_full_eval.py`, and
+`/tmp/wave_migraphx_b0_area_cv4_zero_copy_quality_bootstrap.json`.
+
+### OpenCV JPEG decode screen on the current Python path (2026-10-29)
+
+Because the slowest MIGraphX request was a JPEG, I compared OpenCV `imread`
+plus BGR-to-RGB conversion against the existing shared Pillow loader on all 10
+JPEGs in `step-0-raw-data`. The arrays matched byte-for-byte on all 10,
+including EXIF orientation. Repeated warm medians varied by image: OpenCV
+saved between 1.09 and 7.64 ms on seven images, but was 0.01 to 2.24 ms slower
+on the other three. This small and mixed sample does not show a dependable
+end-to-end win, so I did not alter the production decoder. No full-request
+latency or new MAE was measured; image inputs were exact and the v18 reference
+remains MAE 0.135669 / 0.116597. Per-image decoder measurements were collected
+interactively on 2026-10-29; rerun a paired full-route benchmark before
+considering any JPEG backend change.
+
+I also screened the installed ROCm rocJPEG hardware decoder on the Radeon
+8060S. AMD documents that rocJPEG can use the GPU's VCN JPEG engines and
+return interleaved RGB; the Linux kernel documentation identifies VCN as the
+media engine for hardware image/video decode ([rocJPEG overview](https://rocm.docs.amd.com/projects/rocJPEG/en/develop/what-is-rocJPEG.html),
+[rocJPEG API](https://rocm.docs.amd.com/projects/rocJPEG/en/develop/reference/rocJPEG-api-reference.html),
+[Linux AMDGPU driver](https://docs.kernel.org/gpu/amdgpu/driver-core.html)). A
+local C++ probe used the hardware backend, decoded RGB on the GPU, copied the
+full-resolution result to host memory, and applied EXIF orientation. On the
+slow `IMG_7565.jpeg`, warm rocJPEG calls had a 40.09 ms median / 41.62 ms p95
+before orientation; the host copy and orientation brought the Python-side
+median to about 49 ms. A paired OpenCV CPU decoder measured 35.18 / 38.43 ms.
+Decoded RGB was not byte-exact: across the 10 repository JPEGs, maximum
+per-channel differences ranged from 3 to 28 levels. The hardware path is both
+slower in this single-image workload and changes pixels, so it was rejected
+before a full prediction-quality run. Probe source and outputs are under
+`/tmp/wave_rocjpeg_decoder.cpp`, `/tmp/libwave_rocjpeg.so`, and
+`/tmp/rocjpeg_7565.rgb`.
+
+### MIGraphX SegFormer-B2 full-route screen with the v18 input contract (2026-10-29)
+
+I exported the selected SegFormer-B2 backbone to fixed-shape ONNX graphs and
+fused bilinear logit upsampling, argmax, and water-class lookup into each graph.
+The 448- and 384-pixel calls both return the 448-pixel class mask used by the
+current fast-v1 profile; Python then applies the existing nearest-neighbor
+mask expansion. Both segmentation passes, the v18 regression checkpoint,
+JPEG round trips, crop selection, and output writes were retained. The input
+builder used Pillow bilinear resize and the repository's float64 rescale then
+float32 normalization order. Its tensors matched the Hugging Face processor
+byte-for-byte for all 93 raw images at both input sizes. MIGraphX ran the
+exported model in FP32, while the selected ROCm PyTorch route uses FP16
+autocast, so model outputs are not assumed to be equivalent.
+
+| Route | MAE, validation / test | Total raw-to-output latency, validation (median / p95) | Total raw-to-output latency, test (median / p95) |
+|---|---:|---:|---:|
+| Current v18 B2 reference | 0.135669 / 0.116597 | 238.72 / 259.94 ms | 241.27 / 256.30 ms |
+| MIGraphX B2, exact processor inputs, FP32 | 0.132469 / 0.111427 | 148.16 / 155.83 ms | 148.00 / 152.69 ms |
+
+All 93 requests succeeded. Candidate MAE point estimates improved by 2.36%
+on validation and 4.43% on test, and paired median latency fell about 90 ms
+and 93 ms respectively. However, 50,000 capture-date cluster bootstrap draws
+gave candidate-minus-v18 MAE 95% intervals of [-0.01251, +0.00688] on
+validation (31 dates) and [-0.01359, +0.00327] on test (27 dates). Both allow
+a material regression, and test dates overlap training dates; the quality
+gate is therefore not established. No request was under 100 ms. Median stage
+times were 21.5 ms decode, 26.1 ms Step 1 processor, 35.5 ms Step 1 MIGraphX,
+4.2 ms mask expansion, 2.0 ms Step 2 processor, 27.5 ms Step 2 MIGraphX, and
+6.7 ms final JPEG/regression. Peak RSS was 4.15 GiB. Each MIGraphX session
+took about 37–43 seconds to load/compile outside warm request latency. This
+screen shows that compiling the current B2 route alone does not reach the
+100-ms target on this host; it remains experimental. Records, runner, and
+bootstrap are under `/tmp/wave_migraphx_b2_exact_resize_full_eval_v3/`,
+`/tmp/wave_migraphx_b2_exact_resize_full_eval.py`, and
+`/tmp/wave_migraphx_b2_exact_resize_quality_bootstrap_v3.json`.
+
+I then replaced only the exact Pillow bilinear input resize with OpenCV
+`INTER_LINEAR_EXACT`, keeping MIGraphX B2, the full image, all mask/crop/JPEG
+steps, and the v18 regressor. This shrank the Step 1 processor median from
+26.1 ms to 8.0 ms; Step 2 processor median changed from 2.0 to 1.6 ms. On all
+93 photos, MAE was 0.131744 validation / 0.107415 test and complete-request
+latency was 129.85 ms median / 137.83 ms p95 validation and 130.41 / 134.29 ms
+test. This is about 18 ms faster than the exact-Pillow MIGraphX B2 run, but
+still has no request under 100 ms. Point-estimate MAE improved 2.89% / 7.88%
+against v18; the 50,000-draw capture-date bootstrap intervals were
+[-0.02465, +0.01427] validation and [-0.02460, +0.00429] test, so material
+regression remains possible. Do not adopt it as quality-preserving. Full
+records and bootstrap are under
+`/tmp/wave_migraphx_b2_cv_linear_full_eval_v1/` and
+`/tmp/wave_migraphx_b2_cv_linear_quality_bootstrap.json`; runner:
+`/tmp/wave_migraphx_b2_cv_linear_full_eval.py`.
+
+### MIGraphX FP16 B2 route: fast but nondeterministic mask outputs (2026-10-29)
+
+I enabled ONNX Runtime MIGraphX FP16 execution on the fixed-shape B2 mask
+graphs while retaining the OpenCV `INTER_LINEAR_EXACT` inputs, two complete
+segmentation passes, v18 regressor, full-resolution images, JPEG round trips,
+crop selection, and output writes. One full 93-photo run reported MAE
+0.131612 validation / 0.104246 test, with total raw-to-output median/p95 of
+91.60/97.86 ms validation and 90.89/95.22 ms test. The point-estimate MAE was
+better than v18, but date-cluster bootstrap intervals still allowed a
+regression: [-0.02483, +0.01423] validation and [-0.02870, +0.00130] test.
+
+Repeatability checks invalidate that run as a dependable quality result. With
+the same input tensor and the same MIGraphX FP16 session, ten repeated 448-pixel
+calls produced eight distinct binary masks, differing from the first result
+by 1–4 pixels. A 10-call MIGraphX FP32 control returned one identical mask in
+all calls. The selected PyTorch v18 FP16-autocast model also returned one
+identical mask in 20 repeated calls on the same raw image. Most directly, 20
+repeated full MIGraphX FP16 requests for `IMG_7830.HEIC` yielded five final
+JPEGs and five waviness predictions ranging from 0.334510 to 0.347331 (range
+0.012820). The first call included lazy graph compilation and was excluded
+from warm latency; the other calls were warm. This shows that a few unstable
+mask pixels can change the selected crop and final score. Do not use this
+candidate or its single-run MAE as evidence of quality preservation, despite
+its sub-100-ms median and p95.
+
+An additional full run that used byte-exact OpenCV JPEG decoding changed the
+final JPEG on 35/47 validation and 32/46 test rows, including many HEIC inputs;
+its MAE was 0.137866 / 0.102910. Because the JPEG decoder only affected JPEG
+inputs and repeated HEIF decoding itself was byte-stable, this reinforces the
+FP16-run repeatability failure. Do not attribute the MAE difference to the
+JPEG decoder. Outputs and scripts are under
+`/tmp/wave_b2_fp16_repeatability_holder/repeatability.json`,
+`/tmp/wave_b2_fp16_repeatability.py`,
+`/tmp/wave_migraphx_b2_cv_linear_fp16_full_eval_v1/`,
+`/tmp/wave_migraphx_b2_cv_linear_fp16_jpeg_full_eval_v1/`, and
+`/tmp/wave_migraphx_b2_cv_linear_fp16_jpeg_full_eval.py`.
+
+### Production benchmark profile loading and current v18 route check (2026-10-29)
+
+I found that `step_7_b_benchmark_prediction.py` did not read the selected
+checkpoint's preprocessing profile before checking or timing it. It defaulted
+to 768-pixel FP32 tiled inference, even though `.env` selects v18 fast-v1
+(448/384, FP16, one image per pass). It also wrapped the removed
+`run_segmentation` entry point instead of the current `run_water_mask` API.
+That made the official benchmark fail before prediction and made its default
+configuration wrong for this checkpoint. I corrected it to load the
+checkpoint profile before validation, preserve its precision unless explicitly
+overridden, apply the profile's Step 2 size, and instrument the current mask
+entry point.
+
+The checkpoint's preprocessing code hashes were stale relative to the already
+integrated current source files, so the official validator correctly rejected
+the original checkpoint. I made a separate v18 checkpoint copy with only its
+recorded current-source hashes refreshed; the original checkpoint remains
+unchanged. All 360 tensors in its state dictionary are byte-for-byte equal to
+the original. `.env` now selects this contract-refreshed v18 copy. Before
+changing `.env`, I ran the same current v18 weights through the corrected
+official benchmark on all 93 validation/test raw photos, including decode,
+both segmentation passes, JPEG round trips, regression, and output record
+writes. The newly selected copy then passed the official contract check and
+completed a warm raw HEIC request at 231 ms.
+
+| Route | Waviness MAE, validation / test | Total raw-to-output latency, validation (median / p95 / max) | Total raw-to-output latency, test (median / p95 / max) |
+|---|---:|---:|---:|
+| Current v18 fast-v1, warm official-runner requests | 0.135669 / 0.116597 | 236.74 / 268.90 / 286.69 ms | 240.92 / 270.06 / 286.43 ms |
+
+All 93 warm requests succeeded; 0/93 were under 100 ms. MAE exactly matched the
+checkpoint's reported validation/test values. This run confirms the current
+route is around 237–241 ms median in the official entry point. The hash mismatch
+is resolved for the current v18 pipeline without changing model weights. The
+new copy records the current code contract; it does not include the separate
+eight-strip candidate. Runner and report:
+`step_7_b_benchmark_prediction.py` and
+`/tmp/wave_v18_official_93_current/20261029T061942610068Z/benchmark.json`.
+
+### Production-code rerun of eight-strip Lanczos (2026-10-29)
+
+I repeated the full paired eight-strip resize experiment through the
+production `step_1_b_preprocess_water_inputs.py` standardization function,
+using its previously measured source-box strip implementation. The rerun used
+the same 93 labeled raw photos and current v18 weights. Its stock arm used the
+unchanged single-call Pillow Lanczos resize. The candidate used eight strips;
+no pipeline stage or source resolution changed. The eight-strip JPEGs and
+predictions matched the earlier experimental candidate on all 93 photos.
+
+| Route | Waviness MAE, validation / test | Total raw-to-output latency, validation (median / p95 / max) | Total raw-to-output latency, test (median / p95 / max) |
+|---|---:|---:|---:|
+| Current single-call Lanczos | 0.135669 / 0.116597 | 225.17 / 242.52 / 244.56 ms | 229.44 / 244.45 / 244.96 ms |
+| Eight-strip Lanczos | 0.135602 / 0.116569 | 195.67 / 206.89 / 207.98 ms | 195.38 / 203.76 / 210.63 ms |
+
+The paired median saving was 32.02 ms, with median process CPU time increasing
+13.19 ms. There were 93/93 successful predictions. MAE improved by 0.049% on
+validation and 0.024% on test. The date-cluster bootstrap was unchanged from
+the repeated candidate because all predictions matched it: candidate-minus-
+reference MAE 95% intervals were [-0.000156, +0.000009] validation and
+[-0.000116, +0.000051] test, both well inside the 1% regression margin. This
+is the strongest repeatable v18 speed/quality result in the current full-
+resolution route, but remains above 100 ms. The capture dates still overlap
+training dates, and the changed resize must be assigned a distinct
+preprocessing contract before adoption. Rerun records and date bootstrap:
+`/tmp/wave_v18_parallel_lanczos_integrated_full_ab_v1/`.
+
+### Quality-filtered full-route experiment index (2026-10-29)
+
+This index consolidates the measured full raw-image-to-output experiments
+against the selected v18 checkpoint. I retained experiments only when their
+point-estimate waviness MAE was no more than 1% worse than that run's v18
+reference on **both** validation and test. Candidates over that threshold are
+left out of this quality-qualified list. Rows with exact prediction parity
+have identical MAE by construction. Latency is total request latency; the
+table uses median validation / test values where both are available. The
+underlying sections above contain p95, cohort sizes, paired analysis, and
+limitations. Because snapshots and timing load differ, compare candidates to
+their same-run reference rather than interpreting small absolute differences
+between rows as a controlled ranking.
+
+| Experiment | MAE, validation / test | Total raw-to-output latency, validation / test median | MAE gate / status |
+|---|---:|---:|---|
+| **Current v18 fast-v1 reference (official runner)** | **0.135669 / 0.116597** | **236.74 / 240.92 ms** | Baseline; 0/93 under 100 ms |
+| OpenCV `INTER_NEAREST_EXACT` mask expansion, v18 PyTorch | 0.135669 / 0.116597 | 222.98 / 224.75 ms | Exact prediction parity on 93/93; indicative 13.8 / 16.2 ms lower median; still 0/93 under 100 ms |
+| Eight-strip Lanczos on current v18 PyTorch ROI path | 0.135602 / 0.116569 | 187.39 / 191.22 ms | −0.049% / −0.024%; p95 198.73 / 201.31 ms; passes point MAE gate, remains above 100 ms |
+| Stable MIGraphX FP16 + OpenCV exact-nearest + 24 HEIF workers | 0.131969 / 0.104235 | 92.76 / 92.34 ms | −2.73% / −10.60%; 92/93 under 100 ms; date bootstrap permits >1% regression |
+| Eight-strip Lanczos resize (production-code paired rerun) | 0.135602 / 0.116569 | 195.67 / 195.38 ms | −0.049% / −0.024%; 32.02 ms paired median saving; contract/date validation still needed |
+| Exact water-class lookup before full-resolution mask expansion | 0.135669 / 0.116597 | 323.64 / 328.70 ms | Same-run MAE identical; small exact speed win in that run; integrated |
+| Numba exact Step 2 crop selector | 0.135669 / 0.116597 | 301.15 / 303.46 ms | Exact parity; 19.13 ms paired median saving; integrated |
+| Combined exact lookup + Numba crop selector | 0.135669 / 0.116597 | 300.67 / 302.99 ms | Exact parity; 28.53 ms paired median saving |
+| Native libheif decoder + exact lookup/crop optimizations | 0.135669 / 0.116597 | 286.33 / 286.18 ms | Exact parity; 37.33 ms paired median saving; packaging caveat |
+| Native HEIF decoder, 24 vs 16 tile workers | 0.135669 / 0.116597 | 285.26 / 290.38 ms (24 workers) | Exact parity; small/uneven gain, higher CPU and worse tails |
+| CPU-side FP16 input tensor for Step 1 | 0.135669 / 0.116597 | 285.98 / 290.09 ms | Exact parity; slower paired median; rejected for speed |
+| Fixed-shape HIP graph replay | 0.135669 / 0.116597 | See graph-replay section | Exact parity; no full-request latency improvement |
+| Pillow staged `reducing_gap=2` resize | 0.135168 / 0.117383 | 289.8 / 292.0 ms | −0.37% / +0.67%; point-estimate gate passes; uncertainty remains |
+| Exact HEIF decode + `reducing_gap=2` | 0.135168 / 0.117383 | 263.6 / 268.8 ms | −0.37% / +0.67%; fastest qualified point-estimate route in that run; unadopted dependencies/uncertainty |
+| Compiled B2 fast-v1 | 0.133432 / 0.116534 | 306.5 / 311.1 ms | −1.65% / −0.05%; point-estimate gate passes; date-cluster uncertainty remains |
+| Compiled B2 + exact HEIF + `reducing_gap=2` | 0.134523 / 0.117448 | 220.2 / 221.6 ms | −0.85% / +0.73%; point-estimate gate passes; confidence intervals remain broad |
+| GPU nearest-exact mask expansion on compiled combo | 0.135256 / 0.116713 | 241.4 / 243.1 ms | +0.54% / −0.63%; passes point-estimate gate, but slower and not adopted |
+| Embedded-thumbnail B2 + adapted v18 head | 0.131680 / 0.115703 | 68.47 / 73.67 ms | −4.99% / −0.77%; sub-100 ms on successes; coverage and date-disjoint quality remain unproven |
+| Full-resolution SegFormer-B0 + compiled inference | 0.134233 / 0.111422 | 188.13 / 188.54 ms | −1.06% / −4.44%; passes point-estimate gate, but date-cluster uncertainty remains broad |
+| B0 with direct HEIF buffer and RGB ROI view | 0.134233 / 0.111422 | 129.53 / 129.68 ms | Same B0 MAE; exact copy optimizations; quality vs v18 still not statistically cleared |
+| MIGraphX B0 + OpenCV area preprocessing | 0.131625 / 0.114461 | 81.27 / 83.60 ms | −2.98% / −1.83%; point-estimate gate passes; bootstrap permits material regression |
+| MIGraphX B2 exact processor inputs, FP32 | 0.132469 / 0.111427 | 148.16 / 148.00 ms | −2.36% / −4.43%; point-estimate gate passes; bootstrap permits material regression |
+| MIGraphX B2 + OpenCV `INTER_LINEAR_EXACT` | 0.131744 / 0.107415 | 129.85 / 130.41 ms | −2.89% / −7.88%; point-estimate gate passes; bootstrap permits material regression |
+| OpenCV `INTER_LINEAR_EXACT` in the PyTorch B2 route | 0.136720 / 0.108323 | 252.51 / 255.60 ms | +0.77% / −7.10%; point-estimate gate passes; date-cluster uncertainty remains broad |
+| B2-distilled B0 + MIGraphX FP32 + full-resolution OpenCV preprocessing | 0.110818 / 0.110720 | 78.69 / 79.84 ms | −18.32% / −5.04%; 93/93 succeeded and 92/93 under 100 ms; date-disjoint check fails quality gate |
+
+The MIGraphX FP16 B2 route is deliberately absent despite a favorable single-
+run MAE and sub-100-ms timing: repeated identical inputs produced different
+masks and waviness scores, so its reported quality is not dependable.
+
+### PyTorch `torch.compile` on the unchanged fast-v1 SegFormer (2026-10-29)
+
+PyTorch's performance guide recommends measuring compiler fusion and memory
+format options on the target workload; ROCm likewise recommends profiling
+before changing kernels or transfers. I screened `torch.compile` on the
+existing SegFormer-B2 with the fast-v1 448/384 inputs, FP16 autocast, source
+resolution, preprocessing, and v18 regression checkpoint unchanged. Warm
+model-only forward medians on a real photo fell from 34.77 to 20.35 ms at 448
+pixels and from 28.50 to 22.81 ms at 384 pixels. The compiled logits were not
+bit-identical (maximum absolute difference 0.046875 / 0.023438); on an
+eight-photo mask screen, 7 of 16 class maps changed, by seven pixels total.
+
+I then ran the canonical fresh raw-to-output benchmark on the same 93 labeled
+photos and compared its predictions with the eager v18 full-route reference.
+All 93 requests succeeded. This is a sequential run rather than an
+interleaved timing comparison, so treat small latency differences as
+indicative, not a controlled paired speed claim:
+
+| Route | Waviness MAE, validation / test | Total raw-to-output latency, validation median / p95 | Total raw-to-output latency, test median / p95 | Under 100 ms |
+|---|---:|---:|---:|---:|
+| Eager v18 reference | 0.135669 / 0.116597 | 236.74 / 268.90 ms | 240.92 / 270.06 ms | 0/93 |
+| `torch.compile` B2 experiment | 0.135076 / 0.118273 | 211.88 / 230.21 ms | 217.38 / 233.38 ms | 0/93 |
+
+Validation MAE improved 0.44%, but test MAE regressed 1.44%, above the
+quality gate. The experiment therefore fails even though its warm full-route
+medians were about 25 ms lower in validation and 24 ms lower in test. The
+compiled full-run stage medians were 31.25 ms decode, 145.66 ms Step 1,
+32.33 ms Step 2, and 5.71 ms regression. No full-run RSS or process CPU
+measurement was captured. I did not adopt this change. The benchmark report
+is `/tmp/wave_v18_torch_compile_eval/20261029T072113805869Z/benchmark.json`;
+the temporary runner was removed after the run.
+
+These findings reinforce the optimization order: the small regression model
+and JPEG round trips are not the latency bottlenecks; Step 1 mask
+standardization and segmentation still dominate. Exact memory/copy changes
+are useful but cannot close the remaining gap alone. A compiler or model
+change must be judged on the full request and the untouched waviness MAE gate,
+not isolated forward speed or mask similarity alone. This follows the official
+[PyTorch performance tuning guide](https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html),
+[AMD HIP performance guidelines](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/performance_guidelines.html),
+and [MIGraphX model performance tuning guide](https://rocm.docs.amd.com/projects/AMDMIGraphX/en/develop/how-to/model-performance-tuning.html).
+
+Not every exploratory screen belongs in this table: model-only timings,
+synthetic probes, and exact-output microbenchmarks without a full MAE rerun
+remain in their dated sections, clearly marked as diagnostics. Experiments
+that regressed MAE by more than 1% on either split—including split decoder
+fusion, projected-mask reuse, reduced-precision B0 storage, and the more
+aggressive resize/mask variants—are omitted from this candidate table. The
+B2-to-B0 distillation result passes this table's point-estimate filter, but
+its four-photo date-disjoint check regressed and its capture-date bootstrap
+still allows material test regression. It is not quality-cleared.
+
+### B2-to-B0 binary segmentation distillation with the runtime resize contract (2026-10-29)
+
+I distilled a SegFormer-B0 binary water/not-water student from the selected
+B2 teacher using both input domains required by the raw-to-output pipeline:
+raw photos for Step 1 and the previous Step 1 output for Step 2. The 217
+training rows were split by capture date into 169 fit images across 39 dates
+and 48 selection images across 12 dates. Validation and test photos were not
+used for training or model selection. The first student used the Hugging Face
+Pillow resize for training but OpenCV resize at inference; I corrected that
+train/inference mismatch and regenerated all 434 teacher targets from the
+exact candidate OpenCV input transform. The matched student reached 0.9517
+mean IoU on the training-date holdout (water IoU 0.9606). This is mask
+agreement with the teacher, not the waviness quality gate.
+
+The PyTorch full-route check used the canonical v18 448/384 profile, both
+segmentation passes, the existing regression checkpoint, both JPEG round
+trips, and output writes. All 93 labeled requests succeeded:
+
+| Route | Waviness MAE, validation / test | Total raw-to-output latency, validation / test median | Requests under 100 ms |
+|---|---:|---:|---:|
+| Current v18 B2, paired PyTorch reference | 0.135669 / 0.116597 | 231.12 / 232.21 ms | 0/93 |
+| B2-distilled B0, PyTorch | 0.120761 / 0.111602 | 180.50 / 183.67 ms | 0/93 |
+
+I then exported the student as two fixed-shape ONNX graphs and ran MIGraphX
+FP32 with full-resolution source images, OpenCV `INTER_AREA` for the Step 1
+downscale and `INTER_LINEAR_EXACT` for the Step 2 upscale, native HEIF decode,
+both segmentation passes, crop/mask logic, JPEGs, the v18 regressor, and output
+files. Session load/compile was about 21 seconds per graph and excluded from
+warm request latency. The complete 93-photo run reported:
+
+| Route | Waviness MAE, validation / test | Total raw-to-output latency, validation median / p95 / max | Total raw-to-output latency, test median / p95 / max |
+|---|---:|---:|---:|
+| Current v18 B2 official runner | 0.135669 / 0.116597 | 236.74 / 268.90 / 286.69 ms | 240.92 / 270.06 / 286.43 ms |
+| Distilled B0, MIGraphX FP32, OpenCV resize | 0.110818 / 0.110720 | 78.69 / 85.75 / 107.63 ms | 79.84 / 85.44 / 86.14 ms |
+
+All 93 requests succeeded and 92/93 were under 100 ms; the remaining request
+was `IMG_7565.jpeg` at 107.63 ms. The MIGraphX route's 50,000-draw
+capture-date-cluster MAE-difference intervals versus v18 were [−0.05215,
++0.00046] on validation (31 dates) and [−0.02566, +0.01152] on test (27
+dates). The validation upper bound is within the 1% regression margin, but
+the test interval allows a material regression. The test set overlaps train
+dates. On the four 2026-08-24 test photos, a date absent from training,
+unadapted student MAE was 0.18644 versus 0.15744 for v18; this is a small,
+single-date sample, but it is a caution against claiming preserved
+future-date quality.
+
+I also tried a regression-head-only adaptation using 215 successful
+training-route inputs, selecting learning rate and epoch from a capture-date
+holdout (167 fit / 48 select; 9 held dates). The selected rate was 1e-4 and
+the refit used one epoch. Applying the adapted head to the already-generated
+candidate inputs gave MAE 0.11211 validation / 0.11157 test, slightly worse
+than the original head's 0.11082 / 0.11072. On the four date-disjoint photos,
+MAE was 0.19049, also worse than both the unadapted student (0.18644) and v18
+(0.15744). I did not advance this head adaptation.
+
+I compared OpenCV worker counts 1 and 4 in a paired, interleaved full-route
+run with the same MIGraphX model, inputs, resize operators, and output code.
+JPEGs and waviness predictions matched on all 93 photos, so MAE was exactly
+unchanged:
+
+| OpenCV threads | MAE, validation / test | Total latency, validation median / p95 / max | Total latency, test median / p95 / max | Under 100 ms |
+|---:|---:|---:|---:|---:|
+| 1 | 0.110818 / 0.110720 | 94.36 / 99.78 / 122.94 ms | 94.05 / 99.61 / 100.58 ms | 90/93 |
+| 4 | 0.110818 / 0.110720 | 80.39 / 90.11 / 107.87 ms | 80.53 / 86.36 / 86.85 ms | 92/93 |
+
+One OpenCV thread reduced median process CPU time by about 6 ms but increased
+paired median wall latency by 13.60 ms. Four threads are faster for this
+single-request route; reducing CPU thread count did not help the 100-ms goal.
+
+Peak process RSS during the MIGraphX full run was about 3.1 GiB. The p95
+request latency remained below 100 ms, but maximum latency exceeded it; CPU
+process time was around 274 ms per request. Therefore this is a promising
+speed and aggregate-MAE experiment, not a quality-cleared deployment
+candidate. MIGraphX FP16 remains excluded because repeated identical inputs
+produce nondeterministic masks. Student training artifacts, per-photo
+predictions, and runners are under `/tmp/wave_b2_b0_binary_distill_area_v1/`,
+`/tmp/wave_b2_b0_binary_distilled_full_ab_v2/`,
+`/tmp/wave_migraphx_b0_distilled_area_full_eval_v5/`,
+`/tmp/wave_b2_b0_distilled_area_regressor_adaptation_v1/`, and
+`/tmp/wave_migraphx_b0_distilled_area_full_eval_v5.py`.
+
+
+### Exact OpenCV nearest mask expansion in the official v18 route (2026-10-29)
+
+The production Step 1 mask expansion now uses OpenCV `INTER_NEAREST_EXACT`,
+which matched the previous Pillow nearest-neighbor coordinates byte-for-byte.
+I reran the complete official raw-to-output benchmark on all 93 labeled raw
+photos using the selected v18 weights, including decoding, both segmentation
+passes, JPEG round trips, regression, and output-record writes. Because the
+checkpoint contract hashes the source files, I used a temporary checkpoint
+copy with refreshed source hashes; all 360 state-dictionary tensors were
+unchanged. The original checkpoint was not modified.
+
+| Experiment | Waviness MAE, validation / test | Total raw-to-output latency, validation median / p95 | Total raw-to-output latency, test median / p95 |
+|---|---:|---:|---:|
+| Current v18 reference | 0.135669 / 0.116597 | 236.74 / 267.81 ms | 240.92 / 268.79 ms |
+| OpenCV exact-nearest mask expansion | 0.135669 / 0.116597 | 222.98 / 236.37 ms | 224.75 / 244.12 ms |
+
+All 93 predictions were exactly equal to the v18 reference and all requests
+succeeded. The candidate run was sequential, so the latency comparison is
+indicative rather than interleaved; observed medians were 13.76 ms lower on
+validation and 16.17 ms lower on test. This clears the requested point-estimate
+MAE filter with zero MAE regression, but total latency remains above 100 ms.
+The run reports are `/tmp/wave_v18_cvnearest_official/20261029T080249737155Z/benchmark.json`
+and `/tmp/wave_v18_official_93_current/20261029T061942610068Z/benchmark.json`.
+
+
+### Stable MIGraphX FP16 determinism configuration (2026-10-29)
+
+I found a repeatable MIGraphX FP16 configuration by disabling graph autotuning
+and the fast softmax path with `MIGRAPHX_SKIP_BENCHMARKING=1` and
+`MIGRAPHX_USE_FAST_SOFTMAX=0`. Two separately initialized 93-photo runs
+produced identical Step 2 JPEGs and final predictions on all 93 photos. The
+quality point estimates improved against v18, so this experiment passes the
+requested 1% point-estimate filter; it remains a research candidate because
+the capture-date validation bootstrap still permits more than 1% regression.
+Its latency is also near the 100-ms threshold, with p95 above 100 ms in one
+split.
+
+| Experiment | Waviness MAE, validation / test | Total raw-to-output latency, validation median / p95 | Total raw-to-output latency, test median / p95 |
+|---|---:|---:|---:|
+| Stable MIGraphX FP16 B2 | 0.131969 / 0.104235 | 98.59 / 109.03 ms | 98.32 / 101.72 ms |
+| Add OpenCV nearest-exact mask expansion | 0.131969 / 0.104235 | 94.08 / 100.84 ms | 93.22 / 97.98 ms |
+| Add in-place float32 input normalization | 0.131969 / 0.104235 | 94.22 / 101.23 ms | 93.32 / 97.09 ms |
+
+The OpenCV expansion and in-place normalization variants preserved all 93
+JPEGs and scores against the stable MIGraphX route. The in-place normalization
+showed exact output parity but no further paired end-to-end timing advantage.
+Thus it remains a measured candidate optimization, not an independently
+proven latency reduction. Full-run artifacts are under
+`/tmp/wave_migraphx_b2_cv_linear_fp16_skipbench_full_eval_v1/`,
+`/tmp/wave_migraphx_b2_cv_linear_fp16_skipbench_full_eval_v2/`,
+`/tmp/wave_migraphx_b2_cv_linear_fp16_cvnearest_full_eval_v1/`, and
+`/tmp/wave_migraphx_b2_cv_linear_fp16_cvnearest_inplace_full_eval_v1/`; the
+paired resize benchmark is `/tmp/wave_migraphx_b2_cvnearest_paired_v1/summary.json`.
+
+
+### CPU/memory profiling and exact sub-100-ms route experiment (2026-10-29)
+
+I reviewed AMD's ROCm performance guidance, PyTorch's profiler guidance, and
+OpenCV's parallel-processing documentation before selecting the next trials.
+The shared principles are to profile the complete request first; optimize the
+measured bottleneck; minimize unnecessary full-resolution copies and host/device
+transfers; and tune parallelism on the actual hardware rather than equating
+more threads with lower latency. AMD specifically documents mapped pinned
+memory as an option on integrated systems, but that remains an untested
+hypothesis for this PyTorch/ROCm path. The official guidance is [AMD HIP
+performance guidelines](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/performance_guidelines.html),
+[PyTorch Profiler](https://docs.pytorch.org/tutorials/recipes/recipes/profiler_recipe.html),
+and [OpenCV parallel processing](https://docs.opencv.org/5.0/tutorials/core/how_to_use_OpenCV_parallel_for_new/how_to_use_OpenCV_parallel_for_new.html).
+
+For the selected PyTorch v18 route, I measured OpenCV's default 32 threads
+against 4 threads over all 93 raw photos. All scores stayed exactly equal.
+The 4-thread run's medians were 221.39 ms validation / 224.29 ms test, versus
+222.98 / 224.75 ms at 32 threads; this small difference is within run
+variation and does not justify changing the default by itself. An in-place
+`cv2.erode` also matched the allocated result exactly, but was slower (2.04 ms
+vs 1.07 ms median) and did not improve the 75-ms standardization stage.
+
+A per-stage CPU breakdown on a real 9.04-megapixel Step 1 water ROI showed
+`cv2.bitwise_and` at about 3.88 ms, Pillow `Image.fromarray` at 6.63 ms, and
+single-call Pillow Lanczos resize at 58.12 ms median. The existing eight-strip
+Lanczos hypothesis reduced the current PyTorch v18 standardization median
+from 77–78 ms to 42–43 ms. On the full 93-photo run it measured 187.39 ms
+validation / 191.22 ms test median, with p95 198.73 / 201.31 ms. MAE was
+0.135602 / 0.116569, a 0.049% / 0.024% improvement over v18; all 93 predictions
+matched the previously measured eight-strip candidate exactly. This is a real
+quality-filter-passing improvement, but it remains above 100 ms and is not
+integrated into the production profile. Candidate report:
+`/tmp/wave_v18_eightstrip_current_full/20261029T080919147816Z/benchmark.json`.
+
+I restored the MIGraphX FP16 runtime in an isolated Python 3.12 environment
+using AMD's ROCm 10.1 wheels, then compared the exact stable route with mask
+expansion through OpenCV `INTER_NEAREST_EXACT` and the native HEIF tile decoder
+at 8, 16, and 24 workers. The 8-worker decoder lowered process CPU time but
+increased wall latency (validation/test medians 104.13 / 103.07 ms); it is
+rejected for this latency objective. The 24-worker route returned byte-identical
+Step 2 JPEGs and exactly equal scores versus the 16-worker route on all 93
+photos, while improving median total raw-to-output time to 92.76 / 92.34 ms
+and p95 to 97.93 / 96.02 ms. All 46 test requests and 46/47 validation
+requests were under 100 ms (92/93 overall). Median process CPU time was
+318.8 / 315.7 ms, showing that parallel CPU work can exceed elapsed wall time;
+peak RSS was 3.16 GiB. The one validation request above the limit keeps the
+strict per-request target from being met on every sample.
+
+| Route | Waviness MAE, validation / test | Total raw-to-output latency, validation median / p95 | Total raw-to-output latency, test median / p95 | Requests under 100 ms |
+|---|---:|---:|---:|---:|
+| Current v18 PyTorch official route | 0.135669 / 0.116597 | 236.74 / 267.81 ms | 240.92 / 268.79 ms | 0/93 |
+| Stable MIGraphX FP16 + OpenCV exact-nearest, 16 HEIF workers | 0.131969 / 0.104235 | 94.85 / 103.20 ms | 94.87 / 99.51 ms | 87/93 |
+| Stable MIGraphX FP16 + OpenCV exact-nearest, 24 HEIF workers | 0.131969 / 0.104235 | 92.76 / 97.93 ms | 92.34 / 96.02 ms | 92/93 |
+
+The 24-worker candidate's point-estimate MAE improves 2.73% validation and
+10.60% test versus v18. I recomputed its 50,000-draw capture-date bootstrap
+against the official v18 raw-to-output predictions: candidate-minus-v18 MAE
+95% intervals were [-0.02483, +0.01494] validation and [-0.02826, +0.00128]
+test. Both intervals permit more than 1% MAE regression. The point estimates
+pass, but this is not yet sufficient evidence to claim quality cannot regress.
+A four-photo date-disjoint test group had MAE 0.13552 vs 0.15744 for v18; this
+sample is too small to close that uncertainty.
+
+I also generated the candidate route's Step 2 outputs for the 217 training
+photos and tried a training-only regression-head adaptation. A 10-date holdout
+selected LR 1e-5 for 8 epochs; holdout MAE changed only from 0.107748 to
+0.107719. Refit on all training rows changed candidate-route MAE from
+0.131969 to 0.131766 validation and 0.104235 to 0.104098 test, while test
+RMSE worsened slightly from 0.130212 to 0.130565. On the four date-disjoint
+photos, MAE worsened from 0.13552 to 0.13732. I reject this head adaptation.
+The unadapted stable route remains the best speed candidate, pending more
+independent date coverage for quality confidence.
+
+The MIGraphX environment is isolated at `/tmp/wave_migraphx_312_env`; its
+packages were not added to project requirements. Full-run artifacts are under
+`/tmp/wave_migraphx_b2_fp16_stable_aligned_ref_v1/`,
+`/tmp/wave_migraphx_b2_fp16_stable_cvnearest_aligned_v1/`,
+`/tmp/wave_migraphx_b2_fp16_stable_cvnearest_heif8_v1/`,
+`/tmp/wave_migraphx_b2_fp16_stable_cvnearest_heif24_v1/`, and
+`/tmp/wave_migraphx_b2_fp16_stable_cvnearest_heif24_train_v1/`. The current
+bootstrap is `/tmp/wave_migraphx_b2_cvnearest_heif24_quality_bootstrap_v1.json`;
+head-adaptation search is under `/tmp/wave_migraphx_fp16_head_adaptation_v1/`.
+
+### Final bounded raw-to-score experiment round and stop gate (2026-10-29)
+
+I compared OpenCV's direct RGB JPEG decode (`cv2.IMREAD_COLOR_RGB`) with the
+Pillow decode path. All ten JPEGs in `step-0-raw-data` decoded to identical
+RGB bytes and identical dimensions. In the full 93-photo stable MIGraphX run,
+all Step 2 JPEGs and scores also matched the Pillow route exactly. The slow
+JPEG `IMG_7565.jpeg` decode fell from 38.14 ms to 30.22 ms, but total latency
+was still 106.12 ms for that image and another validation image measured
+100.76 ms. The route's medians were 93.13 ms validation / 92.90 ms test, p95
+98.10 / 96.42 ms, with 91/93 requests under 100 ms. Thus this exact decode
+change did not eliminate all tail misses.
+
+| Final route | Waviness MAE, validation / test | Total raw-to-output latency, validation median / p95 | Total raw-to-output latency, test median / p95 | Under 100 ms |
+|---|---:|---:|---:|---:|
+| Stable MIGraphX FP16, OpenCV exact-nearest, 24 HEIF workers, Pillow JPEG decode | 0.131969 / 0.104235 | 92.76 / 97.93 ms | 92.34 / 96.02 ms | 92/93 |
+| Same route with OpenCV RGB JPEG decode | 0.131969 / 0.104235 | 93.13 / 98.10 ms | 92.90 / 96.42 ms | 91/93 |
+| Same route with OpenCV RGB JPEG decode and one OpenCV thread | 0.131969 / 0.104235 | 97.22 / 101.67 ms | 96.90 / 108.11 ms | 81/93 |
+
+The one-thread route also preserved all scores but had worse tail behavior. I
+will keep the measured four-thread setting for the best candidate; neither
+OpenCV JPEG decode nor one-thread OpenCV is an overall latency improvement.
+Run artifacts are `/tmp/wave_migraphx_b2_fp16_stable_cvnearest_heif24_cvjpeg_v1/`
+and `/tmp/wave_migraphx_b2_fp16_stable_cvnearest_heif24_cvjpeg_cv1_v1/`.
+
+#### Stop condition for this experiment campaign
+
+The campaign has reached its bounded stop point after the full-cohort JPEG
+and CPU-thread checks. I will count a route as successful only when two full
+raw-to-score runs on all 93 labeled photos each meet all of these gates:
+
+1. Every request completes in under 100 ms, with no failed photos.
+2. Validation and test MAE are each no more than 1% worse than current v18.
+3. The 95% capture-date-cluster bootstrap upper bound is also within the 1%
+   MAE regression allowance on both splits, and the date-disjoint check does
+   not show a material quality drop.
+4. The experiment uses both segmentation passes, full-resolution raw input,
+   required JPEG round trips, and the final prediction-record write.
+
+The best measured route currently meets the MAE point-estimate gate and reaches
+sub-100-ms median and p95, but misses the all-requests-under-100-ms gate by one
+validation photo and does not pass the bootstrap quality gate. The current
+PyTorch v18 route remains selected. No further optimization experiment is
+planned in this campaign; restart only after new independently labeled dates
+are available or the user chooses a specific candidate for focused follow-up.
+
+### Six-photo B2-distilled B0 MIGraphX FP32 prediction check (2026-10-30)
+
+Ran the candidate sequentially on the six HEIC photos in
+`step-7-predict-captures-holder/experiment-predict-holder`, loading two
+MIGraphX FP32 segmentation sessions and the existing v18 regressor once. The
+run included both full-resolution preprocessing passes, JPEG round trips, and
+score generation. It made one first pass in filename order followed by one
+warm repeat of the same photos; there was no randomized order or concurrency.
+No waviness labels were supplied, so MAE is unavailable for these six photos.
+
+The process took 19.93 s from Python launch through exit. Session setup took
+4.608 s for the Step 1 ONNX session, 4.505 s for Step 2, and 0.014 s for the
+regressor. The first photo then incurred first-execution MIGraphX costs of
+4.452 s (Step 1) and 4.509 s (Step 2), for 9.033 s total raw-to-score. The
+remaining first-pass photos took 89.50–101.67 ms; warm repeats took 92.07–
+96.32 ms (94.41 ms median). The complete 12-request sum was 10.067 s,
+excluding process startup/session setup; process wall time includes those.
+
+| Photo | Predicted waviness score | First pass, raw-to-score | Warm repeat, raw-to-score |
+|---|---:|---:|---:|
+| IMG_7927.HEIC | 0.79608029 | 9032.51 ms | 94.26 ms |
+| IMG_7928.HEIC | 0.60329902 | 89.50 ms | 95.81 ms |
+| IMG_7929.HEIC | 0.31018612 | 92.32 ms | 92.94 ms |
+| IMG_7931.HEIC | 0.32639742 | 91.54 ms | 96.32 ms |
+| IMG_7932.HEIC | 0.31529391 | 93.39 ms | 92.07 ms |
+| IMG_7933.HEIC | 0.24815047 | 101.67 ms | 94.55 ms |
+
+Warm median stage times were decode 16.62 ms, Step 1 total 51.75 ms, Step 1
+JPEG round trip 0.49 ms, Step 2 total 17.41 ms, and Step 2 JPEG plus regression
+6.34 ms. Step 1 and Step 2 totals include their respective model calls and
+preprocessing; listed substage timings are diagnostic and should not be added
+to those totals. The exact Step 1 and Step 2 JPEGs are saved under the holder's
+`preprocessed/step-1/` and `preprocessed/step-2/` folders. The detailed
+per-photo timing report is in
+`step-7-predict-captures-holder/experiment-predict-holder/benchmark-results/`.
+
+### Single-process experimental inference server (2026-10-30)
+
+Added `step_7_i_experimental_migraphx_server.py` for the distilled-B0
+MIGraphX FP32 candidate. It creates the Step 1 and Step 2 ONNX Runtime
+MIGraphX sessions and the v18 EfficientNet-B0 regressor once, runs shape
+warm-ups for all three, then listens on `127.0.0.1:8765`. It uses Python's
+single-threaded `HTTPServer`, so requests are handled sequentially and do not
+start extra copies of the models. `GET /health` reports readiness;
+`POST /predict` accepts raw image bytes with an `X-Filename` header and returns
+the waviness score plus server-side stage timings. The server was started and
+reached ready state after its 18.262-second model setup and warm-up. No photos
+were sent to the server in this setup step; this is not a prediction benchmark.
+
+Start it with the isolated MIGraphX environment:
+
+```bash
+LD_LIBRARY_PATH=/tmp/wave_migraphx_312_env/lib/python3.12/site-packages/migraphx_libs:/opt/rocm/lib \
+MIGRAPHX_SKIP_BENCHMARKING=1 MIGRAPHX_USE_FAST_SOFTMAX=0 \
+/tmp/wave_migraphx_312_env/bin/python -u step_7_i_experimental_migraphx_server.py
+```
+
+Send one photo later with:
+
+```bash
+curl -X POST http://127.0.0.1:8765/predict \
+  -H 'X-Filename: photo.HEIC' --data-binary @photo.HEIC
+```
+
+The server is experimental, local-only, and depends on the ONNX graphs and
+isolated MIGraphX environment under `/tmp`; it does not change `.env` or the
+production watcher.
+
+### Six sequential requests through the warmed server (2026-10-30)
+
+After the server reached ready state, I sent the six holder photos one at a
+time in filename order. The server stayed alive and kept all sessions loaded;
+there were no concurrent or randomized requests. Client time starts before
+reading each local photo and ends after the full HTTP response body arrives.
+Server request time includes receiving the upload and writing its temporary
+file, through inference, but stops before sending the response. Raw-to-score
+time starts after the upload is staged and includes image decode, both
+preprocessing passes, and regression. MAE is unavailable because these photos
+have no labels.
+
+| Photo | Prediction | Client request-to-response | Server request time | Server raw-to-score |
+|---|---:|---:|---:|---:|
+| IMG_7927.HEIC | 0.79608029 | 131.34 ms | 124.34 ms | 120.68 ms |
+| IMG_7928.HEIC | 0.60329902 | 104.59 ms | 103.23 ms | 99.49 ms |
+| IMG_7929.HEIC | 0.31018612 | 115.18 ms | 114.01 ms | 109.23 ms |
+| IMG_7931.HEIC | 0.32639742 | 107.91 ms | 106.83 ms | 100.96 ms |
+| IMG_7932.HEIC | 0.31529391 | 101.72 ms | 100.57 ms | 95.77 ms |
+| IMG_7933.HEIC | 0.24815047 | 103.61 ms | 102.34 ms | 97.28 ms |
+
+Client request median was 106.25 ms (all six exceeded 100 ms); median server
+request time was 105.03 ms (also 0/6 under 100 ms). Median server raw-to-score
+was 100.23 ms, with 3/6 under 100 ms. Warm median stage timings were decode
+19.89 ms, Step 1 total 55.40 ms, Step 1 JPEG round trip 0.54 ms, Step 2 total
+17.82 ms, and final JPEG plus regression 7.80 ms. Within Step 1, tensor prep,
+model call, and mask expansion medians were 9.46, 20.36, and 5.47 ms. Within
+Step 2, they were 1.56, 13.45, and effectively 0 ms. Substage times are
+included in their step totals. Predictions exactly match the prior six-photo
+in-process run. Detailed per-request stage records are in
+`step-7-predict-captures-holder/experiment-predict-holder/benchmark-results/b2-distilled-b0-migraphx-fp32-warm-server-requests-20261030.json`.

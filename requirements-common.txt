@@ -4,5 +4,7 @@ transformers>=4.30,<5
 pillow
 pillow-heif
 numpy
+numba>=0.68,<0.69
 scipy
 matplotlib
+opencv-python-headless
