@@ -1,0 +1,25 @@
+{
+  "code_sha256": {
+    "step_1_a_water_segmentation.py": "9a99b1c58f376e75d2552bb44fb67eaccf64ae7abb1b63496dad67caeaebb0b6",
+    "step_1_b_preprocess_water_inputs.py": "1db456c075083536ad3feeb599ffde5f993c6e41ddd2473f5811c3a4c909ebe4",
+    "step_1_c_preprocessing_profiles.py": "44e5acd61b8e2a9635146daecce346648632f4d3aa175382c64523ad12c2d949",
+    "step_2_a_reduce_black_water_area.py": "52e68a021e0944867c789b5d6c2865e80b1b49b6d1eed76ebbb1b3089c5222a6",
+    "step_2_b_crop_selector.py": "de3c7441f9bb3c08ccf03d0b261e6bf13b8da50f1553f0beae616db6d251b936",
+    "step_4_a_wave_dataset.py": "43c8e43d0c0dc49f30494728653a7d5f83d436d74cd995e503949014faf14850",
+    "step_5_a_wave_regression_model.py": "bc4ea30feb5c7b00f407e3099e9760cb15c00d6a86d25936ec1807c0bd214102",
+    "step_7_a_predict.py": "7d9356da66869e1856157b5e27435a3f4fd823e75882bf13b869634d3db16ce9",
+    "step_7_i_migraphx_server.py": "1551958db1759bfd027b09cba369b1522bedec115f6901846acc5d6924ca822c",
+    "step_7_j_fast_v2_1_client.py": "ea4d9795035392b36974ca6ae55c64d2d021047f45ddd2134fc29bee90cc50c3"
+  },
+  "coordinate_crop": true,
+  "device": "MIGraphX",
+  "logits_resolution": 448,
+  "model": "SegFormer-B0 ONNX (MIGraphX FP16)",
+  "overlapping_tiles": false,
+  "precision": "float16",
+  "profile": "fast-v2.2",
+  "resolution": 448,
+  "segmentation_model_revision": "sha256:96410800203e3f19b7dab26980ea6413f6f9369bb868e23bfa7f14eca6681fda",
+  "step2_resolution": null,
+  "torch_version": "not-used"
+}

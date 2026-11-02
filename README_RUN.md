@@ -5,11 +5,11 @@ Set up Python and install dependencies as described in the main
 steps. Put the input photos in `step-0-raw-data/` before starting.
 
 ```bash
-python step_1_b_preprocess_water_inputs.py --profile fast-v2.2
-python step_2_a_reduce_black_water_area.py --profile fast-v2.2
-python step_2_b_label_data.py --profile fast-v2.2  # labeling UI at http://localhost:8055
-python step_3_a_prepare_dataset_split.py --profile fast-v2.2
-python train.py --profile fast-v2.2                # EfficientNet-B0 default
+python step_1_b_preprocess_water_inputs.py
+python step_2_a_reduce_black_water_area.py
+python step_2_b_label_data.py        # labeling UI at http://localhost:8055
+python step_3_a_prepare_dataset_split.py
+python train.py                     # fast-v2.2 + EfficientNet-B0 defaults
 python step_6_a_evaluate_test.py
 ```
 
