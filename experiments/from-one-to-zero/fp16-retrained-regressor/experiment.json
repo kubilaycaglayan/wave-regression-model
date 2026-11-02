@@ -1,0 +1,39 @@
+{
+  "id": "fp16-retrained-regressor",
+  "name": "FP16 SegFormer + matched retrained regressor",
+  "purpose": "Train and evaluate an experiment-local waviness regressor using the exact final 224x224 images produced by the fast-v2.1 FP16 SegFormer path.",
+  "source_speed_experiment": "migraphx-fp16",
+  "pipeline": {
+    "profile": "fast-v2.1-coordinate",
+    "segmentation_model": "models/fast-v2.1/segformer-b0-step1-448-fp32.onnx",
+    "segmentation_runtime": "ONNX Runtime MIGraphX Execution Provider with migraphx_fp16_enable=1",
+    "segmentation_input_size": 448,
+    "preprocessing": "Decode and orient HEIC; OpenCV INTER_AREA resize to 448x448; ImageNet normalize; FP16 MIGraphX SegFormer water mask; nearest-exact projection to 224x224; lower-water crop selection; map crop to original-source coordinates; Lanczos4 resize and apply mask on 224x224 black canvas; JPEG quality 95 with 4:4:4 subsampling; decode JPEG to RGB for the regressor.",
+    "regressor_training_input": "Exact final 224x224 RGB JPEG bytes emitted by the FP16 inference path; standard deterministic ImageNet normalization at training and evaluation time.",
+    "regressor_backbone": "EfficientNet-B0 ImageNet pretrained, frozen feature extractor, trained sigmoid regression head"
+  },
+  "dataset": {
+    "split_snapshot": "20261102T084438874261Z",
+    "counts": {"train": 217, "validation": 47, "test": 46},
+    "checkpoint_selection": "Minimum validation MAE",
+    "test_policy": "Prepare/evaluate test only after the best checkpoint has been selected on validation."
+  },
+  "training": {
+    "seed": 42,
+    "optimizer": "AdamW",
+    "learning_rate": 0.001,
+    "batch_size": 8,
+    "maximum_epochs": 100,
+    "early_stopping": {"monitor": "val_mae", "mode": "min", "patience": 10},
+    "augmentations": "Random horizontal flip p=0.5; ColorJitter brightness=0.25, contrast=0.25, saturation=0.20, hue=0.02.",
+    "loss": "SmoothL1Loss"
+  },
+  "comparison": {
+    "baseline": "Current fast-v2.1 FP32 SegFormer + current ONNX regressor",
+    "fp16_screen_control": "FP16 SegFormer + current ONNX regressor",
+    "candidate": "FP16 SegFormer + this experiment's validation-selected regressor",
+    "speed_measurement": "Raw photo to waviness score; one warm-up and three measured runs per held-out test photo; model startup reported separately.",
+    "quality_metrics": ["MAE", "RMSE", "bias", "prediction min/max", "per-photo absolute-error change"]
+  },
+  "artifacts_policy": "Generated masked training inputs, checkpoints, and ONNX model stay in the experiment-local ignored artifacts directory. Reports and hashes are retained in the repository."
+}

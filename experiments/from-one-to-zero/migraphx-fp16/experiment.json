@@ -1,0 +1,8 @@
+{
+  "id": "migraphx-fp16",
+  "name": "SegFormer-B0 MIGraphX FP16",
+  "purpose": "Screen lower-precision MIGraphX execution using the same distilled SegFormer-B0 ONNX weights.",
+  "change": "Enable MIGraphX FP16 provider math; retain the same 448x448 input, HEIC decoder, crop selector, and regressor.",
+  "quality_status": "speed_screen_only",
+  "runner": "python experiments/from-one-to-zero/run_screen.py --only migraphx-fp16"
+}

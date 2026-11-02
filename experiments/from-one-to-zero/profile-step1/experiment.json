@@ -1,0 +1,8 @@
+{
+  "id": "profile-step1",
+  "name": "Step 1 ONNX operator profile",
+  "purpose": "Identify expensive SegFormer-B0 nodes and confirm their execution provider assignments.",
+  "change": "Enable ONNX Runtime profiling on the unchanged 448x448 FP32 model. Profiled latency is diagnostic and is not comparable to unprofiled runs.",
+  "quality_status": "diagnostic_only",
+  "runner": "python experiments/from-one-to-zero/run_screen.py --only profile-step1"
+}

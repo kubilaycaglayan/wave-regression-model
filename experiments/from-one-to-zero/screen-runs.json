@@ -1,0 +1,81 @@
+{
+  "runs": [
+    {
+      "created_at_utc": "2026-11-02T09:33:40.865167+00:00",
+      "photo_count": 4,
+      "photos": [
+        "IMG_7912.HEIC",
+        "IMG_7914.HEIC",
+        "IMG_7919.HEIC",
+        "IMG_7921.HEIC"
+      ],
+      "measured_repeats_per_photo": 3,
+      "screen_stamp": "20261102T093231Z",
+      "quality_gate": "Not run; predictions and crop deltas are diagnostic only. A small screen does not establish quality.",
+      "variants": [
+        "baseline",
+        "migraphx-fp16",
+        "profile-step1",
+        "smaller-input-384",
+        "heic-lowres-roi"
+      ]
+    },
+    {
+      "created_at_utc": "2026-11-02T09:34:54.989654+00:00",
+      "photo_count": 4,
+      "photos": [
+        "IMG_7912.HEIC",
+        "IMG_7914.HEIC",
+        "IMG_7919.HEIC",
+        "IMG_7921.HEIC"
+      ],
+      "measured_repeats_per_photo": 3,
+      "screen_stamp": "20261102T093432Z",
+      "quality_gate": "Not run; predictions and crop deltas are diagnostic only. A small screen does not establish quality.",
+      "variants": [
+        "baseline",
+        "heic-lowres-roi"
+      ]
+    },
+    {
+      "created_at_utc": "2026-11-02T09:37:24.863765+00:00",
+      "photo_count": 4,
+      "photos": [
+        "IMG_7912.HEIC",
+        "IMG_7914.HEIC",
+        "IMG_7919.HEIC",
+        "IMG_7921.HEIC"
+      ],
+      "measured_repeats_per_photo": 3,
+      "screen_stamp": "20261102T093629Z",
+      "quality_gate": "Not run; predictions and crop deltas are diagnostic only. A small screen does not establish quality.",
+      "variants": [
+        "baseline",
+        "migraphx-fp16",
+        "profile-step1",
+        "smaller-input-384",
+        "heic-lowres-roi"
+      ]
+    },
+    {
+      "created_at_utc": "2026-11-02T09:39:40.585240+00:00",
+      "photo_count": 4,
+      "photos": [
+        "IMG_7912.HEIC",
+        "IMG_7914.HEIC",
+        "IMG_7919.HEIC",
+        "IMG_7921.HEIC"
+      ],
+      "measured_repeats_per_photo": 3,
+      "screen_stamp": "20261102T093844Z",
+      "quality_gate": "Not run; predictions and crop deltas are diagnostic only. A small screen does not establish quality.",
+      "variants": [
+        "baseline",
+        "migraphx-fp16",
+        "profile-step1",
+        "smaller-input-384",
+        "heic-lowres-roi"
+      ]
+    }
+  ]
+}

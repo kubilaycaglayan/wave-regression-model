@@ -73,6 +73,7 @@ EXPERIMENT = os.environ.get("WAVE_EXPERIMENT", "distilled-b0-migraphx-fp32")
 if EXPERIMENT not in CANDIDATES:
     raise RuntimeError(f"Unknown WAVE_EXPERIMENT={EXPERIMENT!r}; choose one of {', '.join(CANDIDATES)}")
 CONFIG = CANDIDATES[EXPERIMENT]
+STEP1_SIZE = int(os.environ.get("WAVE_STEP1_SIZE", "448"))
 STEP1_ONNX = Path(os.environ.get("WAVE_STEP1_ONNX", CONFIG["step1"])).expanduser()
 STEP2_ONNX = Path(os.environ.get("WAVE_STEP2_ONNX", CONFIG["step2"])).expanduser()
 REGRESSOR_ONNX = Path(os.environ.get(
@@ -302,7 +303,7 @@ def run_fast_v2_1_pipeline(path: Path) -> dict:
             source = image
 
         tick = time.perf_counter()
-        tensor = processor_input(image, 448)
+        tensor = processor_input(image, STEP1_SIZE)
         stages["step1_tensor_prep_ms"] = (time.perf_counter() - tick) * 1000
         tick = time.perf_counter()
         predicted_mask = STEP1_SESSION.run(["water_mask"], {"pixel_values": tensor})[0][0]
@@ -384,8 +385,13 @@ def load_session(path: Path, device, label: str):
     options = ort.SessionOptions()
     options.log_severity_level = 3
     options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    provider_options = {"migraphx_fp16_enable": "1"} if CONFIG["fp16"] else {}
+    fp16_enabled = CONFIG["fp16"] or os.environ.get("WAVE_MIGRAPHX_FP16") == "1"
+    provider_options = {"migraphx_fp16_enable": "1"} if fp16_enabled else {}
     options.add_provider_for_devices([device], provider_options)
+    profile_prefix = os.environ.get("WAVE_STEP1_PROFILE_PREFIX")
+    if label == "Step 1 segmentation" and profile_prefix:
+        options.enable_profiling = True
+        options.profile_file_prefix = profile_prefix
     session = ort.InferenceSession(str(path), sess_options=options)
     if "MIGraphXExecutionProvider" not in session.get_providers():
         raise RuntimeError(f"{label} did not load on MIGraphX: {session.get_providers()}")
@@ -428,7 +434,7 @@ def initialize_models():
 
     # Trigger first-use compilation for every graph before requests are accepted.
     tick = time.perf_counter()
-    sessions = [(STEP1_SESSION, 448)]
+    sessions = [(STEP1_SESSION, STEP1_SIZE)]
     if not coordinate_crop:
         sessions.append((STEP2_SESSION, 384))
     for session, size in sessions:

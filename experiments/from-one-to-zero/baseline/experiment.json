@@ -1,0 +1,7 @@
+{
+  "id": "baseline-screen",
+  "name": "Paired screen baseline · fast-v2.1 FP32",
+  "purpose": "Reference latency for candidate screens using the current fast-v2.1 path and the same small raw-photo cohort.",
+  "change": "No pipeline changes.",
+  "quality_status": "reference_only"
+}

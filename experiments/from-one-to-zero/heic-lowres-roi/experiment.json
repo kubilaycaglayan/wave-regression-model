@@ -1,0 +1,8 @@
+{
+  "id": "heic-lowres-roi",
+  "name": "HEIC thumbnail segmentation + regional decode",
+  "purpose": "Screen using an embedded HEIC thumbnail for segmentation, then decoding only selected source tiles for the final crop.",
+  "change": "Use the first embedded thumbnail when present; fall back to the current full-frame path when absent. Decode source pixels from only tiles intersecting the selected crop.",
+  "quality_status": "speed_screen_only",
+  "runner": "python experiments/from-one-to-zero/run_screen.py --only heic-lowres-roi"
+}

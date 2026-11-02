@@ -14,6 +14,7 @@ __pycache__/
 __pycache__/*
 *.py[cod]
 native/build/
+experiments/from-one-to-zero/fp16-retrained-regressor/artifacts/
 
 # Machine-specific GPU runtime pins.
 /requirements-rocm-*.txt

@@ -1,0 +1,8 @@
+{
+  "id": "smaller-input",
+  "name": "SegFormer-B0 384x384 input",
+  "purpose": "Screen whether reducing the Step 1 input from 448x448 to 384x384 lowers inference latency.",
+  "change": "Create an experiment-local fixed-shape ONNX graph by rewriting SegFormer spatial reshape constants; retain the same weights and FP32 math.",
+  "quality_status": "speed_screen_only",
+  "runner": "python experiments/from-one-to-zero/run_screen.py --only smaller-input"
+}
