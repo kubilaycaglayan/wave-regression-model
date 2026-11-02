@@ -1,0 +1,260 @@
+{
+  "created_at_utc": "2026-11-02T09:02:57.066963+00:00",
+  "purpose": "Baseline timing for current fast-v2.1 prediction path; no speed changes.",
+  "pipeline": "fast-v2.1-coordinate: raw HEIC decode/orientation -> 448px SegFormer-B0 ONNX segmentation (MIGraphX) -> lower-water rectangle selection and source-coordinate crop -> 224px masked JPEG -> EfficientNet-B0 ONNX waviness inference (CPU).",
+  "checkpoint_setting": {
+    "path": "step-5-checkpoints/v20-mae-0.0979-efficientnet_b0-fast-v2.1/wave-regression-efficientnet_b0-v20-best-val-mae-epoch=29-val_mae=0.0979.ckpt",
+    "sha256": "b2c3b0dfbe5b90af22d54177d870d26f70c2a4e8d170d2ec2d23fe63e64963b8",
+    "note": "PREDICT_CHECKPOINT_PATH is configured to latest v20 checkpoint. The v2.1 ONNX service does not load this PyTorch checkpoint; its regressor is the separately identified ONNX model below."
+  },
+  "models": {
+    "segmentation": {
+      "path": "models/fast-v2.1/segformer-b0-step1-448-fp32.onnx",
+      "sha256": "96410800203e3f19b7dab26980ea6413f6f9369bb868e23bfa7f14eca6681fda"
+    },
+    "regressor": {
+      "path": "models/fast-v2.1/wave-regression-efficientnet-b0-fast-v2.1.onnx",
+      "sha256": "50948b8e500885c56cf864d3baaeb654f5d796d4dada272165dd1470b7a2a9aa",
+      "source": "models/fast-v2.1/model-manifest.json"
+    }
+  },
+  "runtime_health": {
+    "ready": true,
+    "candidate": "distilled-b0-migraphx-fp32",
+    "label": "B2-distilled SegFormer-B0 MIGraphX FP32 + OpenCV",
+    "pipeline_profile": "fast-v2.1-coordinate",
+    "step1_model": "/home/ubuntu/dev/deep-learning/wave-regression-model/models/fast-v2.1/segformer-b0-step1-448-fp32.onnx",
+    "regressor_model": "/home/ubuntu/dev/deep-learning/wave-regression-model/models/fast-v2.1/wave-regression-efficientnet-b0-fast-v2.1.onnx"
+  },
+  "cohort": [
+    {
+      "filename": "IMG_7912.HEIC",
+      "path": "step-7-predict-captures-holder/IMG_7912.HEIC",
+      "bytes": 531448,
+      "sha256": "ad428d72d722b484dd18b78daac4442f0717fe5e18dd836495609655e2d19217"
+    },
+    {
+      "filename": "IMG_7914.HEIC",
+      "path": "step-7-predict-captures-holder/IMG_7914.HEIC",
+      "bytes": 556876,
+      "sha256": "bfa03f43545aabb3b79c6701c9ba043eb26dd083598ece908eb77de674163e01"
+    }
+  ],
+  "protocol": {
+    "warmup_runs_per_photo": 1,
+    "measured_runs_per_photo": 3,
+    "photos": 2,
+    "measurement": "client request wall time, raw file already on disk through returned waviness score; includes local HTTP request overhead; excludes service/model initialization"
+  },
+  "startup_to_ready_ms": 10043.830542999785,
+  "latency_summary": {
+    "client_raw_to_score_ms": {
+      "count": 6,
+      "median_ms": 57.253678005508846,
+      "p95_ms": 59.49399900418939,
+      "min_ms": 55.49443700147094,
+      "max_ms": 59.49399900418939
+    },
+    "server_pipeline_ms": {
+      "count": 6,
+      "median_ms": 54.97264499717858,
+      "p95_ms": 57.59444999421248,
+      "min_ms": 53.568890994938556,
+      "max_ms": 57.59444999421248
+    }
+  },
+  "runs": [
+    {
+      "photo": "IMG_7912.HEIC",
+      "repeat": 1,
+      "status": "ok",
+      "prediction": 0.30544212460517883,
+      "total_raw_to_score_ms": 57.52057300560409,
+      "server_pipeline_ms": 55.02920599974459,
+      "stages_ms": {
+        "decode_ms": 16.463346997625194,
+        "step1_tensor_prep_ms": 7.668695005122572,
+        "step1_segmentation_ms": 20.296608003263827,
+        "mask_projection_ms": 0.054692995036020875,
+        "crop_selection_ms": 0.9799760009627789,
+        "coordinate_map_and_source_crop_ms": 0.008726994565222412,
+        "final_canvas_resize_and_mask_ms": 3.2032499948400073,
+        "final_jpeg_roundtrip_ms": 0.702466000802815,
+        "regressor_tensor_prep_ms": 0.34136899921577424,
+        "regressor_inference_ms": 5.2985849979449995,
+        "preprocessing_total_ms": 49.72917799750576
+      },
+      "image": {
+        "width": 3024,
+        "height": 4032,
+        "format": ".heic"
+      },
+      "crop": [
+        486,
+        882,
+        2592,
+        3690
+      ]
+    },
+    {
+      "photo": "IMG_7912.HEIC",
+      "repeat": 2,
+      "status": "ok",
+      "prediction": 0.30544212460517883,
+      "total_raw_to_score_ms": 58.20973300433252,
+      "server_pipeline_ms": 56.064866002998315,
+      "stages_ms": {
+        "decode_ms": 15.893631003564224,
+        "step1_tensor_prep_ms": 9.697162997326814,
+        "step1_segmentation_ms": 20.053201995324343,
+        "mask_projection_ms": 0.061456004914361984,
+        "crop_selection_ms": 0.9937809954863042,
+        "coordinate_map_and_source_crop_ms": 0.008757000614423305,
+        "final_canvas_resize_and_mask_ms": 3.0301860024337657,
+        "final_jpeg_roundtrip_ms": 0.6853140002931468,
+        "regressor_tensor_prep_ms": 0.3518490048008971,
+        "regressor_inference_ms": 5.277295000269078,
+        "preprocessing_total_ms": 50.78616800165037
+      },
+      "image": {
+        "width": 3024,
+        "height": 4032,
+        "format": ".heic"
+      },
+      "crop": [
+        486,
+        882,
+        2592,
+        3690
+      ]
+    },
+    {
+      "photo": "IMG_7912.HEIC",
+      "repeat": 3,
+      "status": "ok",
+      "prediction": 0.30544212460517883,
+      "total_raw_to_score_ms": 56.9867830054136,
+      "server_pipeline_ms": 54.91608399461256,
+      "stages_ms": {
+        "decode_ms": 15.908287998172455,
+        "step1_tensor_prep_ms": 7.778450002660975,
+        "step1_segmentation_ms": 20.68191899888916,
+        "mask_projection_ms": 0.05689699901267886,
+        "crop_selection_ms": 0.9817190002650023,
+        "coordinate_map_and_source_crop_ms": 0.008885996066965163,
+        "final_canvas_resize_and_mask_ms": 3.0950569998822175,
+        "final_jpeg_roundtrip_ms": 0.7179550011642277,
+        "regressor_tensor_prep_ms": 0.328384994645603,
+        "regressor_inference_ms": 5.345151999790687,
+        "preprocessing_total_ms": 49.56933899666183
+      },
+      "image": {
+        "width": 3024,
+        "height": 4032,
+        "format": ".heic"
+      },
+      "crop": [
+        486,
+        882,
+        2592,
+        3690
+      ]
+    },
+    {
+      "photo": "IMG_7914.HEIC",
+      "repeat": 1,
+      "status": "ok",
+      "prediction": 0.31795358657836914,
+      "total_raw_to_score_ms": 56.62671800382668,
+      "server_pipeline_ms": 54.718273000617046,
+      "stages_ms": {
+        "decode_ms": 16.048239995143376,
+        "step1_tensor_prep_ms": 7.801042003848124,
+        "step1_segmentation_ms": 20.656622997194063,
+        "mask_projection_ms": 0.05647599755320698,
+        "crop_selection_ms": 0.8493610002915375,
+        "coordinate_map_and_source_crop_ms": 0.008755996532272547,
+        "final_canvas_resize_and_mask_ms": 2.773865999188274,
+        "final_jpeg_roundtrip_ms": 0.7218019964057021,
+        "regressor_tensor_prep_ms": 0.33027800236595795,
+        "regressor_inference_ms": 5.459877000248525,
+        "preprocessing_total_ms": 49.25695400015684
+      },
+      "image": {
+        "width": 3024,
+        "height": 4032,
+        "format": ".heic"
+      },
+      "crop": [
+        594,
+        1476,
+        2322,
+        3780
+      ]
+    },
+    {
+      "photo": "IMG_7914.HEIC",
+      "repeat": 2,
+      "status": "ok",
+      "prediction": 0.31795358657836914,
+      "total_raw_to_score_ms": 59.49399900418939,
+      "server_pipeline_ms": 57.59444999421248,
+      "stages_ms": {
+        "decode_ms": 16.184785999939777,
+        "step1_tensor_prep_ms": 10.283882002113387,
+        "step1_segmentation_ms": 20.440747997781727,
+        "mask_projection_ms": 0.08900700049707666,
+        "crop_selection_ms": 0.9869390050880611,
+        "coordinate_map_and_source_crop_ms": 0.010048002877738327,
+        "final_canvas_resize_and_mask_ms": 2.8267749949009158,
+        "final_jpeg_roundtrip_ms": 0.733583998226095,
+        "regressor_tensor_prep_ms": 0.5724520015064627,
+        "regressor_inference_ms": 5.451129996799864,
+        "preprocessing_total_ms": 52.14183800126193
+      },
+      "image": {
+        "width": 3024,
+        "height": 4032,
+        "format": ".heic"
+      },
+      "crop": [
+        594,
+        1476,
+        2322,
+        3780
+      ]
+    },
+    {
+      "photo": "IMG_7914.HEIC",
+      "repeat": 3,
+      "status": "ok",
+      "prediction": 0.31795358657836914,
+      "total_raw_to_score_ms": 55.49443700147094,
+      "server_pipeline_ms": 53.568890994938556,
+      "stages_ms": {
+        "decode_ms": 16.391263001423795,
+        "step1_tensor_prep_ms": 7.62521199794719,
+        "step1_segmentation_ms": 19.31714300008025,
+        "mask_projection_ms": 0.04893200093647465,
+        "crop_selection_ms": 0.8495520014548674,
+        "coordinate_map_and_source_crop_ms": 0.008916998922359198,
+        "final_canvas_resize_and_mask_ms": 2.774086002318654,
+        "final_jpeg_roundtrip_ms": 0.7032169960439205,
+        "regressor_tensor_prep_ms": 0.34422399767208844,
+        "regressor_inference_ms": 5.49587400018936,
+        "preprocessing_total_ms": 48.071012999571394
+      },
+      "image": {
+        "width": 3024,
+        "height": 4032,
+        "format": ".heic"
+      },
+      "crop": [
+        594,
+        1476,
+        2322,
+        3780
+      ]
+    }
+  ]
+}
