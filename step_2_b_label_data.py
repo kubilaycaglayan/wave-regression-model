@@ -746,7 +746,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the local sea-waviness labeling app")
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2"), default="fast-v2")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2", "fast-v2.1"), default="fast-v2.1")
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--port", type=int, default=8055)
     args = parser.parse_args()

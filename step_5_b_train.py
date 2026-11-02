@@ -206,7 +206,7 @@ def write_summary(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backbone", choices=SUPPORTED_BACKBONES, default=DEFAULT_BACKBONE)
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2"), default="fast-v2")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2", "fast-v2.1"), default="fast-v2.1")
     args = parser.parse_args()
     profile = get_profile(args.profile)
     global SPLIT_SNAPSHOT_DIR

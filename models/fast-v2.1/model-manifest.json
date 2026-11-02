@@ -1,0 +1,17 @@
+{
+  "profile": "fast-v2.1-coordinate",
+  "segmentation": {
+    "path": "segformer-b0-step1-448-fp32.onnx",
+    "source": "experiments/distil-fp32/seg-distil-b0-step1-448-fp32-20261030.onnx",
+    "sha256": "96410800203e3f19b7dab26980ea6413f6f9369bb868e23bfa7f14eca6681fda",
+    "runtime": "ONNX Runtime with MIGraphX Execution Provider",
+    "precision": "float32"
+  },
+  "regressor": {
+    "path": "wave-regression-efficientnet-b0-fast-v2.1.onnx",
+    "source": "experiments/distil-fp32/performance-improvements/training-runs/v001_coordinate_crop_single_output/run-v001-1/model.onnx",
+    "training_checkpoint": "best-epoch=epoch=11-val_mae=val_mae=0.100441.ckpt",
+    "sha256": "50948b8e500885c56cf864d3baaeb654f5d796d4dada272165dd1470b7a2a9aa",
+    "runtime": "ONNX Runtime CPU Execution Provider"
+  }
+}

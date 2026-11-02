@@ -4,43 +4,55 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
+import json
 import math
 import os
+import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Mapping
-
-import torch
-import step_1_a_water_segmentation as segmentation
-from torchvision_compat import ensure_torchvision_operator_schemas
-
-ensure_torchvision_operator_schemas()
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 from PIL import Image
-from transformers.utils import logging as transformers_logging
-
-from image_loading import load_rgb_image
-from step_1_a_water_segmentation import SegmentationModel
-from step_1_a_water_segmentation import configure_inference_device
-from step_1_a_water_segmentation import load_model as load_segmentation_model
-from step_1_b_preprocess_water_inputs import (
-    decode_rgb_bytes,
-    encode_step_1_output,
-    preprocess_raw_image,
-    preprocess_raw_image_with_projected_mask,
-)
-from step_2_a_reduce_black_water_area import encode_step_2_output, preprocess_step_1_image
-from step_1_c_preprocessing_profiles import configure_prediction_profile, configure_segmentation, get_profile
-from step_4_a_wave_dataset import IMAGE_SIZE, build_evaluation_transform
-from step_5_a_wave_regression_model import WaveRegressionModel
-from step_7_g_checkpoint_contract import validate_checkpoint_preprocessing, validate_segmentation_revision
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
 INPUT_DIR = PROJECT_DIR / "step-7-predict-captures-holder"
+FAST_V2_1_REGRESSOR_ONNX = PROJECT_DIR / "models/fast-v2.1/wave-regression-efficientnet-b0-fast-v2.1.onnx"
+FAST_V2_1_SEGMENTATION_ONNX = PROJECT_DIR / "models/fast-v2.1/segformer-b0-step1-448-fp32.onnx"
+IMAGE_SIZE = (224, 224)
+
+
+def load_torch_v19_modules() -> None:
+    """Import the legacy torch stack only when the rollback backend is selected."""
+    global torch, segmentation, transformers_logging, SegmentationModel
+    global configure_inference_device, load_segmentation_model
+    global decode_rgb_bytes, encode_step_1_output, preprocess_raw_image
+    global preprocess_raw_image_with_projected_mask, encode_step_2_output
+    global preprocess_step_1_image, configure_prediction_profile, configure_segmentation
+    global get_profile, IMAGE_SIZE, build_evaluation_transform, WaveRegressionModel
+    from torchvision_compat import ensure_torchvision_operator_schemas
+
+    ensure_torchvision_operator_schemas()
+    import torch
+    import step_1_a_water_segmentation as segmentation
+    from transformers.utils import logging as transformers_logging
+    from step_1_a_water_segmentation import SegmentationModel, configure_inference_device
+    from step_1_a_water_segmentation import load_model as load_segmentation_model
+    from step_1_b_preprocess_water_inputs import (
+        decode_rgb_bytes, encode_step_1_output, preprocess_raw_image,
+        preprocess_raw_image_with_projected_mask,
+    )
+    from step_2_a_reduce_black_water_area import encode_step_2_output, preprocess_step_1_image
+    from step_1_c_preprocessing_profiles import configure_prediction_profile, configure_segmentation, get_profile
+    from step_4_a_wave_dataset import IMAGE_SIZE, build_evaluation_transform
+    from step_5_a_wave_regression_model import WaveRegressionModel
 
 
 def checkpoint_path_from_env() -> Path:
@@ -79,10 +91,162 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--threads", type=int, help="PyTorch CPU threads; benchmark for your hardware")
     parser.add_argument("--profile", choices=("baseline-v16", "fast-v2"), help="preprocessing profile; defaults from the checkpoint")
+    parser.add_argument("--backend", choices=("fast-v2.1", "torch-v19"),
+                        default=os.getenv("PREDICT_BACKEND", "fast-v2.1"),
+                        help="prediction backend (default: fast-v2.1; torch-v19 is the rollback path)")
     args = parser.parse_args()
     if args.threads is not None and args.threads < 1:
         parser.error("--threads must be positive")
     return args
+
+
+def configured_value(name: str, default: str | None = None) -> str | None:
+    value = os.getenv(name)
+    if value is not None:
+        return value
+    dotenv_path = PROJECT_DIR / ".env"
+    if dotenv_path.is_file():
+        for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, separator, candidate = line.partition("=")
+            if separator and key.strip() == name:
+                return candidate.strip().strip("\"'")
+    return default
+
+
+def fast_v2_1_runtime(args: argparse.Namespace) -> None:
+    """Run the persistent fast-v2.1 MIGraphX backend and save normal Step 7 outputs."""
+    if args.profile is not None:
+        raise ValueError("--profile applies to --backend torch-v19; fast-v2.1 has a fixed fast-v2.1 preprocessing contract")
+    photos = find_input_photos()
+    regressor = Path(configured_value("PREDICT_REGRESSOR_ONNX_PATH", str(FAST_V2_1_REGRESSOR_ONNX))).expanduser()
+    regressor = regressor if regressor.is_absolute() else PROJECT_DIR / regressor
+    if not regressor.is_file():
+        raise FileNotFoundError(f"fast-v2.1-matched ONNX regressor is missing: {regressor}")
+    if not FAST_V2_1_SEGMENTATION_ONNX.is_file():
+        raise FileNotFoundError(f"fast-v2.1 distilled SegFormer-B0 ONNX model is missing: {FAST_V2_1_SEGMENTATION_ONNX}")
+    checkpoint_sha256 = sha256_for(regressor)
+    runtime_python = Path(configured_value(
+        "PREDICT_MIGRAPHX_PYTHON", "/tmp/wave_migraphx_312_env/bin/python"
+    )).expanduser()
+    if not runtime_python.is_file():
+        raise FileNotFoundError(
+            f"MIGraphX Python runtime not found: {runtime_python}. Set PREDICT_MIGRAPHX_PYTHON "
+            "to the Python 3.12 runtime containing onnxruntime-ep-migraphx."
+        )
+    port = int(configured_value("PREDICT_MIGRAPHX_PORT", "8766"))
+    base_url = f"http://127.0.0.1:{port}"
+    server_script = PROJECT_DIR / "step_7_i_migraphx_server.py"
+    runtime_root = runtime_python.parent.parent
+    migraphx_libs = runtime_root / "lib/python3.12/site-packages/migraphx_libs"
+    library_paths = [str(path) for path in (migraphx_libs, Path("/opt/rocm/lib")) if path.is_dir()]
+    prior_ld = os.getenv("LD_LIBRARY_PATH", "")
+    if prior_ld:
+        library_paths.append(prior_ld)
+    server_env = os.environ.copy()
+    server_env.update({
+        "WAVE_EXPERIMENT": "distilled-b0-migraphx-fp32",
+        "WAVE_PIPELINE_PROFILE": "fast-v2.1-coordinate",
+        "WAVE_SERVER_PORT": str(port),
+        "WAVE_REGRESSOR_ONNX": str(regressor.resolve()),
+        "WAVE_STEP1_ONNX": str(FAST_V2_1_SEGMENTATION_ONNX.resolve()),
+        "MIGRAPHX_SKIP_BENCHMARKING": "1",
+        "MIGRAPHX_USE_FAST_SOFTMAX": "0",
+        "LD_LIBRARY_PATH": ":".join(library_paths),
+    })
+    preview_root = PROJECT_DIR / "step-7-inference-preview" / "fast-v2.1-migraphx"
+    global PREVIEW_DIR
+    PREVIEW_DIR = preview_root
+    PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+
+    server_process = None
+    log_handle = None
+    server_log = Path(tempfile.gettempdir()) / f"wave-fast-v2.1-server-{port}.log"
+    health = None
+    try:
+        try:
+            with urlopen(f"{base_url}/health", timeout=1) as response:
+                health = json.loads(response.read())
+        except (OSError, URLError, TimeoutError):
+            log_handle = server_log.open("a", encoding="utf-8")
+            server_process = subprocess.Popen(
+                [str(runtime_python), str(server_script)], cwd=PROJECT_DIR, env=server_env,
+                stdout=log_handle, stderr=subprocess.STDOUT, start_new_session=True,
+            )
+            deadline = time.monotonic() + 120
+            while time.monotonic() < deadline:
+                if server_process.poll() is not None:
+                    raise RuntimeError(f"MIGraphX prediction server exited; see {server_log}")
+                try:
+                    with urlopen(f"{base_url}/health", timeout=1) as response:
+                        health = json.loads(response.read())
+                    break
+                except (OSError, URLError, TimeoutError):
+                    time.sleep(0.25)
+            if health is None:
+                raise TimeoutError(f"MIGraphX prediction server did not become ready; see {server_log}")
+        if health.get("pipeline_profile") != "fast-v2.1-coordinate":
+            raise RuntimeError(f"Port {port} is serving the wrong pipeline: {health}")
+        if Path(health.get("regressor_model", "")).resolve() != regressor.resolve():
+            raise RuntimeError(f"Port {port} is serving a different regressor: {health.get('regressor_model')}")
+        if Path(health.get("step1_model", "")).resolve() != FAST_V2_1_SEGMENTATION_ONNX.resolve():
+            raise RuntimeError(f"Port {port} is serving a different segmentation model: {health.get('step1_model')}")
+        print(f"Backend: fast-v2.1 coordinate-crop + MIGraphX SegFormer-B0 + ONNX CPU regressor")
+        print(f"Runtime: {runtime_python.resolve()}; server log: {server_log}")
+        print(f"Images: {len(photos)} ({sum(not should_skip_photo(p, regressor, checkpoint_sha256) for p in photos)} pending)")
+        processed = skipped = failed = 0
+        total_started = time.perf_counter()
+        for index, photo in enumerate(photos, 1):
+            if should_skip_photo(photo, regressor, checkpoint_sha256):
+                skipped += 1
+                print(f"[{index}/{len(photos)}] {photo.name}: skipped (matching prediction and preview already exist)")
+                continue
+            photo_started = time.perf_counter()
+            print(f"[{index}/{len(photos)}] Input: {photo.relative_to(PROJECT_DIR)}", flush=True)
+            try:
+                request = Request(
+                    f"{base_url}/predict", data=b"", method="POST",
+                    headers={"Content-Type": "application/octet-stream", "X-Filename": photo.name,
+                             "X-Source-Path": str(photo.resolve())},
+                )
+                with urlopen(request, timeout=180) as response:
+                    payload = json.loads(response.read())
+                score = float(payload["prediction"])
+                encoded = base64.b64decode(payload["model_input_jpeg_base64"], validate=True)
+                preview_path = save_preview(photo, encoded)
+                log_path = append_prediction_record(
+                    photo, regressor, checkpoint_sha256, score,
+                    "MIGraphX segmentation / ONNX CPU regressor",
+                    {"photo_elapsed": time.perf_counter() - photo_started,
+                     "server_pipeline": float(payload.get("total_server_ms", 0)) / 1000.0,
+                     "request_and_transfer": max(0.0, time.perf_counter() - photo_started
+                                                  - float(payload.get("total_server_ms", 0)) / 1000.0)},
+                )
+                print(f"Waviness: {score:.3f}")
+                print(f"Stages (ms): {json.dumps(payload.get('stages_ms', {}), sort_keys=True)}")
+                print(f"Preview: {preview_path.relative_to(PROJECT_DIR)}")
+                print(f"Prediction log: {log_path.relative_to(PROJECT_DIR)}")
+                print_timing("Photo total", photo_started)
+                processed += 1
+            except Exception as error:
+                failed += 1
+                print(f"Error processing {photo.name}: {error}", file=sys.stderr, flush=True)
+        print(f"Processed: {processed}; skipped: {skipped}; failed: {failed}")
+        print_timing("Total", total_started)
+        if failed:
+            raise SystemExit(1)
+    finally:
+        if server_process is not None:
+            server_process.terminate()
+            try:
+                server_process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                server_process.kill()
+                server_process.wait(timeout=5)
+        if log_handle is not None:
+            log_handle.close()
 
 
 def find_input_photos() -> list[Path]:
@@ -351,6 +515,14 @@ def predict(
 
 def main() -> None:
     args = parse_args()
+    if args.backend == "fast-v2.1":
+        try:
+            fast_v2_1_runtime(args)
+        except Exception as error:
+            print(f"Error: {error}", file=sys.stderr)
+            raise SystemExit(1) from error
+        return
+    load_torch_v19_modules()
     if args.threads is not None:
         torch.set_num_threads(args.threads)
     try:

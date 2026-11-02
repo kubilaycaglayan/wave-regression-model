@@ -61,6 +61,20 @@ PROFILES = {
         step2_dir=Path("step-2-coordinate-crop-data"),
         split_dir=Path("step-3-coordinate-crop-splits"),
     ),
+    "fast-v2.1": PreprocessingProfile(
+        name="fast-v2.1",
+        step1_resolution=448,
+        step2_resolution=None,
+        precision="float32",
+        overlapping_tiles=False,
+        tile_size=448,
+        tile_overlap=0.0,
+        logits_resolution=448,
+        coordinate_crop=True,
+        step1_dir=Path("step-1-processed-data/fast-v2.1"),
+        step2_dir=Path("step-2-coordinate-crop-data/fast-v2.1"),
+        split_dir=Path("step-3-coordinate-crop-splits"),
+    ),
 }
 
 

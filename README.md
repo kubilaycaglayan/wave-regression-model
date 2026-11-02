@@ -77,8 +77,9 @@ Next, we unfroze the final layer of the EfficientNet-B0 backbone to test whether
 ## Current status
 
 - The pipeline supports image preprocessing, labeling, dataset splits, training, evaluation, and inference.
+- Step 7 now defaults to the fast-v2.1 speed path: native HEIF decoding, distilled SegFormer-B0 ONNX segmentation through MIGraphX, one coordinate-selected lower-water crop, and the fast-v2.1-matched EfficientNet-B0 ONNX regressor. The prior v19 PyTorch path remains available with `--backend torch-v19`.
 - EfficientNet-B0 is the current preferred backbone based on validation experiments.
-- The latest model reported here achieved **0.141 validation MAE** on 17 images. This is a validation result, not a test-set result.
+- The selected fast-v2.1-matched regressor measured **0.100 validation MAE** and **0.125 test MAE** in the matched experiment. Those quality results are reported separately from the current deployment change.
 - The first model version is available on [Hugging Face](https://huggingface.co/kubilaycaglayan/wave-regression).
 - More varied, carefully labeled data is needed to evaluate how well predictions generalize across days, weather, locations, and camera angles.
 

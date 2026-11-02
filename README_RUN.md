@@ -16,18 +16,24 @@ python train.py --backbone efficientnet_b0
 python step_6_a_evaluate_test.py
 ```
 
-Predict one or more new photos:
+Predict one or more new photos (the default backend is the fast-v2.1 speed path):
 
 ```bash
 # put HEIC/JPG/PNG in step-7-predict-captures-holder/, then:
 python step_7_a_predict.py
+# Optional: use the previous PyTorch v19 inference path.
+python step_7_a_predict.py --backend torch-v19
 # Optionally limit PyTorch CPU threads after benchmarking your hardware.
 python step_7_a_predict.py --threads 4
 # previews -> step-7-inference-preview/<profile namespace>/
 # prediction histories -> step-7-predict-captures-holder/predictions/
 ```
 
-The standard training and prediction flow uses `fast-v2` coordinate cropping and requires a CUDA GPU for image preprocessing. CPU preprocessing remains available with `--profile baseline-v16 --device cpu`. The coordinate-crop profile uses its own Step 1, Step 2, and split directories so its outputs cannot mix with older preprocessing. Step 1 runs the repository's SegFormer-B2 model with the 448 × 448 fast settings, selects a lower-water rectangle on the 224 × 224 mask grid, and maps it back onto the original photo to create the final 224 × 224 model input. Step 2 carries that JPEG forward unchanged; it does not run a second segmentation model. This adopts v001's coordinate-crop method with the default pipeline's segmentation model, so train a new checkpoint on these inputs before prediction. The v001 benchmark used distilled SegFormer-B0 and its reported metrics are not a quality guarantee for this route. Step 3 keeps a separate timestamped split history, and Step 5 writes a versioned checkpoint directory. Labels remain in the shared `labels.csv`.
+The default prediction backend now uses the fast-v2.1 speed path: native HEIF decoding, distilled SegFormer-B0 ONNX segmentation on MIGraphX, one lower-water coordinate crop from the original photo, and the fast-v2.1-matched EfficientNet-B0 ONNX regressor on CPU. It skips the intermediate Step 1 image and Step 2 segmentation, and writes the final model-input preview under `step-7-inference-preview/fast-v2.1-migraphx/`. The backend starts a local MIGraphX service for the prediction run and shuts it down afterward. Its default runtime interpreter is `/tmp/wave_migraphx_312_env/bin/python`; override it with `PREDICT_MIGRAPHX_PYTHON` if the Python 3.12 environment is installed elsewhere. The matched regressor can be overridden with `PREDICT_REGRESSOR_ONNX_PATH`. The prior PyTorch v19 route remains available as `--backend torch-v19`.
+
+The fast-v2.1 prediction route requires a Python 3.12 runtime with `onnxruntime` and `onnxruntime-ep-migraphx`, plus access to the ROCm libraries. The shipped ONNX models are in `models/fast-v2.1/`. If the runtime is missing, prediction stops with an error instead of silently using the slower v19 backend.
+
+Training and batch preprocessing now default to the `fast-v2.1` profile. Its Step 1 uses the same distilled SegFormer-B0 ONNX/MIGraphX segmentation, lower-water coordinate crop, and single 224x224 full-chroma JPEG model input as fast-v2.1 prediction. Step 2 passes that image through, and split snapshots record `fast-v2.1` so they cannot be confused with earlier profiles. A newly trained PyTorch checkpoint is not automatically the ONNX regressor used by prediction: prediction continues to use the shipped fast-v2.1-matched ONNX file until you export and select a replacement.
 
 Step 7 reuses valid cached inference previews when switching checkpoints.
 
@@ -83,13 +89,13 @@ Inspect the original, mask, and overlay images. The generated `original` and `ov
 
 ![Step 1 lower-water coordinate-crop model input](readme_files/step-1-preprocessed-sea-example.jpg)
 
-Run the default fast-v2 coordinate-crop preprocessing flow used by prediction:
+Run the default fast-v2.1 coordinate-crop preprocessing flow used by training and prediction:
 
 ```bash
 python step_1_b_preprocess_water_inputs.py
 ```
 
-The fast-v2 profile requires a CUDA GPU. To use CPU, select the baseline profile explicitly:
+The fast-v2.1 profile requires the configured Python 3.12 MIGraphX runtime and ROCm libraries. The same runtime setting used for prediction, `PREDICT_MIGRAPHX_PYTHON`, is used here. To use the older PyTorch paths explicitly, select their profile:
 
 ```bash
 python step_1_b_preprocess_water_inputs.py --profile baseline-v16 --device cpu
@@ -104,13 +110,13 @@ step-0-raw-data/
 and writes the final lower-water coordinate-crop model input as `224x224` images to:
 
 ```text
-step-1-processed-data/fast-v2/
+step-1-processed-data/fast-v2.1/
 ```
 
 Open:
 
 ```text
-step-1-processed-data/fast-v2/index.html
+step-1-processed-data/fast-v2.1/index.html
 ```
 
 The script skips images whose `step-1_<name>.jpg` output already exists, and skips earlier processing when the matching Step 2 output is already present.
@@ -138,15 +144,15 @@ Use the baseline-v16 command only when Step 1 was also run with `--profile basel
 This reads the Step 1 outputs and writes:
 
 ```text
-step-2-coordinate-crop-data/
+step-2-coordinate-crop-data/fast-v2.1/
 ```
 
-For the default `fast-v2` profile, Step 1 already selects the lower-water crop from the predicted mask and maps it back to the original photo. Step 2 copies that final model input into the labeled-data directory without running another segmentation model. The crop selection retains the lower part of detected water, where waves are expected to be most visible.
+For the default `fast-v2.1` profile, Step 1 calls the isolated MIGraphX runtime, predicts the water mask at 448 pixels, selects the lower-water coordinate crop, and maps that crop back to the source photo to create one 224x224 full-chroma model input. Step 2 copies that image into the labeled-data directory without running another segmentation model. The crop selection retains the lower part of detected water, where waves are expected to be most visible.
 
 Inspect the result here:
 
 ```text
-step-2-coordinate-crop-data/index.html
+step-2-coordinate-crop-data/fast-v2.1/index.html
 ```
 
 The script skips images whose `step-2_<name>.jpg` output already exists and copies the matching Step 1 coordinate-crop JPEG unchanged.
@@ -258,7 +264,7 @@ The training script uses the coordinate-crop Step 2 images and profile-matched s
 New checkpoints will be created in:
 
 ```text
-step-5-checkpoints/vN-mae-<best-mae>-<backbone>-fast-v2/
+step-5-checkpoints/vN-mae-<best-mae>-<backbone>-fast-v2.1/
 ```
 
 Each training version directory contains its checkpoint, manifest, summary,
@@ -293,16 +299,17 @@ step-6-test-evaluation/
 
 Each result directory is keyed by the checkpoint filename and SHA-256, then by the split snapshot ID and test-manifest SHA-256. Predictions, summary, gallery, and metadata stay together. A complete evaluation for the same checkpoint and manifest is reused on later runs; a new split snapshot or checkpoint gets its own directory.
 
-## Step 7: Use the new checkpoint for predictions
+## Step 7: Use the fast-v2.1 ONNX prediction model
 
-Configure the prediction checkpoint in `.env` (or the environment) using:
+The default `fast-v2.1` backend runs the ONNX regressor, so changing `PREDICT_CHECKPOINT_PATH` alone does not make a newly trained PyTorch checkpoint active for prediction. Export the trained checkpoint to ONNX, then point `PREDICT_REGRESSOR_ONNX_PATH` at the exported model. For example, the experiment-local exporter can export a checkpoint while keeping its output alongside the run artifacts:
 
-```text
-# Use the exact best-checkpoint path printed by train.py.
-PREDICT_CHECKPOINT_PATH=step-5-checkpoints/vN-mae-<best-mae>-<backbone>-fast-v2/<best-checkpoint>.ckpt
+```bash
+python experiments/distil-fp32/performance-improvements/training/export_regressor.py \
+  step-5-checkpoints/<run-directory>/<best-checkpoint>.ckpt \
+  step-5-checkpoints/<run-directory>/regressor-fast-v2.1.onnx
 ```
 
-After training, update `PREDICT_CHECKPOINT_PATH` to the new checkpoint path printed by `train.py`.
+Set `PREDICT_REGRESSOR_ONNX_PATH` in `.env` (or the environment) to that ONNX path. Keep `PREDICT_CHECKPOINT_PATH` for the optional `--backend torch-v19` rollback route.
 
 Then put new inference photos in:
 

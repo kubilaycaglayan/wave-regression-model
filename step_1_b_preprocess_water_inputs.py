@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import html
 import io
 import os
@@ -260,7 +261,7 @@ def process_image(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2"), default="fast-v2")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2", "fast-v2.1"), default="fast-v2.1")
     parser.add_argument("--input-dir", type=Path, action="append", help="Additional input directory; repeatable")
     parser.add_argument("--output-dir", type=Path, help="Output directory; defaults to the selected profile")
     parser.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")
@@ -271,7 +272,8 @@ def main() -> None:
     args = parser.parse_args()
     profile = get_profile(args.profile)
     output_dir = args.output_dir or profile.step1_dir
-    configure_segmentation(profile, segmentation)
+    if profile.name != "fast-v2.1":
+        configure_segmentation(profile, segmentation)
     if args.workers is not None and args.workers < 1:
         parser.error("--workers must be at least 1")
     ensure_profile_directory(profile, output_dir)
@@ -311,12 +313,40 @@ def main() -> None:
     device = configure_inference_device(args.device) if not pending else None
     model_revisions: set[str] = set()
     if pending:
-        device = configure_inference_device(args.device)
-        if profile.precision == "float16" and device.type != "cuda":
+        if profile.name == "fast-v2.1":
+            from step_7_j_fast_v2_1_client import FastV2_1Client
+
+            run_started = time.perf_counter()
+            with FastV2_1Client() as client:
+                print(f"Fast-v2.1 runtime: {client.runtime_python}")
+                for index, source_path, standardized_path in pending:
+                    item_started = time.perf_counter()
+                    try:
+                        result = client.predict_path(source_path)
+                        image_bytes = base64.b64decode(result["model_input_jpeg_base64"], validate=True)
+                        with Image.open(io.BytesIO(image_bytes)) as opened:
+                            if opened.size != OUTPUT_SIZE:
+                                raise ValueError(f"Expected {OUTPUT_SIZE} model input, received {opened.size}")
+                        temporary_path = standardized_path.with_name(f".{standardized_path.name}.tmp")
+                        temporary_path.write_bytes(image_bytes)
+                        os.replace(temporary_path, standardized_path)
+                        elapsed = time.perf_counter() - item_started
+                        processing_seconds += elapsed
+                        entries[index] = (source_path.name, source_path, standardized_path)
+                        print(f"[{index}/{total}] {source_path.name}: processed ({elapsed:.3f}s; "
+                              f"server={result.get('request_total_ms', 0):.1f}ms)")
+                    except Exception as error:
+                        skipped.append(source_path.name)
+                        print(f"[{index}/{total}] {source_path.name}: WARNING: {error}; skipped "
+                              f"({time.perf_counter() - item_started:.3f}s)")
+        else:
+            device = configure_inference_device(args.device)
+        if profile.name != "fast-v2.1" and profile.precision == "float16" and device.type != "cuda":
             raise RuntimeError(f"The {profile.name} profile requires GPU segmentation with float16 precision")
-        if profile.coordinate_crop:
+        if profile.name != "fast-v2.1" and profile.coordinate_crop:
             warm_coordinate_crop_selector()
-        workers = select_worker_count(args.workers, device, len(pending))
+        if profile.name != "fast-v2.1":
+            workers = select_worker_count(args.workers, device, len(pending))
         tasks = {index: (source_path, standardized_path, profile.coordinate_crop)
                  for index, source_path, standardized_path in pending}
         settings = {
@@ -327,7 +357,7 @@ def main() -> None:
             "SINGLE_IMAGE_LOGITS_RESOLUTION": profile.logits_resolution,
             "INFERENCE_PRECISION": profile.precision,
         }
-        results = run_segmentation_tasks(process_image, tasks, str(device), workers, settings)
+        results = [] if profile.name == "fast-v2.1" else run_segmentation_tasks(process_image, tasks, str(device), workers, settings)
         for index, (status, elapsed, warning, model_revision) in results:
             source_path, standardized_path, _ = tasks[index]
             processing_seconds += elapsed
@@ -341,6 +371,12 @@ def main() -> None:
                 print(f"[{index}/{total}] {source_path.name}: WARNING: {warning}; skipped ({elapsed:.3f}s)")
 
     contract_path = output_dir / "preprocessing-contract.json"
+    if profile.name == "fast-v2.1" and not contract_path.exists():
+        write_preprocessing_contract(
+            profile, output_dir, model_name="SegFormer-B0 ONNX (MIGraphX)",
+            device="MIGraphX", torch_version="not-used",
+            segmentation_model_revision="sha256:96410800203e3f19b7dab26980ea6413f6f9369bb868e23bfa7f14eca6681fda",
+        )
     if profile.name != "baseline-v16" and not contract_path.exists():
         if not model_revisions:
             model = load_model(str(device), verbose=False)
