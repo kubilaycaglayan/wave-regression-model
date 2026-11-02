@@ -1,0 +1,24 @@
+{
+  "code_sha256": {
+    "step_1_a_water_segmentation.py": "9a99b1c58f376e75d2552bb44fb67eaccf64ae7abb1b63496dad67caeaebb0b6",
+    "step_1_b_preprocess_water_inputs.py": "ecbebbc6debb54af05d6c5ec85b5edfdbf1fd648e31d0e9e06e95a52419e11f8",
+    "step_1_c_preprocessing_profiles.py": "56611aed804a068731cecf8336e6403917cf222a1db710f083c411b2cace84f4",
+    "step_2_a_reduce_black_water_area.py": "f4986becaad800df0a8ab489c3cf928c06656e66f961cc239d4a6b867c8d6a17",
+    "step_2_b_crop_selector.py": "de3c7441f9bb3c08ccf03d0b261e6bf13b8da50f1553f0beae616db6d251b936"
+  },
+  "profile": "fast-v2.1",
+  "settings": {
+    "coordinate_crop": true,
+    "logits_resolution": 448,
+    "name": "fast-v2.1",
+    "overlapping_tiles": false,
+    "precision": "float32",
+    "split_dir": "step-3-coordinate-crop-splits",
+    "step1_dir": "step-1-processed-data/fast-v2.1",
+    "step1_resolution": 448,
+    "step2_dir": "step-2-coordinate-crop-data/fast-v2.1",
+    "step2_resolution": null,
+    "tile_overlap": 0.0,
+    "tile_size": 448
+  }
+}
