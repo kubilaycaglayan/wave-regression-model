@@ -1,0 +1,9 @@
+{
+  "id": "fast-v2.2-current-checkpoint",
+  "name": "Latest checkpoint · fast-v2.2 FP16 pipeline",
+  "purpose": "Benchmark the latest PREDICT_CHECKPOINT_PATH checkpoint after exporting it to an experiment-local ONNX file, through the same fast-v2.2 FP16 prediction path.",
+  "checkpoint_selection": "Read from PREDICT_CHECKPOINT_PATH in .env",
+  "preprocessing": "Use the current default fast-v2.2 route unchanged: 448x448 MIGraphX FP16 SegFormer; nearest-exact mask projection; lower-water coordinate crop; source-photo crop mapping; Lanczos4 resize and mask; 224x224 quality-95 4:4:4 JPEG; ImageNet normalization.",
+  "comparison": "Paired with the current bundled fast-v2.2 ONNX default on the same held-out test split.",
+  "artifacts": "The exported ONNX file remains in the ignored experiment-local artifacts directory."
+}

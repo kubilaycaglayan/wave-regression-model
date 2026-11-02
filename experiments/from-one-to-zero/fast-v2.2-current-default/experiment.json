@@ -1,0 +1,15 @@
+{
+  "id": "fast-v2.2-current-default",
+  "name": "Current default · fast-v2.2 FP16 + bundled ONNX regressor",
+  "purpose": "Fresh benchmark of the repository's default Step 7 prediction path, using the latest fast-v2.2 held-out split.",
+  "default_backend": "step_7_a_predict.py --backend fast-v2.2",
+  "regressor": "models/fast-v2.2/wave-regression-efficientnet-b0-fast-v2.2.onnx",
+  "segmentation": "models/fast-v2.1/segformer-b0-step1-448-fp32.onnx with MIGraphX FP16 enabled",
+  "protocol": {
+    "split": "test from the split snapshot referenced by the latest PREDICT_CHECKPOINT_PATH training manifest",
+    "warmup_runs_per_photo": 1,
+    "measured_runs_per_photo": 3,
+    "measurement": "Direct in-process raw photo to waviness score; model startup reported separately."
+  },
+  "note": "PREDICT_CHECKPOINT_PATH is the PyTorch rollback/evaluation checkpoint. The default fast-v2.2 Step 7 backend loads the bundled ONNX regressor listed above."
+}
