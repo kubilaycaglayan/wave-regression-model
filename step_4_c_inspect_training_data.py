@@ -65,7 +65,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=Path("step-4-data-preview"))
     parser.add_argument("--variants", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2", "fast-v2.1"), default="fast-v2.1")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2", "fast-v2.1", "fast-v2.2"), default="fast-v2.2")
     args = parser.parse_args()
     started = time.perf_counter()
     profile = get_profile(args.profile)

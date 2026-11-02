@@ -75,6 +75,20 @@ PROFILES = {
         step2_dir=Path("step-2-coordinate-crop-data/fast-v2.1"),
         split_dir=Path("step-3-coordinate-crop-splits"),
     ),
+    "fast-v2.2": PreprocessingProfile(
+        name="fast-v2.2",
+        step1_resolution=448,
+        step2_resolution=None,
+        precision="float16",
+        overlapping_tiles=False,
+        tile_size=448,
+        tile_overlap=0.0,
+        logits_resolution=448,
+        coordinate_crop=True,
+        step1_dir=Path("step-1-processed-data/fast-v2.2"),
+        step2_dir=Path("step-2-coordinate-crop-data/fast-v2.2"),
+        split_dir=Path("step-3-coordinate-crop-splits"),
+    ),
 }
 
 
@@ -160,6 +174,7 @@ def write_preprocessing_contract(profile: PreprocessingProfile, output_dir: Path
         "step_1_c_preprocessing_profiles.py", "step_2_a_reduce_black_water_area.py",
         "step_2_b_crop_selector.py", "step_4_a_wave_dataset.py",
         "step_5_a_wave_regression_model.py", "step_7_a_predict.py",
+        "step_7_i_migraphx_server.py", "step_7_j_fast_v2_1_client.py",
     )
     hashes = {
         name: hashlib.sha256((project_dir / name).read_bytes()).hexdigest()

@@ -291,7 +291,7 @@ def diagnostic_line(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2", "fast-v2.1"), default="fast-v2.1")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2", "fast-v2.1", "fast-v2.2"), default="fast-v2.2")
     parser.add_argument("--input-dir", type=Path, help="Step 1 directory; defaults to the selected profile")
     parser.add_argument("--output-dir", type=Path, help="Output directory; defaults to the selected profile")
     parser.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")

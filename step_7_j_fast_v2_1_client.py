@@ -1,4 +1,4 @@
-"""Local client for the isolated MIGraphX fast-v2.1 prediction runtime."""
+"""Local client for the versioned MIGraphX coordinate-crop prediction runtime."""
 from __future__ import annotations
 
 import json
@@ -13,7 +13,20 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 SEGMENTATION_MODEL = ROOT / "models/fast-v2.1/segformer-b0-step1-448-fp32.onnx"
-DEFAULT_REGRESSOR = ROOT / "models/fast-v2.1/wave-regression-efficientnet-b0-fast-v2.1.onnx"
+PIPELINES = {
+    "fast-v2.1": {
+        "profile": "fast-v2.1-coordinate",
+        "experiment": "distilled-b0-migraphx-fp32",
+        "regressor": ROOT / "models/fast-v2.1/wave-regression-efficientnet-b0-fast-v2.1.onnx",
+        "fp16": False,
+    },
+    "fast-v2.2": {
+        "profile": "fast-v2.2-coordinate",
+        "experiment": "fast-v2.2",
+        "regressor": ROOT / "models/fast-v2.2/wave-regression-efficientnet-b0-fast-v2.2.onnx",
+        "fp16": True,
+    },
+}
 SERVER_SCRIPT = ROOT / "step_7_i_migraphx_server.py"
 
 
@@ -34,10 +47,16 @@ def configured_value(name: str, default: str | None = None) -> str | None:
 
 
 class FastV2_1Client:
-    """Start or reuse the local fast-v2.1 service and issue path-based requests."""
+    """Start or reuse the selected local coordinate-crop service."""
 
-    def __init__(self, *, regressor: Path | None = None, port: int | None = None):
-        selected = regressor or Path(configured_value("PREDICT_REGRESSOR_ONNX_PATH", str(DEFAULT_REGRESSOR)))
+    def __init__(self, *, regressor: Path | None = None, port: int | None = None,
+                 pipeline_version: str = "fast-v2.2"):
+        if pipeline_version not in PIPELINES:
+            raise ValueError(f"Unsupported MIGraphX preprocessing profile: {pipeline_version}")
+        self.pipeline_version = pipeline_version
+        self.pipeline = PIPELINES[pipeline_version]
+        configured_default = str(self.pipeline["regressor"])
+        selected = regressor or Path(configured_value("PREDICT_REGRESSOR_ONNX_PATH", configured_default))
         self.regressor = selected.expanduser()
         if not self.regressor.is_absolute():
             self.regressor = ROOT / self.regressor
@@ -49,14 +68,14 @@ class FastV2_1Client:
         self.runtime_python = runtime
         self.process: subprocess.Popen | None = None
         self.log_handle = None
-        self.server_log = Path(tempfile.gettempdir()) / f"wave-fast-v2.1-server-{self.port}.log"
+        self.server_log = Path(tempfile.gettempdir()) / f"wave-{self.pipeline_version}-server-{self.port}.log"
         self.health: dict | None = None
 
     def __enter__(self) -> "FastV2_1Client":
         if not self.regressor.is_file():
-            raise FileNotFoundError(f"fast-v2.1-matched ONNX regressor is missing: {self.regressor}")
+            raise FileNotFoundError(f"{self.pipeline_version}-matched ONNX regressor is missing: {self.regressor}")
         if not SEGMENTATION_MODEL.is_file():
-            raise FileNotFoundError(f"fast-v2.1 SegFormer-B0 ONNX model is missing: {SEGMENTATION_MODEL}")
+            raise FileNotFoundError(f"{self.pipeline_version} SegFormer-B0 ONNX model is missing: {SEGMENTATION_MODEL}")
         if not self.runtime_python.is_file():
             raise FileNotFoundError(
                 f"MIGraphX Python runtime not found: {self.runtime_python}. Set PREDICT_MIGRAPHX_PYTHON "
@@ -79,8 +98,8 @@ class FastV2_1Client:
             library_paths.append(prior_ld)
         server_env = os.environ.copy()
         server_env.update({
-            "WAVE_EXPERIMENT": "distilled-b0-migraphx-fp32",
-            "WAVE_PIPELINE_PROFILE": "fast-v2.1-coordinate",
+            "WAVE_EXPERIMENT": self.pipeline["experiment"],
+            "WAVE_PIPELINE_PROFILE": self.pipeline["profile"],
             "WAVE_SERVER_PORT": str(self.port),
             "WAVE_REGRESSOR_ONNX": str(self.regressor.resolve()),
             "WAVE_STEP1_ONNX": str(SEGMENTATION_MODEL.resolve()),
@@ -88,6 +107,10 @@ class FastV2_1Client:
             "MIGRAPHX_USE_FAST_SOFTMAX": "0",
             "LD_LIBRARY_PATH": ":".join(library_paths),
         })
+        if self.pipeline["fp16"]:
+            server_env["WAVE_MIGRAPHX_FP16"] = "1"
+        else:
+            server_env.pop("WAVE_MIGRAPHX_FP16", None)
         self.log_handle = self.server_log.open("a", encoding="utf-8")
         self.process = subprocess.Popen(
             [str(self.runtime_python), str(SERVER_SCRIPT)], cwd=ROOT, env=server_env,
@@ -108,8 +131,10 @@ class FastV2_1Client:
 
     def _validate_health(self) -> None:
         health = self.health or {}
-        if health.get("pipeline_profile") != "fast-v2.1-coordinate":
+        if health.get("pipeline_profile") != self.pipeline["profile"]:
             raise RuntimeError(f"Port {self.port} is serving the wrong pipeline: {health}")
+        if health.get("migraphx_fp16") is not self.pipeline["fp16"]:
+            raise RuntimeError(f"Port {self.port} is serving the wrong segmentation precision: {health}")
         if Path(health.get("regressor_model", "")).resolve() != self.regressor.resolve():
             raise RuntimeError(f"Port {self.port} is serving a different regressor: {health.get('regressor_model')}")
         if Path(health.get("step1_model", "")).resolve() != SEGMENTATION_MODEL.resolve():

@@ -98,7 +98,10 @@ PAGE = r'''<!doctype html>
     .split-stat strong { display:block; margin-top:2px; }
     .split-bins { flex-basis:100%; padding:10px 13px; color:var(--muted); background:white; border:1px solid var(--line); border-radius:8px; }
     .split-gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:14px; }
-    .split-tile { min-width:0; position:relative; padding:9px; border:1px solid var(--line); border-radius:9px; background:white; }
+    .split-tile { min-width:0; position:relative; padding:9px; border:1px solid var(--line); border-radius:9px; background:white; cursor:pointer; }
+    .split-tile:hover { border-color:var(--accent); }
+    .split-tile:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+    .split-edit-hint { margin-top:6px; color:var(--accent); font-size:12px; }
     .split-tile img { display:block; width:100%; aspect-ratio:1; object-fit:contain; background:#10191d; border-radius:5px; }
     .split-tile .score { margin-top:8px; font-weight:750; font-size:18px; }
     .split-tile .tile-name { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -231,7 +234,12 @@ PAGE = r'''<!doctype html>
         data=await response.json(); state.splitData[cacheKey]=data;
       }
       renderSplitSummary(summary,data.stats,version);
-      gallery.innerHTML=data.samples.length ? data.samples.map(sample=>`<article class="split-tile"><img loading="lazy" src="/split-images/${encodeURIComponent(version)}/${kind}/${encodeURIComponent(sample.filename)}" alt="${escapeHtml(sample.filename)}"><div class="score">${scoreText(sample.waviness)}</div><div class="tile-name" title="${escapeHtml(sample.filename)}">${escapeHtml(sample.filename)}</div></article>`).join('') : '<div class="empty">This split contains no images.</div>';
+      gallery.innerHTML=data.samples.length ? data.samples.map(sample=>{const waviness=state.labels[sample.filename] ?? sample.waviness;return `<article class="split-tile" data-name="${encodeURIComponent(sample.filename)}" role="button" tabindex="0" aria-label="Edit label for ${escapeHtml(sample.filename)}"><img loading="lazy" src="/split-images/${encodeURIComponent(version)}/${kind}/${encodeURIComponent(sample.filename)}" alt="${escapeHtml(sample.filename)}"><div class="score">${scoreText(waviness)}</div><div class="tile-name" title="${escapeHtml(sample.filename)}">${escapeHtml(sample.filename)}</div><div class="split-edit-hint">Click to edit label</div></article>`;}).join('') : '<div class="empty">This split contains no images.</div>';
+      gallery.querySelectorAll('.split-tile').forEach(tile=>{
+        const edit=()=>selectForLabeling(decodeURIComponent(tile.dataset.name));
+        tile.onclick=edit;
+        tile.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();edit();}};
+      });
     }
     function showSplitError(kind,error) { const view=document.querySelector(`.split-view[data-split="${kind}"]`); const message=document.createElement('div'); message.className='empty'; message.textContent=error.message||'Could not load dataset split.'; view.querySelector('.split-gallery').replaceChildren(message); }
     async function reloadDiscarded() {
@@ -746,7 +754,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the local sea-waviness labeling app")
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2", "fast-v2.1"), default="fast-v2.1")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2", "fast-v2.1", "fast-v2.2"), default="fast-v2.2")
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--port", type=int, default=8055)
     args = parser.parse_args()

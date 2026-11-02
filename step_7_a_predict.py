@@ -25,7 +25,14 @@ from PIL import Image
 PROJECT_DIR = Path(__file__).resolve().parent
 INPUT_DIR = PROJECT_DIR / "step-7-predict-captures-holder"
 FAST_V2_1_REGRESSOR_ONNX = PROJECT_DIR / "models/fast-v2.1/wave-regression-efficientnet-b0-fast-v2.1.onnx"
-FAST_V2_1_SEGMENTATION_ONNX = PROJECT_DIR / "models/fast-v2.1/segformer-b0-step1-448-fp32.onnx"
+FAST_V2_2_REGRESSOR_ONNX = PROJECT_DIR / "models/fast-v2.2/wave-regression-efficientnet-b0-fast-v2.2.onnx"
+FAST_SEGMENTATION_ONNX = PROJECT_DIR / "models/fast-v2.1/segformer-b0-step1-448-fp32.onnx"
+MIGRAPHX_PIPELINES = {
+    "fast-v2.1": {"regressor": FAST_V2_1_REGRESSOR_ONNX, "profile": "fast-v2.1-coordinate",
+                  "experiment": "distilled-b0-migraphx-fp32", "fp16": False},
+    "fast-v2.2": {"regressor": FAST_V2_2_REGRESSOR_ONNX, "profile": "fast-v2.2-coordinate",
+                  "experiment": "fast-v2.2", "fp16": True},
+}
 IMAGE_SIZE = (224, 224)
 
 
@@ -91,9 +98,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--threads", type=int, help="PyTorch CPU threads; benchmark for your hardware")
     parser.add_argument("--profile", choices=("baseline-v16", "fast-v2"), help="preprocessing profile; defaults from the checkpoint")
-    parser.add_argument("--backend", choices=("fast-v2.1", "torch-v19"),
-                        default=os.getenv("PREDICT_BACKEND", "fast-v2.1"),
-                        help="prediction backend (default: fast-v2.1; torch-v19 is the rollback path)")
+    parser.add_argument("--backend", choices=("fast-v2.2", "fast-v2.1", "torch-v19"),
+                        default=os.getenv("PREDICT_BACKEND", "fast-v2.2"),
+                        help="prediction backend (default: fast-v2.2; fast-v2.1 and torch-v19 remain selectable)")
     args = parser.parse_args()
     if args.threads is not None and args.threads < 1:
         parser.error("--threads must be positive")
@@ -116,17 +123,19 @@ def configured_value(name: str, default: str | None = None) -> str | None:
     return default
 
 
-def fast_v2_1_runtime(args: argparse.Namespace) -> None:
-    """Run the persistent fast-v2.1 MIGraphX backend and save normal Step 7 outputs."""
+def fast_migraphx_runtime(args: argparse.Namespace) -> None:
+    """Run the selected fast-v2.x MIGraphX backend and save normal Step 7 outputs."""
+    pipeline = MIGRAPHX_PIPELINES[args.backend]
+    version = args.backend
     if args.profile is not None:
-        raise ValueError("--profile applies to --backend torch-v19; fast-v2.1 has a fixed fast-v2.1 preprocessing contract")
+        raise ValueError("--profile applies to --backend torch-v19; fast-v2.x has a fixed versioned preprocessing contract")
     photos = find_input_photos()
-    regressor = Path(configured_value("PREDICT_REGRESSOR_ONNX_PATH", str(FAST_V2_1_REGRESSOR_ONNX))).expanduser()
+    regressor = Path(configured_value("PREDICT_REGRESSOR_ONNX_PATH", str(pipeline["regressor"]))).expanduser()
     regressor = regressor if regressor.is_absolute() else PROJECT_DIR / regressor
     if not regressor.is_file():
-        raise FileNotFoundError(f"fast-v2.1-matched ONNX regressor is missing: {regressor}")
-    if not FAST_V2_1_SEGMENTATION_ONNX.is_file():
-        raise FileNotFoundError(f"fast-v2.1 distilled SegFormer-B0 ONNX model is missing: {FAST_V2_1_SEGMENTATION_ONNX}")
+        raise FileNotFoundError(f"{version}-matched ONNX regressor is missing: {regressor}")
+    if not FAST_SEGMENTATION_ONNX.is_file():
+        raise FileNotFoundError(f"{version} distilled SegFormer-B0 ONNX model is missing: {FAST_SEGMENTATION_ONNX}")
     checkpoint_sha256 = sha256_for(regressor)
     runtime_python = Path(configured_value(
         "PREDICT_MIGRAPHX_PYTHON", "/tmp/wave_migraphx_312_env/bin/python"
@@ -147,23 +156,27 @@ def fast_v2_1_runtime(args: argparse.Namespace) -> None:
         library_paths.append(prior_ld)
     server_env = os.environ.copy()
     server_env.update({
-        "WAVE_EXPERIMENT": "distilled-b0-migraphx-fp32",
-        "WAVE_PIPELINE_PROFILE": "fast-v2.1-coordinate",
+        "WAVE_EXPERIMENT": pipeline["experiment"],
+        "WAVE_PIPELINE_PROFILE": pipeline["profile"],
         "WAVE_SERVER_PORT": str(port),
         "WAVE_REGRESSOR_ONNX": str(regressor.resolve()),
-        "WAVE_STEP1_ONNX": str(FAST_V2_1_SEGMENTATION_ONNX.resolve()),
+        "WAVE_STEP1_ONNX": str(FAST_SEGMENTATION_ONNX.resolve()),
         "MIGRAPHX_SKIP_BENCHMARKING": "1",
         "MIGRAPHX_USE_FAST_SOFTMAX": "0",
         "LD_LIBRARY_PATH": ":".join(library_paths),
     })
-    preview_root = PROJECT_DIR / "step-7-inference-preview" / "fast-v2.1-migraphx"
+    if pipeline["fp16"]:
+        server_env["WAVE_MIGRAPHX_FP16"] = "1"
+    else:
+        server_env.pop("WAVE_MIGRAPHX_FP16", None)
+    preview_root = PROJECT_DIR / "step-7-inference-preview" / f"{version}-migraphx"
     global PREVIEW_DIR
     PREVIEW_DIR = preview_root
     PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
 
     server_process = None
     log_handle = None
-    server_log = Path(tempfile.gettempdir()) / f"wave-fast-v2.1-server-{port}.log"
+    server_log = Path(tempfile.gettempdir()) / f"wave-{version}-server-{port}.log"
     health = None
     try:
         try:
@@ -187,13 +200,15 @@ def fast_v2_1_runtime(args: argparse.Namespace) -> None:
                     time.sleep(0.25)
             if health is None:
                 raise TimeoutError(f"MIGraphX prediction server did not become ready; see {server_log}")
-        if health.get("pipeline_profile") != "fast-v2.1-coordinate":
+        if health.get("pipeline_profile") != pipeline["profile"]:
             raise RuntimeError(f"Port {port} is serving the wrong pipeline: {health}")
+        if health.get("migraphx_fp16") is not pipeline["fp16"]:
+            raise RuntimeError(f"Port {port} is serving the wrong segmentation precision: {health}")
         if Path(health.get("regressor_model", "")).resolve() != regressor.resolve():
             raise RuntimeError(f"Port {port} is serving a different regressor: {health.get('regressor_model')}")
-        if Path(health.get("step1_model", "")).resolve() != FAST_V2_1_SEGMENTATION_ONNX.resolve():
+        if Path(health.get("step1_model", "")).resolve() != FAST_SEGMENTATION_ONNX.resolve():
             raise RuntimeError(f"Port {port} is serving a different segmentation model: {health.get('step1_model')}")
-        print(f"Backend: fast-v2.1 coordinate-crop + MIGraphX SegFormer-B0 + ONNX CPU regressor")
+        print(f"Backend: {version} coordinate-crop + MIGraphX SegFormer-B0 {'FP16' if pipeline['fp16'] else 'FP32'} + ONNX CPU regressor")
         print(f"Runtime: {runtime_python.resolve()}; server log: {server_log}")
         print(f"Images: {len(photos)} ({sum(not should_skip_photo(p, regressor, checkpoint_sha256) for p in photos)} pending)")
         processed = skipped = failed = 0
@@ -218,7 +233,7 @@ def fast_v2_1_runtime(args: argparse.Namespace) -> None:
                 preview_path = save_preview(photo, encoded)
                 log_path = append_prediction_record(
                     photo, regressor, checkpoint_sha256, score,
-                    "MIGraphX segmentation / ONNX CPU regressor",
+                    f"{version} MIGraphX {'FP16' if pipeline['fp16'] else 'FP32'} segmentation / ONNX CPU regressor",
                     {"photo_elapsed": time.perf_counter() - photo_started,
                      "server_pipeline": float(payload.get("total_server_ms", 0)) / 1000.0,
                      "request_and_transfer": max(0.0, time.perf_counter() - photo_started
@@ -515,9 +530,9 @@ def predict(
 
 def main() -> None:
     args = parse_args()
-    if args.backend == "fast-v2.1":
+    if args.backend in MIGRAPHX_PIPELINES:
         try:
-            fast_v2_1_runtime(args)
+            fast_migraphx_runtime(args)
         except Exception as error:
             print(f"Error: {error}", file=sys.stderr)
             raise SystemExit(1) from error

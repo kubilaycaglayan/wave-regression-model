@@ -7,6 +7,7 @@ import argparse
 import base64
 import html
 import io
+import json
 import os
 import tempfile
 import time
@@ -36,6 +37,8 @@ from step_1_c_preprocessing_profiles import (
     get_profile,
     write_preprocessing_contract,
 )
+
+MIGRAPHX_COORDINATE_PROFILES = {"fast-v2.1", "fast-v2.2"}
 import step_1_a_water_segmentation as segmentation
 
 OUTPUT_SIZE = (224, 224)
@@ -261,7 +264,7 @@ def process_image(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2", "fast-v2.1"), default="fast-v2.1")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2", "fast-v2.1", "fast-v2.2"), default="fast-v2.2")
     parser.add_argument("--input-dir", type=Path, action="append", help="Additional input directory; repeatable")
     parser.add_argument("--output-dir", type=Path, help="Output directory; defaults to the selected profile")
     parser.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")
@@ -272,7 +275,7 @@ def main() -> None:
     args = parser.parse_args()
     profile = get_profile(args.profile)
     output_dir = args.output_dir or profile.step1_dir
-    if profile.name != "fast-v2.1":
+    if profile.name not in MIGRAPHX_COORDINATE_PROFILES:
         configure_segmentation(profile, segmentation)
     if args.workers is not None and args.workers < 1:
         parser.error("--workers must be at least 1")
@@ -313,12 +316,12 @@ def main() -> None:
     device = configure_inference_device(args.device) if not pending else None
     model_revisions: set[str] = set()
     if pending:
-        if profile.name == "fast-v2.1":
+        if profile.name in MIGRAPHX_COORDINATE_PROFILES:
             from step_7_j_fast_v2_1_client import FastV2_1Client
 
             run_started = time.perf_counter()
-            with FastV2_1Client() as client:
-                print(f"Fast-v2.1 runtime: {client.runtime_python}")
+            with FastV2_1Client(pipeline_version=profile.name) as client:
+                print(f"{profile.name} runtime: {client.runtime_python}")
                 for index, source_path, standardized_path in pending:
                     item_started = time.perf_counter()
                     try:
@@ -341,11 +344,11 @@ def main() -> None:
                               f"({time.perf_counter() - item_started:.3f}s)")
         else:
             device = configure_inference_device(args.device)
-        if profile.name != "fast-v2.1" and profile.precision == "float16" and device.type != "cuda":
+        if profile.name not in MIGRAPHX_COORDINATE_PROFILES and profile.precision == "float16" and device.type != "cuda":
             raise RuntimeError(f"The {profile.name} profile requires GPU segmentation with float16 precision")
-        if profile.name != "fast-v2.1" and profile.coordinate_crop:
+        if profile.name not in MIGRAPHX_COORDINATE_PROFILES and profile.coordinate_crop:
             warm_coordinate_crop_selector()
-        if profile.name != "fast-v2.1":
+        if profile.name not in MIGRAPHX_COORDINATE_PROFILES:
             workers = select_worker_count(args.workers, device, len(pending))
         tasks = {index: (source_path, standardized_path, profile.coordinate_crop)
                  for index, source_path, standardized_path in pending}
@@ -357,7 +360,7 @@ def main() -> None:
             "SINGLE_IMAGE_LOGITS_RESOLUTION": profile.logits_resolution,
             "INFERENCE_PRECISION": profile.precision,
         }
-        results = [] if profile.name == "fast-v2.1" else run_segmentation_tasks(process_image, tasks, str(device), workers, settings)
+        results = [] if profile.name in MIGRAPHX_COORDINATE_PROFILES else run_segmentation_tasks(process_image, tasks, str(device), workers, settings)
         for index, (status, elapsed, warning, model_revision) in results:
             source_path, standardized_path, _ = tasks[index]
             processing_seconds += elapsed
@@ -371,11 +374,19 @@ def main() -> None:
                 print(f"[{index}/{total}] {source_path.name}: WARNING: {warning}; skipped ({elapsed:.3f}s)")
 
     contract_path = output_dir / "preprocessing-contract.json"
-    if profile.name == "fast-v2.1" and not contract_path.exists():
+    if profile.name in MIGRAPHX_COORDINATE_PROFILES and not contract_path.exists():
+        if profile.name == "fast-v2.2":
+            manifest_path = Path("models/fast-v2.2/model-manifest.json")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            model_name = "SegFormer-B0 ONNX (MIGraphX FP16)"
+            model_revision = f"sha256:{manifest['segmentation']['sha256']}"
+        else:
+            model_name = "SegFormer-B0 ONNX (MIGraphX)"
+            model_revision = "sha256:96410800203e3f19b7dab26980ea6413f6f9369bb868e23bfa7f14eca6681fda"
         write_preprocessing_contract(
-            profile, output_dir, model_name="SegFormer-B0 ONNX (MIGraphX)",
+            profile, output_dir, model_name=model_name,
             device="MIGraphX", torch_version="not-used",
-            segmentation_model_revision="sha256:96410800203e3f19b7dab26980ea6413f6f9369bb868e23bfa7f14eca6681fda",
+            segmentation_model_revision=model_revision,
         )
     if profile.name != "baseline-v16" and not contract_path.exists():
         if not model_revisions:

@@ -368,7 +368,7 @@ def summary_text(splits: dict[str, list[Sample]], groups: list[list[Sample]], to
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2", "fast-v2.1"), default="fast-v2.1")
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2", "fast-v2.1", "fast-v2.2"), default="fast-v2.2")
     parser.add_argument(
         "--seed",
         type=int,

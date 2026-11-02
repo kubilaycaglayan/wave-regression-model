@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Single-process local MIGraphX prediction service.
 
-The current Step 7 fast-v2.1 backend starts this service in an isolated Python
+The current Step 7 fast-v2.2 backend starts this service in an isolated Python
 runtime and sends raw image bytes to /predict. With WAVE_PIPELINE_PROFILE set to
-fast-v2.1-coordinate it runs only the Step 1 segmentation session and the matched
-fast-v2.1 ONNX regressor. The legacy two-stage route remains for benchmark tooling.
+fast-v2.2-coordinate it runs only the Step 1 segmentation session and the matched
+fast-v2.2 ONNX regressor. The legacy two-stage route remains for benchmark tooling.
 HTTPServer handles one request at a time by design.
 """
 from __future__ import annotations
@@ -52,6 +52,14 @@ CANDIDATES = {
         "fp16": False, "opencv_mask_resize": False, "heif_workers": 16,
         "zero_copy_heif": True, "linear_processor": False,
     },
+    "fast-v2.2": {
+        "step1": ROOT / "models/fast-v2.1/segformer-b0-step1-448-fp32.onnx",
+        "step2": ROOT / "experiments/distil-fp32/seg-distil-b0-step2-384-to224-fp32-20261030.onnx",
+        "slug": "fast-v2.2",
+        "label": "Fast-v2.2 · SegFormer-B0 MIGraphX FP16 + retrained EfficientNet-B0",
+        "fp16": True, "opencv_mask_resize": False, "heif_workers": 16,
+        "zero_copy_heif": True, "linear_processor": False,
+    },
     "migraphx-b0-opencv-area": {
         "step1": ROOT / "experiments/area-b0/seg-b0-step1-448-fp32-20261030.onnx",
         "step2": ROOT / "experiments/area-b0/seg-b0-step2-384-to224-fp32-20261030.onnx",
@@ -69,7 +77,7 @@ CANDIDATES = {
         "zero_copy_heif": False, "linear_processor": True,
     },
 }
-EXPERIMENT = os.environ.get("WAVE_EXPERIMENT", "distilled-b0-migraphx-fp32")
+EXPERIMENT = os.environ.get("WAVE_EXPERIMENT", "fast-v2.2")
 if EXPERIMENT not in CANDIDATES:
     raise RuntimeError(f"Unknown WAVE_EXPERIMENT={EXPERIMENT!r}; choose one of {', '.join(CANDIDATES)}")
 CONFIG = CANDIDATES[EXPERIMENT]
@@ -77,8 +85,13 @@ STEP1_SIZE = int(os.environ.get("WAVE_STEP1_SIZE", "448"))
 STEP1_ONNX = Path(os.environ.get("WAVE_STEP1_ONNX", CONFIG["step1"])).expanduser()
 STEP2_ONNX = Path(os.environ.get("WAVE_STEP2_ONNX", CONFIG["step2"])).expanduser()
 REGRESSOR_ONNX = Path(os.environ.get(
-    "WAVE_REGRESSOR_ONNX", ROOT / "experiments/shared/reg-v18-efficientnet-b0-cpu-20261030.onnx"
+    "WAVE_REGRESSOR_ONNX", ROOT / "models/fast-v2.2/wave-regression-efficientnet-b0-fast-v2.2.onnx"
 )).expanduser()
+COORDINATE_CROP_PROFILES = {"fast-v2.1-coordinate", "fast-v2.2-coordinate"}
+
+
+def coordinate_crop_enabled() -> bool:
+    return os.environ.get("WAVE_PIPELINE_PROFILE", "fast-v2.2-coordinate") in COORDINATE_CROP_PROFILES
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("WAVE_SERVER_PORT", "8765"))
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
@@ -219,8 +232,8 @@ def to_canvas(image: Image.Image) -> Image.Image:
 
 
 def run_pipeline(path: Path) -> dict:
-    if os.environ.get("WAVE_PIPELINE_PROFILE") == "fast-v2.1-coordinate":
-        return run_fast_v2_1_pipeline(path)
+    if coordinate_crop_enabled():
+        return run_coordinate_crop_pipeline(path)
     started = time.perf_counter()
     stages = {}
     tick = time.perf_counter()
@@ -285,8 +298,8 @@ def run_pipeline(path: Path) -> dict:
             image.close()
 
 
-def run_fast_v2_1_pipeline(path: Path) -> dict:
-    """Run fast-v2.1 single-output coordinate crop and matched regressor."""
+def run_coordinate_crop_pipeline(path: Path) -> dict:
+    """Run versioned single-output coordinate crop and matched regressor."""
     import math
 
     started = time.perf_counter()
@@ -379,6 +392,11 @@ def run_fast_v2_1_pipeline(path: Path) -> dict:
             image.close()
 
 
+def run_fast_v2_1_pipeline(path: Path) -> dict:
+    """Compatibility entry point retained for saved fast-v2.1 experiment runners."""
+    return run_coordinate_crop_pipeline(path)
+
+
 def load_session(path: Path, device, label: str):
     if not path.is_file():
         raise FileNotFoundError(f"{label} model file not found: {path}")
@@ -411,7 +429,7 @@ def initialize_models():
     tick = time.perf_counter()
     STEP1_SESSION = load_session(STEP1_ONNX, device, "Step 1 segmentation")
     setup["step1_session_load_ms"] = (time.perf_counter() - tick) * 1000
-    coordinate_crop = os.environ.get("WAVE_PIPELINE_PROFILE") == "fast-v2.1-coordinate"
+    coordinate_crop = coordinate_crop_enabled()
     if coordinate_crop:
         STEP2_SESSION = None
         setup["step2_session_load_ms"] = 0.0
@@ -464,7 +482,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if urlparse(self.path).path == "/health":
             self.respond(200, {"ready": True, "candidate": EXPERIMENT, "label": CONFIG["label"],
-                               "pipeline_profile": os.environ.get("WAVE_PIPELINE_PROFILE", "legacy-two-step"),
+                               "pipeline_profile": os.environ.get("WAVE_PIPELINE_PROFILE", "fast-v2.2-coordinate"),
+                               "migraphx_fp16": CONFIG["fp16"] or os.environ.get("WAVE_MIGRAPHX_FP16") == "1",
                                "step1_model": str(STEP1_ONNX.resolve()),
                                "regressor_model": str(REGRESSOR_ONNX.resolve())})
         else:
@@ -510,13 +529,13 @@ class Handler(BaseHTTPRequestHandler):
                 upload.write(body)
                 upload.flush()
                 result = run_pipeline(Path(upload.name))
-                if os.environ.get("WAVE_PIPELINE_PROFILE") == "fast-v2.1-coordinate":
+                if coordinate_crop_enabled():
                     if save_steps:
-                        raise ValueError("save_steps is not supported by the fast-v2.1 single-output pipeline")
+                        raise ValueError("save_steps is not supported by the single-output coordinate pipeline")
                 else:
                     step1_jpeg = result.pop("step1_jpeg")
                     step2_jpeg = result.pop("step2_jpeg")
-                if save_steps and os.environ.get("WAVE_PIPELINE_PROFILE") != "fast-v2.1-coordinate":
+                if save_steps and not coordinate_crop_enabled():
                     tick = time.perf_counter()
                     slug = Path(filename).stem
                     step1_dir = PREPROCESSED_ROOT / CONFIG["slug"] / "step-1"
@@ -554,7 +573,7 @@ def main():
         "regressor_model": str(REGRESSOR_ONNX),
         "heif_workers": CONFIG["heif_workers"],
         "opencv_threads": cv2.getNumThreads(),
-        "migraphx_fp16": CONFIG["fp16"],
+        "migraphx_fp16": CONFIG["fp16"] or os.environ.get("WAVE_MIGRAPHX_FP16") == "1",
         "setup_breakdown_ms": setup,
         "setup_and_warmup_seconds_after_imports": round(warm_seconds, 3),
         "process_launch_to_ready_seconds": round(time.perf_counter() - PROCESS_START, 3),

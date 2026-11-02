@@ -1,0 +1,42 @@
+{
+  "pipeline": "fast-v2.2",
+  "profile": "fast-v2.2",
+  "segmentation": {
+    "path": "../fast-v2.1/segformer-b0-step1-448-fp32.onnx",
+    "sha256": "96410800203e3f19b7dab26980ea6413f6f9369bb868e23bfa7f14eca6681fda",
+    "runtime": "ONNX Runtime MIGraphX Execution Provider",
+    "precision": "float16 (migraphx_fp16_enable=1)",
+    "input_size": 448,
+    "source": "models/fast-v2.1/model-manifest.json"
+  },
+  "regressor": {
+    "path": "wave-regression-efficientnet-b0-fast-v2.2.onnx",
+    "sha256": "a1a8f65500d88debe2980c900ccc55b2b8b6d46f6492d3b3ddf2a6b7ad3eb8e4",
+    "runtime": "ONNX Runtime CPU Execution Provider",
+    "architecture": "EfficientNet-B0 ImageNet pretrained frozen backbone + trained sigmoid regression head",
+    "training_experiment": "experiments/from-one-to-zero/fp16-retrained-regressor",
+    "training_run_id": "20261102T102000Z",
+    "checkpoint": "artifacts/training-runs/20261102T102000Z/checkpoints/best-epoch=epoch=14-val_mae=val_mae=0.098544.ckpt",
+    "split_snapshot": "20261102T084438874261Z",
+    "selected_epoch_1_based": 15,
+    "train_mae": 0.09319744720917693,
+    "validation_mae": 0.09854426242886706,
+    "validation_rmse": 0.12411941571784495,
+    "training_checkpoint": "experiments/from-one-to-zero/fp16-retrained-regressor/artifacts/training-runs/20261102T102000Z/checkpoints/best-epoch=epoch=14-val_mae=val_mae=0.098544.ckpt (local ignored artifact; reproducible with the experiment training script)"
+  },
+  "preprocessing": "Decode and orient HEIC; OpenCV INTER_AREA resize to 448x448; ImageNet normalize; FP16 MIGraphX SegFormer water mask; nearest-exact projection to 224x224; lower-water crop selection; map crop to original-source coordinates; Lanczos4 resize and apply mask on 224x224 black canvas; JPEG quality 95 with 4:4:4 subsampling; decode JPEG to RGB for the regressor.",
+  "regressor_training_input": "Exact final 224x224 RGB JPEG bytes emitted by the FP16 inference path; standard deterministic ImageNet normalization at training and evaluation time.",
+  "model_input": "224x224 RGB JPEG; ImageNet normalization in the regressor",
+  "quality_note": "Held-out test MAE for the retrained FP16 pipeline was 0.13238 on 46 photos. See the linked experiment report for mode comparisons.",
+  "evaluation": {
+    "report": "experiments/from-one-to-zero/fp16-retrained-regressor/screen-20261102T102000Z.json",
+    "split_snapshot": "20261102T084438874261Z",
+    "test_photos": 46,
+    "fp32_baseline_test_mae": 0.1253271187129228,
+    "fast_v2_2_test_mae": 0.1323786225007928,
+    "fast_v2_2_test_rmse": 0.1788229678367817,
+    "fp32_median_ms": 57.931877996452386,
+    "fast_v2_2_median_ms": 42.48957899835659,
+    "repeats_per_photo": 3
+  }
+}
