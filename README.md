@@ -31,13 +31,13 @@ The adopted pipeline reduced median raw-photo-to-score time from **10.716 s** to
       <th align="left">⚙️ Change</th>
       <th align="right">⏱️ Before</th>
       <th align="right">⚡ After</th>
-      <th align="right">📈 Improvement</th>
+      <th align="right" width="24%" nowrap>📈 Improvement</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td>🧩 Step 1: replace 35 overlapping tiles with one 448 × 448 pass</td>
-      <td align="right"><code>10.299 s</code></td>
+      <td align="right"><code>10.3 s</code></td>
       <td align="right"><code>225 ms</code></td>
       <td align="right"><strong>45.8× faster</strong></td>
     </tr>
@@ -55,9 +55,9 @@ The adopted pipeline reduced median raw-photo-to-score time from **10.716 s** to
     </tr>
     <tr>
       <td>🧮 Segmentation runtime: FP32 → MIGraphX FP16¹</td>
-      <td align="right"><code>57.86 ms</code></td>
-      <td align="right"><code>42.84 ms</code></td>
-      <td align="right"><strong>15.02 ms saved</strong></td>
+      <td align="right"><code>58 ms</code></td>
+      <td align="right"><code>43 ms</code></td>
+      <td align="right"><strong>15 ms saved</strong></td>
     </tr>
     <tr>
       <td>🧠 Regression inference</td>
