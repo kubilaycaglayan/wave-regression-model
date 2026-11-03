@@ -28,41 +28,55 @@ The earliest recorded prediction benchmark took **18.5 s** for a fresh predictio
 <table>
   <thead>
     <tr>
-      <th align="left">⚙️ Change</th>
-      <th align="right">⏱️ Before</th>
-      <th align="right">⚡ After</th>
-      <th align="right" width="24%" nowrap>📈 Improvement</th>
+      <th rowspan="2" align="left">⚙️ Change</th>
+      <th colspan="2" align="center">⏪ Before</th>
+      <th colspan="2" align="center">⏩ After</th>
+      <th rowspan="2" align="right" nowrap>📈 Improvement</th>
+    </tr>
+    <tr>
+      <th align="right">Time</th>
+      <th align="left">Technology</th>
+      <th align="right">Time</th>
+      <th align="left">Technology</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td>🧩 Step 1 segmentation</td>
-      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>8.7 s</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">SegFormer-B2</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">PyTorch CPU</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Tiled</span></td></tr></table></td>
-      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>14 ms</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">SegFormer-B0</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">MIGraphX FP16</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">448 × 448 single pass</span></td></tr></table></td>
+      <td align="right"><code>8.7 s</code></td>
+      <td><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">SegFormer-B2</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">PyTorch CPU</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Tiled</span></td>
+      <td align="right"><code>14 ms</code></td>
+      <td><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">SegFormer-B0</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">MIGraphX FP16</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">448 × 448 single pass</span></td>
       <td align="right"><strong>638× faster</strong></td>
     </tr>
     <tr>
       <td>🎯 Step 2 / crop</td>
-      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>8.9 s</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Step 2 SegFormer-B2</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Crop selection</span></td></tr></table></td>
-      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>5 ms</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Bypass(Project Step 1 mask to 224 × 224)</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Crop and mask original photo</span></td></tr></table></td>
+      <td align="right"><code>8.9 s</code></td>
+      <td><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Step 2 SegFormer-B2</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Crop selection</span></td>
+      <td align="right"><code>5 ms</code></td>
+      <td><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Project Step 1 mask to 224 × 224</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Crop and mask original photo</span></td>
       <td align="right"><strong>1,787× faster</strong></td>
     </tr>
     <tr>
       <td>✂️ Photo decode</td>
-      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>4 ms</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">PNG · 384 × 512</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Pillow</span></td></tr></table></td>
-      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>18 ms</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">HEIC · 3024 × 4032</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Native HEIF · 16 workers</span></td></tr></table></td>
+      <td align="right"><code>4 ms</code></td>
+      <td><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">PNG · 384 × 512</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Pillow</span></td>
+      <td align="right"><code>18 ms</code></td>
+      <td><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">HEIC · 3024 × 4032</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Native HEIF · 16 workers</span></td>
       <td align="right"><strong>Not comparable*</strong></td>
     </tr>
     <tr>
       <td>🧮 Regression</td>
-      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>985 ms</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">EfficientNet-B0</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">PyTorch CPU</span></td></tr></table></td>
-      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>6 ms</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Matched EfficientNet-B0 ONNX</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">ONNX Runtime CPU</span></td></tr></table></td>
+      <td align="right"><code>985 ms</code></td>
+      <td><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">EfficientNet-B0</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">PyTorch CPU</span></td>
+      <td align="right"><code>6 ms</code></td>
+      <td><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Matched EfficientNet-B0 ONNX</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">ONNX Runtime CPU</span></td>
       <td align="right"><strong>169× faster</strong></td>
     </tr>
     <tr>
       <th align="left">🚀 Total raw photo → waviness score</th>
-      <td align="right"><strong>18.5 s</strong></td>
-      <td align="right"><strong>42 ms</strong></td>
+      <td colspan="2" align="right"><strong>18.5 s</strong></td>
+      <td colspan="2" align="right"><strong>42 ms</strong></td>
       <td align="right"><strong>436× faster</strong></td>
     </tr>
   </tbody>
