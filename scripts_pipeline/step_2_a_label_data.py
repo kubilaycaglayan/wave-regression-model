@@ -770,7 +770,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8055)
     args = parser.parse_args()
     profile = get_profile(args.profile)
-    global IMAGE_DIR, SOURCE_MANIFEST_PATH, SPLIT_OUTPUT_DIR, SPLIT_SNAPSHOT_DIR
+    global IMAGE_DIR, PROCESSED_PREFIX, SOURCE_MANIFEST_PATH, SPLIT_OUTPUT_DIR, SPLIT_SNAPSHOT_DIR
     IMAGE_DIR = PROJECT_DIR / profile.final_image_dir
     PROCESSED_PREFIX = profile.final_image_prefix
     SOURCE_MANIFEST_PATH = PROJECT_DIR / profile.step1_dir / ".source-manifest.json"
