@@ -23,7 +23,7 @@ For the current fast-v2.2 pipeline, during pre-processing the pipeline segments 
 
 ### Inference speed improvements
 
-The adopted pipeline reduced median raw-photo-to-score time from **10.716 s** to **42.59 ms** per photo, about **252× faster**. The following table shows measured changes from the paired FP32-to-FP16 comparison. Stage timings come from successive experiments, so they show the scale and source of the gains.
+The earliest recorded prediction benchmark took **18.5 s** for a fresh prediction. The fastest full-pipeline benchmark took **42 ms** median per photo. The table uses stage timings from those two benchmark reports only: the first CPU benchmark for “Before” and the fastest FP16 benchmark for “After.”
 
 <table>
   <thead>
@@ -36,43 +36,41 @@ The adopted pipeline reduced median raw-photo-to-score time from **10.716 s** to
   </thead>
   <tbody>
     <tr>
-      <td>🧩 Step 1: replace 35 overlapping tiles with one 448 × 448 pass</td>
-      <td align="right"><code>10.3 s</code></td>
-      <td align="right"><code>225 ms</code></td>
-      <td align="right"><strong>45.8× faster</strong></td>
+      <td>🧩 Step 1 segmentation</td>
+      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>8.7 s</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">SegFormer-B2</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">PyTorch CPU</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Tiled</span></td></tr></table></td>
+      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>14 ms</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">SegFormer-B0</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">MIGraphX FP16</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">448 × 448 single pass</span></td></tr></table></td>
+      <td align="right"><strong>638× faster</strong></td>
     </tr>
     <tr>
-      <td>🎯 Step 2: reduce segmentation input to 384 × 384 (earlier fast path)</td>
-      <td align="right"><code>305 ms</code></td>
-      <td align="right"><code>59 ms</code></td>
-      <td align="right"><strong>5.2× faster</strong></td>
+      <td>🎯 Step 2 / crop</td>
+      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>8.9 s</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Step 2 SegFormer-B2</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Crop selection</span></td></tr></table></td>
+      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>5 ms</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Bypass(Project Step 1 mask to 224 × 224)</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Crop and mask original photo</span></td></tr></table></td>
+      <td align="right"><strong>1,787× faster</strong></td>
     </tr>
     <tr>
-      <td>✂️ Current fast-v2 route: remove the separate Step 2 segmentation pass</td>
-      <td align="right"><code>305 ms</code></td>
-      <td align="right">—</td>
-      <td align="right"><strong>305 ms removed</strong></td>
+      <td>✂️ Photo decode</td>
+      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>4 ms</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">PNG · 384 × 512</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Pillow</span></td></tr></table></td>
+      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>18 ms</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">HEIC · 3024 × 4032</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Native HEIF · 16 workers</span></td></tr></table></td>
+      <td align="right"><strong>Not comparable*</strong></td>
     </tr>
     <tr>
-      <td>🧮 Segmentation runtime: FP32 → MIGraphX FP16¹</td>
-      <td align="right"><code>58 ms</code></td>
-      <td align="right"><code>43 ms</code></td>
-      <td align="right"><strong>15 ms saved</strong></td>
-    </tr>
-    <tr>
-      <td>🧠 Regression inference</td>
-      <td align="right"><code>6 ms</code></td>
-      <td align="right"><code>5 ms</code></td>
-      <td align="right"><strong>≈1 ms saved</strong></td>
+      <td>🧮 Regression</td>
+      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>985 ms</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">EfficientNet-B0</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">PyTorch CPU</span></td></tr></table></td>
+      <td><table border="0" cellpadding="0" cellspacing="0"><tr><td valign="middle" style="border:0;padding:0 8px 0 0;white-space:nowrap"><code>6 ms</code></td><td style="border:0;padding:0;text-align:left"><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">Matched EfficientNet-B0 ONNX</span><br /><span style="display:inline-block;background:#eef2f7;border:1px solid #d5dce5;border-radius:999px;padding:2px 8px;font-size:0.85em;">ONNX Runtime CPU</span></td></tr></table></td>
+      <td align="right"><strong>169× faster</strong></td>
     </tr>
     <tr>
       <th align="left">🚀 Total raw photo → waviness score</th>
-      <td align="right"><strong>10.716 s</strong></td>
-      <td align="right"><strong>42.59 ms</strong></td>
-      <td align="right"><strong>252× faster</strong></td>
+      <td align="right"><strong>18.5 s</strong></td>
+      <td align="right"><strong>42 ms</strong></td>
+      <td align="right"><strong>436× faster</strong></td>
     </tr>
   </tbody>
 </table>
+
+\* The decode measurements use different inputs: one 384 × 512 PNG (0.2 megapixels) versus 3024 × 4032 HEIC photos (12.2 megapixels, about 62× as many pixels) decoded by the native tiled HEIF decoder with 16 workers. The 4 ms and 18 ms results do not establish that native HEIF decoding is slower.*
+
+See the [first benchmark](step-7-prediction-benchmarks/20261027T091535089295Z/benchmark.json) and [fastest matched FP16 benchmark](experiments/from-one-to-zero/fp16-retrained-regressor/screen-20261102T102000Z.json).
 
 ## Model development
 

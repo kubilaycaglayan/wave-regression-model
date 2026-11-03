@@ -1,0 +1,609 @@
+{
+  "report_version": 3,
+  "created_utc": "2026-10-27T09:15:35.089295+00:00",
+  "configuration": {
+    "repeat": 1,
+    "device_argument": "cpu",
+    "photos_argument": [
+      "/tmp/wave-benchmark-test.png"
+    ]
+  },
+  "processes": [
+    {
+      "startup": {
+        "imports_seconds": 2.6134060319745913,
+        "checkpoint_fingerprint": 0.0075607720063999295,
+        "device_setup": 2.1430023480206728e-05,
+        "load_segmentation_model": 1.1296438479912467,
+        "load_regression_checkpoint": 0.15523129096254706
+      },
+      "checkpoint": "/home/ubuntu/dev/deep-learning/wave-regression-model/step-5-checkpoints/v16-mae-0.1567-efficientnet_b0/wave-regression-efficientnet_b0-v16-best-val-mae-epoch=04-val_mae=0.1567.ckpt",
+      "checkpoint_sha256": "91938b857aa4d6f44d23f0b289f2a76fefd7ed8de2a8cb350e5c7d0e95599289",
+      "requested_device": "cpu",
+      "segmentation_model": "nvidia/segformer-b2-finetuned-ade-512-512",
+      "regression_backbone": "efficientnet_b0",
+      "checkpoint_size_bytes": 16355487,
+      "environment": {
+        "system": {
+          "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+          "architecture": "x86_64",
+          "cpu_model": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+          "logical_cpus": 32,
+          "memory_total_bytes": 131738746880
+        },
+        "accelerators": [
+          {
+            "index": 0,
+            "name": "AMD Radeon 8060S Graphics",
+            "total_memory_bytes": 51539607552,
+            "architecture": "gfx1151",
+            "compute_capability": [
+              11,
+              5
+            ]
+          }
+        ],
+        "software": {
+          "python": "3.14.8",
+          "packages": {
+            "torch": "2.14.0+rocm10.1.0",
+            "torchvision": "0.29.0a0+rocm10.1.0",
+            "lightning": "2.6.6",
+            "torchmetrics": "1.9.0",
+            "transformers": "4.57.6",
+            "pillow": "12.3.0",
+            "pillow-heif": "1.8.0",
+            "numpy": "2.5.3"
+          },
+          "cuda_runtime": null,
+          "rocm_runtime": "7.16.26385",
+          "cudnn_version": 3006001
+        },
+        "runtime": {
+          "torch_threads": 32,
+          "torch_interop_threads": 32,
+          "cudnn_enabled": true,
+          "thread_environment": {}
+        },
+        "repository": {
+          "commit": "435b3b1ab61d906ea63a4e69e22a0f1eb5da7edf",
+          "dirty": true
+        }
+      },
+      "input_photos": [
+        {
+          "path": "/tmp/wave-benchmark-test.png",
+          "size_bytes": 232664,
+          "sha256": "21dc6119eb71cdc33ba8da5aa117870ca4516dace09910dca803a68750b9fbd0",
+          "dimensions": [
+            384,
+            512
+          ],
+          "format": "PNG"
+        }
+      ],
+      "settings": {
+        "resolution": 768,
+        "overlapping_tiles": true,
+        "tile_size": 768,
+        "tile_overlap": 0.25
+      },
+      "runs": [
+        {
+          "kind": "cold",
+          "photo": "/tmp/wave-benchmark-test.png",
+          "status": "ok",
+          "events": [],
+          "input_path_type": "fresh",
+          "prediction_seconds": 18.522207562986296,
+          "prediction": 0.4614630937576294,
+          "regression_device": "cpu",
+          "startup_to_first_photo_seconds": 22.42835742398165,
+          "segmentation_device": "cpu",
+          "timings": {
+            "fresh.decode_input": 0.003697185020428151,
+            "step1.tile_prepare": 0.011325264000333846,
+            "step1.tile_model": 8.525292980019003,
+            "step1.tile_accumulate": 0.015508479962591082,
+            "step1.mask_finalize": 0.025738492025993764,
+            "step1.segmentation": 8.597843747993466,
+            "step1.standardize": 0.009576066979207098,
+            "step1.total": 8.652121908962727,
+            "fresh.step1_jpeg_encode": 0.0024093030369840562,
+            "fresh.jpeg_decode": 0.0007952200248837471,
+            "step2.tile_prepare": 0.009262339037377387,
+            "step2.tile_model": 8.216640148020815,
+            "step2.tile_accumulate": 0.010957013990264386,
+            "step2.mask_finalize": 0.014919937995728105,
+            "step2.segmentation": 8.26071183203021,
+            "step2.crop_selection": 0.5999476800207049,
+            "step2.crop_fit": 0.0005941130220890045,
+            "step2.total": 8.876727439055685,
+            "fresh.step2_jpeg_encode": 0.00029852899024263024,
+            "fresh.save_preview": 0.00015062198508530855,
+            "fresh.transform": 0.026248767040669918,
+            "fresh.model_forward": 0.9590285609592684,
+            "fresh.regression": 0.9854713620152324,
+            "fresh.write_prediction": 0.0002409309963695705
+          },
+          "segmentations": [
+            {
+              "phase": "step1",
+              "width": 384,
+              "height": 512,
+              "tiles": 1,
+              "accumulator_device": "cpu",
+              "device": "cpu"
+            },
+            {
+              "phase": "step2",
+              "width": 224,
+              "height": 224,
+              "tiles": 1,
+              "accumulator_device": "cpu",
+              "device": "cpu"
+            }
+          ]
+        },
+        {
+          "kind": "warm",
+          "photo": "/tmp/wave-benchmark-test.png",
+          "status": "ok",
+          "events": [],
+          "input_path_type": "fresh",
+          "prediction_seconds": 18.92293278098805,
+          "prediction": 0.4614630937576294,
+          "regression_device": "cpu",
+          "segmentation_device": "cpu",
+          "timings": {
+            "fresh.decode_input": 0.008373654971364886,
+            "step1.tile_prepare": 0.018890044011641294,
+            "step1.tile_model": 8.3155414450448,
+            "step1.tile_accumulate": 0.018015355977695435,
+            "step1.mask_finalize": 0.027904529008083045,
+            "step1.segmentation": 8.408856338006444,
+            "step1.standardize": 0.009758068015798926,
+            "step1.total": 8.470876550010871,
+            "fresh.step1_jpeg_encode": 0.0002151530352421105,
+            "fresh.jpeg_decode": 0.0007227640016935766,
+            "step2.tile_prepare": 0.009045112004969269,
+            "step2.tile_model": 8.330697425000835,
+            "step2.tile_accumulate": 0.004377148987259716,
+            "step2.mask_finalize": 0.0025491639971733093,
+            "step2.segmentation": 8.354293934011366,
+            "step2.crop_selection": 0.6023612010176294,
+            "step2.crop_fit": 0.0005793459713459015,
+            "step2.total": 8.965059106994886,
+            "fresh.step2_jpeg_encode": 0.00028169702272862196,
+            "fresh.save_preview": 0.00011237099533900619,
+            "fresh.transform": 0.007795903016813099,
+            "fresh.model_forward": 1.4687714040046558,
+            "fresh.regression": 1.4768160830135457,
+            "fresh.write_prediction": 0.00024309498257935047
+          },
+          "segmentations": [
+            {
+              "phase": "step1",
+              "width": 384,
+              "height": 512,
+              "tiles": 1,
+              "accumulator_device": "cpu",
+              "device": "cpu"
+            },
+            {
+              "phase": "step2",
+              "width": 224,
+              "height": 224,
+              "tiles": 1,
+              "accumulator_device": "cpu",
+              "device": "cpu"
+            }
+          ]
+        }
+      ],
+      "process_wall_seconds": 42.87455189600587
+    }
+  ],
+  "summary": [
+    {
+      "kind": "cold",
+      "stage": "fresh.decode_input",
+      "samples": 1,
+      "median_seconds": 0.003697185020428151,
+      "min_seconds": 0.003697185020428151,
+      "max_seconds": 0.003697185020428151
+    },
+    {
+      "kind": "cold",
+      "stage": "fresh.jpeg_decode",
+      "samples": 1,
+      "median_seconds": 0.0007952200248837471,
+      "min_seconds": 0.0007952200248837471,
+      "max_seconds": 0.0007952200248837471
+    },
+    {
+      "kind": "cold",
+      "stage": "fresh.model_forward",
+      "samples": 1,
+      "median_seconds": 0.9590285609592684,
+      "min_seconds": 0.9590285609592684,
+      "max_seconds": 0.9590285609592684
+    },
+    {
+      "kind": "cold",
+      "stage": "fresh.regression",
+      "samples": 1,
+      "median_seconds": 0.9854713620152324,
+      "min_seconds": 0.9854713620152324,
+      "max_seconds": 0.9854713620152324
+    },
+    {
+      "kind": "cold",
+      "stage": "fresh.save_preview",
+      "samples": 1,
+      "median_seconds": 0.00015062198508530855,
+      "min_seconds": 0.00015062198508530855,
+      "max_seconds": 0.00015062198508530855
+    },
+    {
+      "kind": "cold",
+      "stage": "fresh.step1_jpeg_encode",
+      "samples": 1,
+      "median_seconds": 0.0024093030369840562,
+      "min_seconds": 0.0024093030369840562,
+      "max_seconds": 0.0024093030369840562
+    },
+    {
+      "kind": "cold",
+      "stage": "fresh.step2_jpeg_encode",
+      "samples": 1,
+      "median_seconds": 0.00029852899024263024,
+      "min_seconds": 0.00029852899024263024,
+      "max_seconds": 0.00029852899024263024
+    },
+    {
+      "kind": "cold",
+      "stage": "fresh.transform",
+      "samples": 1,
+      "median_seconds": 0.026248767040669918,
+      "min_seconds": 0.026248767040669918,
+      "max_seconds": 0.026248767040669918
+    },
+    {
+      "kind": "cold",
+      "stage": "fresh.write_prediction",
+      "samples": 1,
+      "median_seconds": 0.0002409309963695705,
+      "min_seconds": 0.0002409309963695705,
+      "max_seconds": 0.0002409309963695705
+    },
+    {
+      "kind": "cold",
+      "stage": "fresh_total",
+      "samples": 1,
+      "median_seconds": 18.522207562986296,
+      "min_seconds": 18.522207562986296,
+      "max_seconds": 18.522207562986296
+    },
+    {
+      "kind": "cold",
+      "stage": "step1.mask_finalize",
+      "samples": 1,
+      "median_seconds": 0.025738492025993764,
+      "min_seconds": 0.025738492025993764,
+      "max_seconds": 0.025738492025993764
+    },
+    {
+      "kind": "cold",
+      "stage": "step1.segmentation",
+      "samples": 1,
+      "median_seconds": 8.597843747993466,
+      "min_seconds": 8.597843747993466,
+      "max_seconds": 8.597843747993466
+    },
+    {
+      "kind": "cold",
+      "stage": "step1.standardize",
+      "samples": 1,
+      "median_seconds": 0.009576066979207098,
+      "min_seconds": 0.009576066979207098,
+      "max_seconds": 0.009576066979207098
+    },
+    {
+      "kind": "cold",
+      "stage": "step1.tile_accumulate",
+      "samples": 1,
+      "median_seconds": 0.015508479962591082,
+      "min_seconds": 0.015508479962591082,
+      "max_seconds": 0.015508479962591082
+    },
+    {
+      "kind": "cold",
+      "stage": "step1.tile_model",
+      "samples": 1,
+      "median_seconds": 8.525292980019003,
+      "min_seconds": 8.525292980019003,
+      "max_seconds": 8.525292980019003
+    },
+    {
+      "kind": "cold",
+      "stage": "step1.tile_prepare",
+      "samples": 1,
+      "median_seconds": 0.011325264000333846,
+      "min_seconds": 0.011325264000333846,
+      "max_seconds": 0.011325264000333846
+    },
+    {
+      "kind": "cold",
+      "stage": "step1.total",
+      "samples": 1,
+      "median_seconds": 8.652121908962727,
+      "min_seconds": 8.652121908962727,
+      "max_seconds": 8.652121908962727
+    },
+    {
+      "kind": "cold",
+      "stage": "step2.crop_fit",
+      "samples": 1,
+      "median_seconds": 0.0005941130220890045,
+      "min_seconds": 0.0005941130220890045,
+      "max_seconds": 0.0005941130220890045
+    },
+    {
+      "kind": "cold",
+      "stage": "step2.crop_selection",
+      "samples": 1,
+      "median_seconds": 0.5999476800207049,
+      "min_seconds": 0.5999476800207049,
+      "max_seconds": 0.5999476800207049
+    },
+    {
+      "kind": "cold",
+      "stage": "step2.mask_finalize",
+      "samples": 1,
+      "median_seconds": 0.014919937995728105,
+      "min_seconds": 0.014919937995728105,
+      "max_seconds": 0.014919937995728105
+    },
+    {
+      "kind": "cold",
+      "stage": "step2.segmentation",
+      "samples": 1,
+      "median_seconds": 8.26071183203021,
+      "min_seconds": 8.26071183203021,
+      "max_seconds": 8.26071183203021
+    },
+    {
+      "kind": "cold",
+      "stage": "step2.tile_accumulate",
+      "samples": 1,
+      "median_seconds": 0.010957013990264386,
+      "min_seconds": 0.010957013990264386,
+      "max_seconds": 0.010957013990264386
+    },
+    {
+      "kind": "cold",
+      "stage": "step2.tile_model",
+      "samples": 1,
+      "median_seconds": 8.216640148020815,
+      "min_seconds": 8.216640148020815,
+      "max_seconds": 8.216640148020815
+    },
+    {
+      "kind": "cold",
+      "stage": "step2.tile_prepare",
+      "samples": 1,
+      "median_seconds": 0.009262339037377387,
+      "min_seconds": 0.009262339037377387,
+      "max_seconds": 0.009262339037377387
+    },
+    {
+      "kind": "cold",
+      "stage": "step2.total",
+      "samples": 1,
+      "median_seconds": 8.876727439055685,
+      "min_seconds": 8.876727439055685,
+      "max_seconds": 8.876727439055685
+    },
+    {
+      "kind": "warm",
+      "stage": "fresh.decode_input",
+      "samples": 1,
+      "median_seconds": 0.008373654971364886,
+      "min_seconds": 0.008373654971364886,
+      "max_seconds": 0.008373654971364886
+    },
+    {
+      "kind": "warm",
+      "stage": "fresh.jpeg_decode",
+      "samples": 1,
+      "median_seconds": 0.0007227640016935766,
+      "min_seconds": 0.0007227640016935766,
+      "max_seconds": 0.0007227640016935766
+    },
+    {
+      "kind": "warm",
+      "stage": "fresh.model_forward",
+      "samples": 1,
+      "median_seconds": 1.4687714040046558,
+      "min_seconds": 1.4687714040046558,
+      "max_seconds": 1.4687714040046558
+    },
+    {
+      "kind": "warm",
+      "stage": "fresh.regression",
+      "samples": 1,
+      "median_seconds": 1.4768160830135457,
+      "min_seconds": 1.4768160830135457,
+      "max_seconds": 1.4768160830135457
+    },
+    {
+      "kind": "warm",
+      "stage": "fresh.save_preview",
+      "samples": 1,
+      "median_seconds": 0.00011237099533900619,
+      "min_seconds": 0.00011237099533900619,
+      "max_seconds": 0.00011237099533900619
+    },
+    {
+      "kind": "warm",
+      "stage": "fresh.step1_jpeg_encode",
+      "samples": 1,
+      "median_seconds": 0.0002151530352421105,
+      "min_seconds": 0.0002151530352421105,
+      "max_seconds": 0.0002151530352421105
+    },
+    {
+      "kind": "warm",
+      "stage": "fresh.step2_jpeg_encode",
+      "samples": 1,
+      "median_seconds": 0.00028169702272862196,
+      "min_seconds": 0.00028169702272862196,
+      "max_seconds": 0.00028169702272862196
+    },
+    {
+      "kind": "warm",
+      "stage": "fresh.transform",
+      "samples": 1,
+      "median_seconds": 0.007795903016813099,
+      "min_seconds": 0.007795903016813099,
+      "max_seconds": 0.007795903016813099
+    },
+    {
+      "kind": "warm",
+      "stage": "fresh.write_prediction",
+      "samples": 1,
+      "median_seconds": 0.00024309498257935047,
+      "min_seconds": 0.00024309498257935047,
+      "max_seconds": 0.00024309498257935047
+    },
+    {
+      "kind": "warm",
+      "stage": "fresh_total",
+      "samples": 1,
+      "median_seconds": 18.92293278098805,
+      "min_seconds": 18.92293278098805,
+      "max_seconds": 18.92293278098805
+    },
+    {
+      "kind": "warm",
+      "stage": "step1.mask_finalize",
+      "samples": 1,
+      "median_seconds": 0.027904529008083045,
+      "min_seconds": 0.027904529008083045,
+      "max_seconds": 0.027904529008083045
+    },
+    {
+      "kind": "warm",
+      "stage": "step1.segmentation",
+      "samples": 1,
+      "median_seconds": 8.408856338006444,
+      "min_seconds": 8.408856338006444,
+      "max_seconds": 8.408856338006444
+    },
+    {
+      "kind": "warm",
+      "stage": "step1.standardize",
+      "samples": 1,
+      "median_seconds": 0.009758068015798926,
+      "min_seconds": 0.009758068015798926,
+      "max_seconds": 0.009758068015798926
+    },
+    {
+      "kind": "warm",
+      "stage": "step1.tile_accumulate",
+      "samples": 1,
+      "median_seconds": 0.018015355977695435,
+      "min_seconds": 0.018015355977695435,
+      "max_seconds": 0.018015355977695435
+    },
+    {
+      "kind": "warm",
+      "stage": "step1.tile_model",
+      "samples": 1,
+      "median_seconds": 8.3155414450448,
+      "min_seconds": 8.3155414450448,
+      "max_seconds": 8.3155414450448
+    },
+    {
+      "kind": "warm",
+      "stage": "step1.tile_prepare",
+      "samples": 1,
+      "median_seconds": 0.018890044011641294,
+      "min_seconds": 0.018890044011641294,
+      "max_seconds": 0.018890044011641294
+    },
+    {
+      "kind": "warm",
+      "stage": "step1.total",
+      "samples": 1,
+      "median_seconds": 8.470876550010871,
+      "min_seconds": 8.470876550010871,
+      "max_seconds": 8.470876550010871
+    },
+    {
+      "kind": "warm",
+      "stage": "step2.crop_fit",
+      "samples": 1,
+      "median_seconds": 0.0005793459713459015,
+      "min_seconds": 0.0005793459713459015,
+      "max_seconds": 0.0005793459713459015
+    },
+    {
+      "kind": "warm",
+      "stage": "step2.crop_selection",
+      "samples": 1,
+      "median_seconds": 0.6023612010176294,
+      "min_seconds": 0.6023612010176294,
+      "max_seconds": 0.6023612010176294
+    },
+    {
+      "kind": "warm",
+      "stage": "step2.mask_finalize",
+      "samples": 1,
+      "median_seconds": 0.0025491639971733093,
+      "min_seconds": 0.0025491639971733093,
+      "max_seconds": 0.0025491639971733093
+    },
+    {
+      "kind": "warm",
+      "stage": "step2.segmentation",
+      "samples": 1,
+      "median_seconds": 8.354293934011366,
+      "min_seconds": 8.354293934011366,
+      "max_seconds": 8.354293934011366
+    },
+    {
+      "kind": "warm",
+      "stage": "step2.tile_accumulate",
+      "samples": 1,
+      "median_seconds": 0.004377148987259716,
+      "min_seconds": 0.004377148987259716,
+      "max_seconds": 0.004377148987259716
+    },
+    {
+      "kind": "warm",
+      "stage": "step2.tile_model",
+      "samples": 1,
+      "median_seconds": 8.330697425000835,
+      "min_seconds": 8.330697425000835,
+      "max_seconds": 8.330697425000835
+    },
+    {
+      "kind": "warm",
+      "stage": "step2.tile_prepare",
+      "samples": 1,
+      "median_seconds": 0.009045112004969269,
+      "min_seconds": 0.009045112004969269,
+      "max_seconds": 0.009045112004969269
+    },
+    {
+      "kind": "warm",
+      "stage": "step2.total",
+      "samples": 1,
+      "median_seconds": 8.965059106994886,
+      "min_seconds": 8.965059106994886,
+      "max_seconds": 8.965059106994886
+    }
+  ]
+}
