@@ -1,6 +1,6 @@
 # Sea Wave Regression Model
 
-[![neural-networks](https://img.shields.io/static/v1?message=neural-networks&color=2f6feb&style=flat-square)](https://github.com/topics/neural-networks) [![regression-model](https://img.shields.io/static/v1?message=regression-model&color=2f6feb&style=flat-square)](https://github.com/topics/regression-model) [![python](https://img.shields.io/static/v1?message=python&color=2f6feb&style=flat-square)](https://github.com/topics/python)
+[![neural-networks](https://img.shields.io/static/v1?message=neural-networks&color=2f6feb&style=flat-square)](https://github.com/topics/neural-networks) [![regression-model](https://img.shields.io/static/v1?message=regression-model&color=2f6feb&style=flat-square)](https://github.com/topics/regression-model) [![python](https://img.shields.io/static/v1?message=python&color=2f6feb&style=flat-square)](https://github.com/topics/python) [![median-inference](https://img.shields.io/static/v1?message=inference-latency-42-ms%2Fphoto&color=16875b&style=flat-square)](#inference-speed-improvements)
 
 This neural network takes a photo of the **sea** and estimates water waviness as a number from **0 to 1**. A score of 0 represents very calm water; a score of 1 represents very wavy water that may be dangerous for swimming. The score describes waviness and is not, by itself, a complete swimming safety assessment.
 
@@ -14,32 +14,72 @@ The repository contains an image-processing and model-training pipeline for a lo
 
 Photos are taken from roughly 200–300 metres from the sea, often from a few recurring locations and angles. The preprocessing pipeline focuses on the sea, removing visual distractions such as sky, buildings, beach, and sand. It then selects a region toward the bottom of the detected sea area, where waves near the coast are most relevant to the swimming experience.
 
-For the current fast-v2.2 pipeline, Step 1 segments the sea and selects a lower-water crop directly from the original photo to create the final model input. The model is trained on this image rather than the original photo:
+<p align="center">
+  <img src="readme_files/original-to-crop.png" alt="Original sea photo compared with the lower-water crop selected for the model" width="90%" />
+  <br /><em>An original photo and the lower-water crop used as model input.</em>
+</p>
 
-```text
-Photo → sea segmentation and lower-water crop (Step 1) → waviness label → regression model
-```
+For the current fast-v2.2 pipeline, during pre-processing the pipeline segments the sea and selects a lower-water crop directly from the original photo to create the final model input. The model is trained on this image.
+
+### Inference speed improvements
+
+The adopted pipeline reduced median raw-photo-to-score time from **10.716 s** to **42.59 ms** per photo, about **252× faster**. The following table shows measured changes from the paired FP32-to-FP16 comparison. Stage timings come from successive experiments, so they show the scale and source of the gains.
 
 <table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="readme_files/step-1-preprocessed-sea-example.jpg" alt="Example of sea-focused preprocessing" width="100%" />
-      <br /><em>Sea segmentation identifies the water area.</em>
-    </td>
-    <td align="center" width="50%">
-      <img src="readme_files/step-2-pick-lower-water-area.jpg" alt="Example of the lower-water crop" width="100%" />
-      <br /><em>Lower-water crop selection keeps a region for model input.</em>
-    </td>
-  </tr>
+  <thead>
+    <tr>
+      <th align="left">⚙️ Change</th>
+      <th align="right">⏱️ Before</th>
+      <th align="right">⚡ After</th>
+      <th align="right">📈 Improvement</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>🧩 Step 1: replace 35 overlapping tiles with one 448 × 448 pass</td>
+      <td align="right"><code>10.299 s</code></td>
+      <td align="right"><code>225 ms</code></td>
+      <td align="right"><strong>45.8× faster</strong></td>
+    </tr>
+    <tr>
+      <td>🎯 Step 2: reduce segmentation input to 384 × 384 (earlier fast path)</td>
+      <td align="right"><code>305 ms</code></td>
+      <td align="right"><code>59 ms</code></td>
+      <td align="right"><strong>5.2× faster</strong></td>
+    </tr>
+    <tr>
+      <td>✂️ Current fast-v2 route: remove the separate Step 2 segmentation pass</td>
+      <td align="right"><code>305 ms</code></td>
+      <td align="right">—</td>
+      <td align="right"><strong>305 ms removed</strong></td>
+    </tr>
+    <tr>
+      <td>🧮 Segmentation runtime: FP32 → MIGraphX FP16¹</td>
+      <td align="right"><code>57.86 ms</code></td>
+      <td align="right"><code>42.84 ms</code></td>
+      <td align="right"><strong>15.02 ms saved</strong></td>
+    </tr>
+    <tr>
+      <td>🧠 Regression inference</td>
+      <td align="right"><code>6 ms</code></td>
+      <td align="right"><code>5 ms</code></td>
+      <td align="right"><strong>≈1 ms saved</strong></td>
+    </tr>
+    <tr>
+      <th align="left">🚀 Total raw photo → waviness score</th>
+      <td align="right"><strong>10.716 s</strong></td>
+      <td align="right"><strong>42.59 ms</strong></td>
+      <td align="right"><strong>252× faster</strong></td>
+    </tr>
+  </tbody>
 </table>
-
-The pipeline is designed for a dataset that grows over time. It processes new images while skipping outputs that already exist, so adding a new batch does not require starting every image from scratch. Images are labeled with a waviness score from 0 to 1, and training, validation, and test splits are managed separately.
 
 ## Model development
 
 The first model versions used a ResNet backbone. An early version reached a validation mean absolute error (MAE) of about **0.10**. As we added more photographs, the dataset also gained noisier or more ambiguous examples, and the validation MAE rose across subsequent versions, reaching about **0.17**.
 
 That prompted a set of controlled experiments to understand model behavior and improve it. We designed experiments in a way that they can be repeated, and the repeated experiment results will be recorded in versioned directories.
+
 ### Experiment A — Constant prediction baselines
 
 We compared the neural network with two simple guesses that do not use the validation photos, then measured them against the network's image-based predictions. Here is how the experiment works:
@@ -76,6 +116,7 @@ Next, we unfroze the final layer of the EfficientNet-B0 backbone to test whether
 
 ## Current status
 
+- The pipeline is designed for a dataset that grows over time. Images are labeled with a waviness score from 0 to 1, and training, validation, and test splits are managed separately.
 - The pipeline supports image preprocessing, labeling, dataset splits, training, evaluation, and inference.
 - Step 7 now defaults to **fast-v2.2**: native HEIF decoding when available (with a Pillow fallback), 448×448 SegFormer-B0 ONNX segmentation through MIGraphX FP16, lower-water coordinate crop from the source image, and the retrained EfficientNet-B0 ONNX regressor. The earlier fast-v2.1 and PyTorch v19 routes remain selectable.
 - EfficientNet-B0 is the current preferred backbone based on validation experiments.
@@ -95,17 +136,6 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 ```
-
-This machine uses AMD gfx1151 with ROCm 10.1, so install its local runtime
-requirements with `python -m pip install -r requirements-rocm-gfx1151.txt`.
-That machine-specific file is ignored by Git. On a standard machine, install
-the default dependencies with `python -m pip install -r requirements.txt`; on a
-CPU-only machine, use `python -m pip install -r requirements-cpu.txt` instead.
-The AMD ROCm runtime and GPU driver must already be installed by the system
-administrator.
-
-Training, evaluation, and prediction may download pretrained weights on their
-first run, so those commands need network access then.
 
 After setup, follow the [pipeline run guide](README_RUN.md) for preprocessing,
 labeling, training, evaluation, and prediction steps.
