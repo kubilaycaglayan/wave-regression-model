@@ -101,8 +101,8 @@ Update `step_5_b_train.py` to:
 - support a command such as:
 
 ```bash
-python step_5_b_train.py --backbone efficientnet_b0
-python step_5_b_train.py --backbone resnet18
+python scripts_pipeline/step_5_b_train.py --backbone efficientnet_b0
+python scripts_pipeline/step_5_b_train.py --backbone resnet18
 ```
 
 - derive checkpoint names, summaries, and manifests from the selected backbone
@@ -205,8 +205,8 @@ Otherwise, adding a future backbone could silently construct the wrong model.
 After the update, selecting a backbone should be a command-line/configuration change:
 
 ```bash
-python step_5_b_train.py --backbone efficientnet_b0
-python step_5_b_train.py --backbone resnet18
+python scripts_pipeline/step_5_b_train.py --backbone efficientnet_b0
+python scripts_pipeline/step_5_b_train.py --backbone resnet18
 ```
 
 Adding another supported backbone should require updating the centralized factory and registry, plus adding tests, rather than editing training, evaluation, and inference logic in multiple places.

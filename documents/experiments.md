@@ -4972,7 +4972,7 @@ records and runner are under `/tmp/wave_v18_b2_exact_combined_full_ab_v1/` and
 ### Integrated native HEIF decoder plus exact v18 optimizations (2026-10-29)
 
 I added an optional Linux build for the parallel libheif tile decoder and
-connected it to shared image loading. `python step_0_b_build_native_heif.py`
+connected it to shared image loading. `python scripts_pipeline/step_0_b_build_native_heif.py`
 builds an ignored local library against the libheif bundled with the installed
 Pillow-Heif package. If the helper is not built or a file fails native decode,
 the loader uses Pillow. The decoder matched Pillow's oriented RGB pixels on
@@ -6365,7 +6365,7 @@ Start it with the isolated MIGraphX environment:
 ```bash
 LD_LIBRARY_PATH=/tmp/wave_migraphx_312_env/lib/python3.12/site-packages/migraphx_libs:/opt/rocm/lib \
 MIGRAPHX_SKIP_BENCHMARKING=1 MIGRAPHX_USE_FAST_SOFTMAX=0 \
-/tmp/wave_migraphx_312_env/bin/python -u step_7_i_experimental_migraphx_server.py
+/tmp/wave_migraphx_312_env/bin/python -u experiment_scripts/step_7_i_experimental_migraphx_server.py
 ```
 
 Send one photo later with:

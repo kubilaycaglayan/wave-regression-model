@@ -1,0 +1,425 @@
+#!/usr/bin/env python3
+"""Produce the labeled lower-water images used by the waviness regressor."""
+
+from __future__ import annotations
+from pathlib import Path as _BootstrapPath
+import sys as _bootstrap_sys
+_REPOSITORY_ROOT = _BootstrapPath(__file__).resolve().parents[1]
+if str(_REPOSITORY_ROOT) not in _bootstrap_sys.path:
+    _bootstrap_sys.path.insert(0, str(_REPOSITORY_ROOT))
+for _script_folder in ("scripts_pipeline", "experiment_scripts", "scripts"):
+    _script_path = str(_REPOSITORY_ROOT / _script_folder)
+    if _script_path not in _bootstrap_sys.path:
+        _bootstrap_sys.path.insert(0, _script_path)
+
+
+import argparse
+import html
+import io
+import json
+import os
+import tempfile
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import quote
+
+import numpy as np
+from PIL import Image
+
+from step_1_a_water_segmentation import (
+    SegmentationModel,
+    extract_water_mask,
+    iter_images,
+    load_model,
+    load_rgb_image,
+    run_segmentation,
+)
+import step_1_a_water_segmentation as segmentation
+from step_1_c_preprocessing_profiles import (
+    configure_segmentation,
+    ensure_profile_directory,
+    get_profile,
+    require_profile_directory,
+    step2_processor_size,
+)
+
+OUTPUT_SIZE = (224, 224)
+BLACK_THRESHOLD = 12
+LOWER_WATER_FRACTION = 0.35
+MINIMUM_LOWER_RETENTION = 0.95
+BLACK_RATIO_BUCKET = 0.005
+CONSOLE_RED = "\033[31m"
+CONSOLE_RESET = "\033[0m"
+
+
+@dataclass(frozen=True)
+class CropMetrics:
+    box: tuple[int, int, int, int]
+    water_ratio: float
+    black_ratio: float
+    lower_water_retention: float
+    water_pixels: int
+    shape_penalty: float
+
+
+@dataclass(frozen=True)
+class Step2PreprocessingResult:
+    image: Image.Image
+    crop: CropMetrics
+    source_black_mask: np.ndarray
+    water_mask: np.ndarray
+
+
+def summed_area(mask: np.ndarray) -> np.ndarray:
+    """Return a padded summed-area table for constant-time rectangle sums."""
+    return np.pad(mask.astype(np.int64), ((1, 0), (1, 0))).cumsum(0).cumsum(1)
+
+
+def rectangle_sum(table: np.ndarray, box: tuple[int, int, int, int]) -> int:
+    left, top, right, bottom = box
+    return int(table[bottom, right] - table[top, right] - table[bottom, left] + table[top, left])
+
+
+def mask_bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
+    ys, xs = np.where(mask)
+    if not len(xs):
+        return None
+    return int(xs.min()), int(ys.min()), int(xs.max() + 1), int(ys.max() + 1)
+
+
+def resized_content_size(width: int, height: int) -> tuple[int, int]:
+    scale = min(OUTPUT_SIZE[0] / width, OUTPUT_SIZE[1] / height)
+    return max(1, round(width * scale)), max(1, round(height * scale))
+
+
+def projected_ratio(pixel_count: int, crop_area: int, width: int, height: int) -> float:
+    """Estimate a crop ratio after aspect-preserving resize and square padding."""
+    resized_width, resized_height = resized_content_size(width, height)
+    occupied_fraction = resized_width * resized_height / (OUTPUT_SIZE[0] * OUTPUT_SIZE[1])
+    return (pixel_count / crop_area) * occupied_fraction
+
+
+def select_crop(water_mask: np.ndarray, black_mask: np.ndarray) -> CropMetrics | None:
+    """Select a lower-anchored rectangle using lexicographic project priorities."""
+    bbox = mask_bbox(water_mask)
+    if bbox is None:
+        return None
+    bbox_left, bbox_top, bbox_right, bbox_bottom = bbox
+    bbox_width, bbox_height = bbox_right - bbox_left, bbox_bottom - bbox_top
+    minimum_water_pixels = max(32, round(water_mask.size * 0.0005))
+    if int(water_mask.sum()) < minimum_water_pixels:
+        return None
+
+    lower_top = max(bbox_top, bbox_bottom - max(1, round(bbox_height * LOWER_WATER_FRACTION)))
+    lower_mask = water_mask.copy()
+    lower_mask[:lower_top, :] = False
+    lower_total = int(lower_mask.sum())
+    if lower_total < minimum_water_pixels:
+        return None
+
+    # Four-pixel horizontal sampling is exhaustive enough at the 224-pixel
+    # pipeline resolution while keeping candidate evaluation inexpensive.
+    horizontal_step = max(1, round(water_mask.shape[1] / 56))
+    boundaries = sorted(
+        set(range(bbox_left, bbox_right + 1, horizontal_step)) | {bbox_left, bbox_right}
+    )
+    tops = list(range(bbox_top, lower_top + 1))
+
+    water_table = summed_area(water_mask)
+    black_table = summed_area(black_mask)
+    lower_table = summed_area(lower_mask)
+    minimum_crop_area = max(256, round(bbox_width * bbox_height * 0.10))
+    best: CropMetrics | None = None
+    best_key = None
+
+    # The bottom is fixed at the lowest detected water row. Tops cannot enter the
+    # lower-water band, so every accepted crop includes that band geometrically.
+    for left_index, left in enumerate(boundaries[:-1]):
+        rights = np.asarray(boundaries[left_index + 1:], dtype=np.int64)
+        lower_counts = (lower_table[bbox_bottom, rights] - lower_table[lower_top, rights]
+                        - lower_table[bbox_bottom, left] + lower_table[lower_top, left])
+        viable = ((rights - left) >= 8) & (lower_counts >= minimum_water_pixels)
+        rights, lower_counts = rights[viable], lower_counts[viable]
+        if not len(rights):
+            continue
+        right_grid = rights[:, None]
+        top_grid = np.asarray(tops, dtype=np.int64)[None, :]
+        width_grid = right_grid - left
+        height_grid = bbox_bottom - top_grid
+        area_grid = width_grid * height_grid
+        def sums(table):
+            return (table[bbox_bottom, right_grid] - table[top_grid, right_grid]
+                    - table[bbox_bottom, left] + table[top_grid, left])
+        retention_grid = sums(lower_table) / lower_counts[:, None]
+        valid = ((height_grid >= 8) & (area_grid >= minimum_crop_area)
+                 & (retention_grid + 1e-12 >= MINIMUM_LOWER_RETENTION))
+        row, col = np.nonzero(valid)
+        if not len(row):
+            continue
+        right = rights[row]
+        top_values = top_grid[0, col]
+        width = right - left
+        heights = bbox_bottom - top_values
+        areas = width * heights
+        retention = retention_grid[row, col]
+        water_pixels, black_pixels = sums(water_table)[row, col], sums(black_table)[row, col]
+        scale = np.minimum(OUTPUT_SIZE[0] / width, OUTPUT_SIZE[1] / heights)
+        occupied = (np.maximum(1, np.rint(width * scale)) * np.maximum(1, np.rint(heights * scale))
+                    / (OUTPUT_SIZE[0] * OUTPUT_SIZE[1]))
+        water_ratio = water_pixels / areas * occupied
+        black_ratio = 1.0 - (areas - black_pixels) / areas * occupied
+        penalty = np.abs(np.log(width / heights))
+        tiers = np.where(retention >= 0.995, 3, np.where(retention >= 0.98, 2, 1))
+        buckets = np.rint(black_ratio / BLACK_RATIO_BUCKET).astype(np.int64)
+        index = np.lexsort((right, top_values, penalty, -water_ratio, -water_pixels, buckets, -tiers))[0]
+        box = (left, int(top_values[index]), int(right[index]), bbox_bottom)
+        key = (-int(tiers[index]), int(buckets[index]), -int(water_pixels[index]),
+               -float(water_ratio[index]), float(penalty[index]), box)
+        if best_key is None or key < best_key:
+            best_key = key
+            best = CropMetrics(box, float(water_ratio[index]), float(black_ratio[index]),
+                               float(retention[index]), int(water_pixels[index]), float(penalty[index]))
+    return best
+
+
+def fit_in_square(image: Image.Image, box: tuple[int, int, int, int]) -> Image.Image:
+    """Crop, resize without distortion, and center-pad to 224x224."""
+    cropped = image.crop(box)
+    resized = cropped.resize(resized_content_size(*cropped.size), Image.Resampling.LANCZOS)
+    output = Image.new("RGB", OUTPUT_SIZE, (0, 0, 0))
+    output.paste(resized, ((OUTPUT_SIZE[0] - resized.width) // 2, (OUTPUT_SIZE[1] - resized.height) // 2))
+    return output
+
+
+def preprocess_step_1_image(
+    image: Image.Image, segmentation_model: SegmentationModel, *, projected_mask: np.ndarray | None = None
+) -> Step2PreprocessingResult | None:
+    """Run the canonical Step 2 lower-water crop on a Step 1 image."""
+    rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    source_black_mask = np.all(rgb <= BLACK_THRESHOLD, axis=2)
+    if projected_mask is None:
+        segmentation_mask = extract_water_mask(
+            run_segmentation(image, segmentation_model), segmentation_model.water_class_ids
+        ).astype(bool)
+    else:
+        if projected_mask.shape != source_black_mask.shape:
+            raise ValueError("Projected water mask must match the Step 1 image dimensions")
+        segmentation_mask = projected_mask.astype(bool)
+    water_mask = segmentation_mask & ~source_black_mask
+    crop = select_crop(water_mask, source_black_mask)
+    if crop is None:
+        return None
+    return Step2PreprocessingResult(
+        fit_in_square(image, crop.box), crop, source_black_mask, water_mask
+    )
+
+
+def encode_step_2_output(image: Image.Image) -> bytes:
+    """Encode exactly as the JPEG files used to train the model."""
+    output = io.BytesIO()
+    image.save(output, format="JPEG", quality=95, subsampling=0)
+    return output.getvalue()
+
+
+def project_mask(mask: np.ndarray, box: tuple[int, int, int, int]) -> np.ndarray:
+    """Apply the same crop/fit operation to a binary mask."""
+    left, top, right, bottom = box
+    cropped = Image.fromarray(mask[top:bottom, left:right].astype(np.uint8) * 255, mode="L")
+    resized = cropped.resize(resized_content_size(*cropped.size), Image.Resampling.NEAREST)
+    output = Image.new("L", OUTPUT_SIZE, 0)
+    output.paste(resized, ((OUTPUT_SIZE[0] - resized.width) // 2, (OUTPUT_SIZE[1] - resized.height) // 2))
+    return np.asarray(output) > 0
+
+
+def black_ratio(image: Image.Image) -> float:
+    rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    return float(np.all(rgb <= BLACK_THRESHOLD, axis=2).mean())
+
+
+def save_result(image: Image.Image, path: Path) -> None:
+    suffix = path.suffix.lower()
+    if suffix in {".jpg", ".jpeg"}:
+        path.write_bytes(encode_step_2_output(image))
+    elif suffix in {".tif", ".tiff"}:
+        image.save(path, format="TIFF")
+    else:
+        image.save(path)
+
+
+def write_bytes_atomically(path: Path, content: bytes) -> None:
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def write_gallery(entries: list[tuple[str, Path]], input_dir: Path, output_dir: Path) -> None:
+    cards = []
+    for filename, result_path in sorted(entries, key=lambda entry: entry[0].lower()):
+        safe_name = html.escape(filename)
+        namespaced_source = input_dir / f"step-1_{filename}"
+        source_path = namespaced_source if namespaced_source.exists() else input_dir / filename
+        current_url = quote(os.path.relpath(source_path, output_dir).replace(os.sep, "/"))
+        result_url = quote(result_path.name)
+        cards.append(
+            f'<article class="card"><h2>{safe_name}</h2><div class="images">'
+            f'<figure><figcaption>last step image</figcaption><a href="{current_url}" target="_blank">'
+            f'<img src="{current_url}" alt="Last step image {safe_name}" loading="lazy"></a></figure>'
+            f'<figure><figcaption>this step image</figcaption><a href="{result_url}" target="_blank">'
+            f'<img src="{result_url}" alt="This step image {safe_name}" loading="lazy"></a></figure>'
+            '</div></article>'
+        )
+    document = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reduced-black water images</title><style>*{box-sizing:border-box}body{margin:0;padding:16px;background:#eef2f5;color:#17212b;font:14px system-ui,sans-serif}h1{font-size:21px;margin:0 0 14px}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px}.card{min-width:0;background:#fff;padding:10px;border-radius:8px;box-shadow:0 1px 5px #0002}.card h2{font-size:13px;margin:0 0 9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.images{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}figure{margin:0;min-width:0}figcaption{font-size:12px;color:#52606d;margin-bottom:5px}figure a{display:block;background:#111;aspect-ratio:1/1;overflow:hidden}img{display:block;width:100%;height:100%;object-fit:contain}@media(max-width:560px){.gallery{grid-template-columns:1fr}.images{gap:6px}}</style></head><body><h1>Reduced-black water images</h1><main class="gallery">''' + ''.join(cards) + '</main></body></html>'
+    (output_dir / "index.html").write_text(document, encoding="utf-8")
+
+
+def diagnostic_line(
+    filename: str,
+    original_black: float | None,
+    final_black: float | None,
+    water_ratio: float | None,
+    retention: float | None,
+    box: tuple[int, int, int, int] | None,
+    status: str,
+) -> str:
+    percentage = lambda value: "n/a" if value is None else f"{value * 100:.2f}%"
+    return (
+        f"filename={filename} | original black ratio={percentage(original_black)} | "
+        f"final black ratio={percentage(final_black)} | water ratio={percentage(water_ratio)} | "
+        f"lower-water retention={percentage(retention)} | crop coordinates={box or 'n/a'} | status={status}"
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", choices=("baseline-v16", "fast-v2", "fast-v2.1", "fast-v2.2"), default="fast-v2.2")
+    parser.add_argument("--input-dir", type=Path, help="Step 1 directory; defaults to the selected profile")
+    parser.add_argument("--output-dir", type=Path, help="Output directory; defaults to the selected profile")
+    parser.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")
+    args = parser.parse_args()
+    profile = get_profile(args.profile)
+    input_dir = args.input_dir or profile.step1_dir
+    output_dir = args.output_dir or profile.step2_dir
+    configure_segmentation(profile, segmentation)
+    require_profile_directory(profile, input_dir)
+    ensure_profile_directory(profile, output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    # Ignore source copies left by older pipeline runs; only the last step's
+    # standardized image is a valid input to this step.
+    image_paths = [
+        p for p in iter_images(input_dir)
+        if "archive" not in p.relative_to(input_dir).parts
+        and not p.stem.lower().endswith("_original")
+    ]
+    namespaced = [p for p in image_paths if p.stem.lower().startswith("step-1_")]
+    if namespaced:
+        image_paths = namespaced
+    if not image_paths:
+        raise SystemExit(f"No supported images found in {input_dir}")
+
+    model = None
+    entries: list[tuple[str, Path]] = []
+    processed = 0
+    skipped = 0
+    total_started = time.perf_counter()
+    if profile.coordinate_crop:
+        contract_path = input_dir / "preprocessing-contract.json"
+        if not contract_path.is_file():
+            raise FileNotFoundError(f"Missing Step 1 preprocessing contract: {contract_path}")
+        contract_bytes = contract_path.read_bytes()
+        destination_contract = output_dir / contract_path.name
+        if destination_contract.exists() and destination_contract.read_bytes() != contract_bytes:
+            raise RuntimeError(f"Step 2 preprocessing contract differs from Step 1: {destination_contract}")
+        if not destination_contract.exists():
+            write_bytes_atomically(destination_contract, contract_bytes)
+    for index, source_path in enumerate(image_paths, 1):
+        item_started = time.perf_counter()
+        logical_stem = source_path.stem.removeprefix("step-1_")
+        logical_name = f"{logical_stem}{source_path.suffix.lower()}"
+        result_path = output_dir / f"step-2_{logical_name}"
+        if result_path.exists():
+            skipped += 1
+            entries.append((logical_name, result_path))
+            print(f"[{index}/{len(image_paths)}] " + diagnostic_line(
+                logical_name, None, None, None, None, None,
+                "skipped: output already exists",
+            ) + f" | time={time.perf_counter() - item_started:.3f}s")
+            continue
+
+        if profile.coordinate_crop:
+            try:
+                write_bytes_atomically(result_path, source_path.read_bytes())
+                processed += 1
+                entries.append((logical_name, result_path))
+                print(f"[{index}/{len(image_paths)}] {logical_name}: passed through Step 1 coordinate crop "
+                      f"({time.perf_counter() - item_started:.3f}s)")
+            except Exception as error:
+                skipped += 1
+                print(f"[{index}/{len(image_paths)}] {logical_name}: WARNING: {error}; skipped "
+                      f"({time.perf_counter() - item_started:.3f}s)")
+            continue
+
+        try:
+            if model is None:
+                model = load_model(args.device)
+            image = load_rgb_image(source_path)
+            with step2_processor_size(profile, model):
+                processed_output = preprocess_step_1_image(image, model)
+            if processed_output is None:
+                skipped += 1
+                reason = f"{CONSOLE_RED}no reliable lower-water crop{CONSOLE_RESET}"
+                print(f"[{index}/{len(image_paths)}] " + diagnostic_line(
+                    logical_name, black_ratio(image), None, None, None, None,
+                    f"skipped: {reason}",
+                ) + f" | time={time.perf_counter() - item_started:.3f}s")
+                continue
+
+            result = processed_output.image
+            crop = processed_output.crop
+            source_black_mask = processed_output.source_black_mask
+            water_mask = processed_output.water_mask
+            save_result(result, result_path)
+            # Measure the persisted file, including square padding and encoding effects.
+            persisted = load_rgb_image(result_path)
+            final_black = black_ratio(persisted)
+            final_water_mask = project_mask(water_mask, crop.box)
+            final_water_ratio = float(final_water_mask.mean())
+            entries.append((logical_name, result_path))
+            processed += 1
+            elapsed = time.perf_counter() - item_started
+            print(f"[{index}/{len(image_paths)}] " + diagnostic_line(
+                logical_name,
+                float(source_black_mask.mean()),
+                final_black,
+                final_water_ratio,
+                crop.lower_water_retention,
+                crop.box,
+                "processed",
+            ) + f" | time={elapsed:.3f}s")
+        except Exception as error:
+            skipped += 1
+            elapsed = time.perf_counter() - item_started
+            print(f"[{index}/{len(image_paths)}] " + diagnostic_line(
+                source_path.name, None, None, None, None, None,
+                f"skipped: {error}",
+            ) + f" | time={elapsed:.3f}s")
+
+    write_gallery(entries, input_dir, output_dir)
+    print(f"Processed: {processed}")
+    print(f"Skipped: {skipped}")
+    print(f"Total time: {time.perf_counter() - total_started:.3f}s")
+    print(f"Preprocessing profile: {profile.name}")
+    print(f"Gallery: {output_dir / 'index.html'}")
+
+
+if __name__ == "__main__":
+    main()

@@ -5,7 +5,7 @@
 Use immutable version directories under the Experiment C root:
 
 ```text
-step-10-experiment-c-frozen-backbone-comparison/
+experiments/step-10-experiment-c-frozen-backbone-comparison/
 ├── experiment_index.json
 ├── experiment_index.md
 ├── v1-20260925T123000Z/
@@ -64,7 +64,7 @@ This makes it possible to answer:
 Move the current completed Experiment C result into:
 
 ```text
-step-10-experiment-c-frozen-backbone-comparison/v1-20260925T...
+experiments/step-10-experiment-c-frozen-backbone-comparison/v1-20260925T...
 ```
 
 Preserve its metrics, plots, reports, run configurations, and checkpoint hashes. Remove the ambiguous unversioned aggregate files after migration, or retain them only as a clearly labeled compatibility pointer.

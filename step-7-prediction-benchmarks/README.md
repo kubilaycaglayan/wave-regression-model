@@ -65,7 +65,7 @@ The fast crops looked visually cleaner in this comparison. Visual appearance alo
 Put new HEIC, HEIF, JPEG, or PNG photos in `step-7-predict-captures-holder/`, set `PREDICT_CHECKPOINT_PATH`, and run:
 
 ```bash
-python step_7_a_predict.py
+python scripts_pipeline/step_7_a_predict.py
 ```
 
 ### Persistent watcher
@@ -73,7 +73,7 @@ python step_7_a_predict.py
 Keep the models loaded for incoming photos with:
 
 ```bash
-python step_7_e_watch_predictions.py --threads 4
+python scripts_pipeline/step_7_e_watch_predictions.py --threads 4
 ```
 
 Stop with Ctrl+C. On Linux, the watcher handles files after a writer closes them or after an atomic move. Prefer staging the photo elsewhere and moving it into the folder with a unique filename. Files present at startup and systems without notifications use stability polling. Use `--watch-mode poll` to force polling or `--watch-mode event` to require notifications. Restart the watcher to select a different checkpoint.
@@ -83,7 +83,7 @@ Stop with Ctrl+C. On Linux, the watcher handles files after a writer closes them
 An example 448 / 384 float16 run is:
 
 ```bash
-PREDICT_CHECKPOINT_PATH=/path/to/experimental.ckpt python step_7_e_watch_predictions.py --threads 4 --experimental-single-resolution 448 --experimental-step2-resolution 384 --experimental-logits-resolution 448 --experimental-precision float16
+PREDICT_CHECKPOINT_PATH=/path/to/experimental.ckpt python scripts_pipeline/step_7_e_watch_predictions.py --threads 4 --experimental-single-resolution 448 --experimental-step2-resolution 384 --experimental-logits-resolution 448 --experimental-precision float16
 ```
 
 Other resolutions can be explored, but each configuration changes outputs and must be evaluated with a matching adapted checkpoint. CPU runs use full precision and separate device-specific outputs. If GPU segmentation unexpectedly falls back to CPU, the watcher fails before saving an incompatible preview. Experimental outputs use a separate namespace and cannot be mistaken for baseline previews.
@@ -94,13 +94,13 @@ Other resolutions can be explored, but each configuration changes outputs and mu
 
 ```bash
 # Default prediction-holder photos; three independent processes.
-python step_7_b_benchmark_prediction.py --repeat 3
+python scripts/step_7_b_benchmark_prediction.py --repeat 3
 
 # Fresh preprocessing and repeated warm predictions for selected photos.
-python step_7_b_benchmark_prediction.py --device cuda --threads 4 --fresh --repeat 1 --warm-runs 5 /path/to/photo.HEIC
+python scripts/step_7_b_benchmark_prediction.py --device cuda --threads 4 --fresh --repeat 1 --warm-runs 5 /path/to/photo.HEIC
 
 # Fast settings; this can change masks, crops, and predictions.
-python step_7_b_benchmark_prediction.py --device cuda --threads 4 --fresh --repeat 1 --warm-runs 5 --resolution 448 --step2-resolution 384 --precision float16 --no-tiles --logits-resolution 448 /path/to/photo.HEIC
+python scripts/step_7_b_benchmark_prediction.py --device cuda --threads 4 --fresh --repeat 1 --warm-runs 5 --resolution 448 --step2-resolution 384 --precision float16 --no-tiles --logits-resolution 448 /path/to/photo.HEIC
 ```
 
 Reports are written to a timestamped directory under `step-7-prediction-benchmarks/`. The benchmark uses an existing preview unless `--fresh` is given. The p95 uses the nearest-rank method; inspect failures separately from successful timings.
@@ -108,7 +108,7 @@ Reports are written to a timestamped directory under `step-7-prediction-benchmar
 ### Arrival-to-record latency
 
 ```bash
-python step_7_h_benchmark_arrival.py --checkpoint /path/to/experimental.ckpt --resolution 448 --step2-resolution 384 --logits-resolution 448 --precision float16 /path/to/photo.HEIC
+python scripts/step_7_h_benchmark_arrival.py --checkpoint /path/to/experimental.ckpt --resolution 448 --step2-resolution 384 --logits-resolution 448 --precision float16 /path/to/photo.HEIC
 ```
 
 This uses an isolated warmed watcher and a temporary symlink plus atomic move. Linux notifications are required. It measures one photo at a time and excludes upload/copy time, model startup, and queued requests.
@@ -117,10 +117,10 @@ This uses an isolated warmed watcher and a temporary symlink plus atomic move. L
 
 ```bash
 # Compare Step 2 resolutions using persisted Step 1 validation images.
-python step_7_d_compare_preprocessing.py --device cuda --candidate-resolution 384 --output /tmp/wave-step2-comparison.json
+python scripts/step_7_d_compare_preprocessing.py --device cuda --candidate-resolution 384 --output /tmp/wave-step2-comparison.json
 
 # Compare raw-photo fast preprocessing with persisted Step 2 validation outputs.
-python step_7_d_compare_preprocessing.py --device cuda --candidate-resolution 448 --step2-resolution 384 --precision float16 --logits-resolution 448 --raw-candidate --output /tmp/wave-fast-comparison.json
+python scripts/step_7_d_compare_preprocessing.py --device cuda --candidate-resolution 448 --step2-resolution 384 --precision float16 --logits-resolution 448 --raw-candidate --output /tmp/wave-fast-comparison.json
 ```
 
 Optional flags test projecting the Step 1 mask into Step 2 (`--reuse-step1-mask`) or other resolutions. The command compares only examples that succeeded in both variants, so also inspect failure counts. It does not save source photos or altered crops. Raw-photo comparison requires the Step 1 source manifest and original local photos.
@@ -128,7 +128,7 @@ Optional flags test projecting the Step 1 mask into Step 2 (`--reuse-step1-mask`
 ### Adapt a regression head for fast preprocessing
 
 ```bash
-python step_7_f_fast_head_experiment.py --output-dir /tmp/wave-fast-head --holdout-by-date
+python experiment_scripts/step_7_f_fast_head_experiment.py --output-dir /tmp/wave-fast-head --holdout-by-date
 ```
 
 This freezes the selected checkpoint's backbone and adapts only the regression head. It uses the training split, selects epoch and teacher weighting on held-out training capture dates, then evaluates validation. It requires usable EXIF capture dates, does not read the test split, and does not change the selected checkpoint. Feature vectors are cached under `step-7-prediction-benchmarks/fast-head-feature-cache/` and reused when source, prior-stage output, checkpoint, model revision, device, and code fingerprints match. Choose a new output directory for each completed experiment.
@@ -136,8 +136,8 @@ This freezes the selected checkpoint's backbone and adapts only the regression h
 ### PyTorch operator profiling
 
 ```bash
-python step_7_c_profile_prediction.py --device cpu /path/to/photo.HEIC
-python step_7_c_profile_prediction.py --device cuda --threads 4 --warmup 1 --repeat 2 --shapes --memory /path/to/photo.HEIC
+python scripts/step_7_c_profile_prediction.py --device cpu /path/to/photo.HEIC
+python scripts/step_7_c_profile_prediction.py --device cuda --threads 4 --warmup 1 --repeat 2 --shapes --memory /path/to/photo.HEIC
 ```
 
 Profiler captures and Chrome/Perfetto traces are saved under `step-7-prediction-profiles/`. Profiler timings include profiling overhead and are not latency benchmark measurements.

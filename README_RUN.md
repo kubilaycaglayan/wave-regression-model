@@ -5,24 +5,24 @@ Set up Python and install dependencies as described in the main
 steps. Put the input photos in `step-0-raw-data/` before starting.
 
 ```bash
-python step_1_b_preprocess_water_inputs.py
-python step_2_a_reduce_black_water_area.py
-python step_2_b_label_data.py        # labeling UI at http://localhost:8055
-python step_3_a_prepare_dataset_split.py
-python train.py                     # fast-v2.2 + EfficientNet-B0 defaults
-python step_6_a_evaluate_test.py
+python scripts_pipeline/step_1_b_preprocess_water_inputs.py
+python scripts_pipeline/step_2_a_reduce_black_water_area.py
+python scripts_pipeline/step_2_b_label_data.py        # labeling UI at http://localhost:8055
+python scripts_pipeline/step_3_a_prepare_dataset_split.py
+python scripts_pipeline/train.py                     # fast-v2.2 + EfficientNet-B0 defaults
+python scripts_pipeline/step_6_a_evaluate_test.py
 ```
 
 Predict one or more new photos (the default backend is fast-v2.2):
 
 ```bash
 # put HEIC/JPG/PNG in step-7-predict-captures-holder/, then:
-python step_7_a_predict.py
+python scripts_pipeline/step_7_a_predict.py
 # Optional: use the earlier fast-v2.1 or previous PyTorch v19 inference path.
-python step_7_a_predict.py --backend fast-v2.1
-python step_7_a_predict.py --backend torch-v19
+python scripts_pipeline/step_7_a_predict.py --backend fast-v2.1
+python scripts_pipeline/step_7_a_predict.py --backend torch-v19
 # Optionally use the previous PyTorch backend and limit its CPU threads.
-python step_7_a_predict.py --backend torch-v19 --threads 4
+python scripts_pipeline/step_7_a_predict.py --backend torch-v19 --threads 4
 # previews -> step-7-inference-preview/<profile namespace>/
 # prediction histories -> step-7-predict-captures-holder/predictions/
 ```
@@ -72,7 +72,7 @@ Do not replace an existing photo with the same filename unless you also remove i
 This is for inspecting whether the pretrained segmentation model correctly detects the sea:
 
 ```bash
-python step_1_a_prepare_water_masks.py
+python scripts_pipeline/step_1_a_prepare_water_masks.py
 ```
 
 Open this file in a browser:
@@ -90,13 +90,13 @@ Inspect the original, mask, and overlay images. The generated `original` and `ov
 Run the default fast-v2.2 FP16 coordinate-crop preprocessing flow used by training and prediction:
 
 ```bash
-python step_1_b_preprocess_water_inputs.py
+python scripts_pipeline/step_1_b_preprocess_water_inputs.py
 ```
 
 The fast-v2.2 profile requires the configured Python 3.12 MIGraphX runtime and ROCm libraries. It uses FP16 SegFormer inference and writes the final regressor JPEG. The same runtime setting used for prediction, `PREDICT_MIGRAPHX_PYTHON`, is used here. To use an older preprocessing path explicitly, select its profile:
 
 ```bash
-python step_1_b_preprocess_water_inputs.py --profile baseline-v16 --device cpu
+python scripts_pipeline/step_1_b_preprocess_water_inputs.py --profile baseline-v16 --device cpu
 ```
 
 This reads each new photo from:
@@ -128,13 +128,13 @@ The script skips images whose `step-1_<name>.jpg` output already exists, and ski
 Run:
 
 ```bash
-python step_2_a_reduce_black_water_area.py
+python scripts_pipeline/step_2_a_reduce_black_water_area.py
 ```
 
 For CPU-only processing:
 
 ```bash
-python step_2_a_reduce_black_water_area.py --profile baseline-v16 --device cpu
+python scripts_pipeline/step_2_a_reduce_black_water_area.py --profile baseline-v16 --device cpu
 ```
 
 Use the baseline-v16 command only when Step 1 was also run with `--profile baseline-v16`; it reads and writes the baseline-v16 directories.
@@ -160,7 +160,7 @@ The script skips images whose `step-2_<name>.jpg` output already exists and copi
 Start the labeling web app:
 
 ```bash
-python step_2_b_label_data.py
+python scripts_pipeline/step_2_b_label_data.py
 ```
 
 Open this URL:
@@ -191,7 +191,7 @@ The existing labels are preserved. You do not need to manually edit the CSV.
 Run:
 
 ```bash
-python step_3_a_prepare_dataset_split.py
+python scripts_pipeline/step_3_a_prepare_dataset_split.py
 ```
 
 This validates that:
@@ -230,7 +230,7 @@ The coordinate-crop Step 2 filenames match the existing label convention, so exi
 Run:
 
 ```bash
-python step_4_c_inspect_training_data.py
+python scripts_pipeline/step_4_c_inspect_training_data.py
 ```
 
 Then open:
@@ -246,7 +246,7 @@ This checks tensor shapes, labels, deterministic validation/test transforms, and
 Run:
 
 ```bash
-python train.py
+python scripts_pipeline/train.py
 ```
 
 The training script uses the coordinate-crop Step 2 images and profile-matched split snapshot. Existing checkpoints trained on the older two-segmentation preprocessing are not compatible; train a new checkpoint before running prediction. The training script:
@@ -269,8 +269,8 @@ Each training version directory contains its checkpoint, manifest, summary,
 training history, and plots. Existing legacy version directories can be renamed with:
 
 ```bash
-python migrate_step_5_checkpoints.py --dry-run --fallback-backbone resnet18
-python migrate_step_5_checkpoints.py --fallback-backbone resnet18
+python scripts/migrate_step_5_checkpoints.py --dry-run --fallback-backbone resnet18
+python scripts/migrate_step_5_checkpoints.py --fallback-backbone resnet18
 ```
 
 Use `--fallback-backbone` only for legacy directories whose checkpoint metadata
@@ -284,7 +284,7 @@ The command prints the exact best checkpoint path. Use that path for later evalu
 Run:
 
 ```bash
-python step_6_a_evaluate_test.py
+python scripts_pipeline/step_6_a_evaluate_test.py
 ```
 
 The evaluation uses `test.csv` from the latest dataset split snapshot by default and automatically selects the newest training manifest's best checkpoint. To evaluate a specific checkpoint, set `EVALUATION_CHECKPOINT_PATH` to its path. Use `--test-manifest` to select another test CSV.
@@ -318,7 +318,7 @@ step-7-predict-captures-holder/
 Run:
 
 ```bash
-python step_7_a_predict.py
+python scripts_pipeline/step_7_a_predict.py
 ```
 
 Predictions and processed previews are written to:
@@ -334,9 +334,9 @@ The prediction directory contains one append-only `.txt` history per input photo
 
 ```bash
 # Default: photos in the prediction holder, three independent processes.
-python step_7_b_benchmark_prediction.py --repeat 3
+python scripts/step_7_b_benchmark_prediction.py --repeat 3
 # Or select photos and a device explicitly.
-python step_7_b_benchmark_prediction.py --device cpu --repeat 3 /path/to/photo.HEIC /path/to/photo.jpg
+python scripts/step_7_b_benchmark_prediction.py --device cpu --repeat 3 /path/to/photo.HEIC /path/to/photo.jpg
 ```
 
 The benchmark measures cold and warm predictions using an existing preview when available, without changing prediction outputs. Each run saves timing and system details as JSON and Markdown in a timestamped folder under `step-7-prediction-benchmarks/`.
@@ -344,7 +344,7 @@ The benchmark measures cold and warm predictions using an existing preview when 
 ### Profile prediction operators
 
 ```bash
-python step_7_c_profile_prediction.py --device cpu /path/to/photo.HEIC
+python scripts/step_7_c_profile_prediction.py --device cpu /path/to/photo.HEIC
 ```
 
 This separate profiling run captures both segmentation passes and the regression forward pass; its timings include profiler overhead and are not latency benchmarks. Reports and Chrome/Perfetto traces are saved under `step-7-prediction-profiles/`.
@@ -352,41 +352,41 @@ This separate profiling run captures both segmentation passes and the regression
 ## Step 8: Run the baseline experiment
 
 ```bash
-python step_8_experiment_a_constant_prediction_baselines.py
+python experiment_scripts/step_8_experiment_a_constant_prediction_baselines.py
 ```
 
-Step 8 compares training-mean and training-median baselines with the matching neural-network checkpoint. Each run writes JSON and Markdown reports to a new `vN-timestamp/` folder under `step-8-experiment-a-baseline/`; test data is not evaluated.
+Step 8 compares training-mean and training-median baselines with the matching neural-network checkpoint. Each run writes JSON and Markdown reports to a new `vN-timestamp/` folder under `experiments/step-8-experiment-a-baseline/`; test data is not evaluated.
 
 ## Step 9: Review per-image errors
 
 ```bash
-python step_9_experiment_b_per_image_error_analysis.py
+python experiment_scripts/step_9_experiment_b_per_image_error_analysis.py
 ```
 
 Step 9 shows which validation images the model understands well and where its waviness judgments are least reliable. It helps reveal patterns in the model’s mistakes so future improvements can focus on the images that need the most attention.
 
-Each run writes to a new `vN-timestamp/` folder under the checkpoint and split snapshot result path in `step-9-experiment-b-per-image-error-analysis/`.
+Each run writes to a new `vN-timestamp/` folder under the checkpoint and split snapshot result path in `experiments/step-9-experiment-b-per-image-error-analysis/`.
 
 ## Step 10: Compare frozen backbones
 
 ```bash
-python step_10_experiment_c.py
+python experiment_scripts/step_10_experiment_c.py
 ```
 
-Step 10 compares three frozen ImageNet backbones across three seeds using the newest valid dataset split by default. Results are kept in a versioned folder under `step-10-experiment-c-frozen-backbone-comparison/`. Pass `--dry-run` to check the selected split and planned runs without training.
+Step 10 compares three frozen ImageNet backbones across three seeds using the newest valid dataset split by default. Results are kept in a versioned folder under `experiments/step-10-experiment-c-frozen-backbone-comparison/`. Pass `--dry-run` to check the selected split and planned runs without training.
 
 ## Step 11: Experiment D — frozen vs partially fine-tuned EfficientNet-B0
 
-Read the [Experiment D protocol](step-11-experiment-d-efficientnet-partial-finetuning/EXPERIMENT-D.md)
-and [configuration audit](step-11-experiment-d-efficientnet-partial-finetuning/CONFIGURATION_AUDIT.md).
+Read the [Experiment D protocol](experiments/step-11-experiment-d-efficientnet-partial-finetuning/EXPERIMENT-D.md)
+and [configuration audit](experiments/step-11-experiment-d-efficientnet-partial-finetuning/CONFIGURATION_AUDIT.md).
 To run all six paired seeds on the specified immutable snapshot:
 
 ```bash
-python step_11_experiment_d.py
+python experiment_scripts/step_11_experiment_d.py
 ```
 
 Each execution writes to a version directory under
-`step-11-experiment-d-efficientnet-partial-finetuning/`. Interrupted matching
+`experiments/step-11-experiment-d-efficientnet-partial-finetuning/`. Interrupted matching
 versions resume completed runs safely; use `--force-new` to start a separate
 version. Use `--dry-run` to validate the snapshot and list the six planned
 runs without training.

@@ -83,14 +83,14 @@ Model provenance:
 
 ## Repository setup and runtime environment
 
-Repository root: `/home/ubuntu/dev/deep-learning/wave-regression-model`. The serving entry point is [`step_7_i_experimental_migraphx_server.py`](../step_7_i_experimental_migraphx_server.py). Supporting repository files are `step_0_a_native_heif_decoder.py` (optional native HEIF wrapper) and `step_2_b_crop_selector.py` (lower-water crop selection). The benchmark image set and outputs live in `step-7-predict-captures-holder/experiment-predict-holder/`.
+Repository root: `/home/ubuntu/dev/deep-learning/wave-regression-model`. The serving entry point is [`step_7_i_experimental_migraphx_server.py`](../experiment_scripts/step_7_i_experimental_migraphx_server.py). Supporting repository files are `scripts_pipeline/step_0_a_native_heif_decoder.py` (optional native HEIF wrapper) and `scripts_pipeline/step_2_b_crop_selector.py` (lower-water crop selection). The benchmark image set and outputs live in `step-7-predict-captures-holder/experiment-predict-holder/`.
 
 The measured runtime was Python 3.12 on Linux with an AMD GPU/ROCm stack and the MIGraphX ONNX Runtime execution provider. Observed versions included ONNX Runtime 1.29.0, MIGraphX EP package `1.0.0+rocm10.1.0`, OpenCV 5.0.0, NumPy 2.5.3, Pillow 12.3.0, and pillow-heif 1.8.0. The repository's `requirements-rocm-gfx1151.txt` pins the machine's PyTorch/ROCm wheel set; the common requirements alone do not install MIGraphX. Install a compatible AMD provider build and preserve these observed versions when reproducing results. Environment locations are machine-specific and are intentionally not part of the handoff.
 
 Before starting Distil-FP32 or Area-B0, verify that the four candidate segmentation graphs and shared regressor in `experiments/` match their recorded hashes, the native library can be loaded (or fallback is acceptable), the GPU/MIGraphX provider is visible to ONNX Runtime, and the six HEIC inputs are present. The experiment server checks missing graphs and provider availability and exits with a clear error. The optional native decoder can be rebuilt after installing `pillow-heif` and a C++17 compiler:
 
 ```bash
-python step_0_b_build_native_heif.py
+python scripts_pipeline/step_0_b_build_native_heif.py
 ```
 
 This generates `native/build/libwave_heif_tiles.so`, linked to the libheif bundled with that environment. The server can fall back to Pillow HEIC decoding if the helper is unavailable, but that changes performance and is not an apples-to-apples reproduction of the measured runs.
@@ -116,13 +116,13 @@ export REGRESSOR_ONNX="$MODEL_DIR/shared/reg-v18-efficientnet-b0-cpu-20261030.on
 WAVE_EXPERIMENT=distilled-b0-migraphx-fp32 \
 WAVE_STEP1_ONNX="$MODEL_DIR/distil-fp32/seg-distil-b0-step1-448-fp32-20261030.onnx" \
 WAVE_STEP2_ONNX="$MODEL_DIR/distil-fp32/seg-distil-b0-step2-384-to224-fp32-20261030.onnx" \
-WAVE_REGRESSOR_ONNX="$REGRESSOR_ONNX" python -u step_7_i_experimental_migraphx_server.py
+WAVE_REGRESSOR_ONNX="$REGRESSOR_ONNX" python -u experiment_scripts/step_7_i_experimental_migraphx_server.py
 
 # Area-B0
 WAVE_EXPERIMENT=migraphx-b0-opencv-area \
 WAVE_STEP1_ONNX="$MODEL_DIR/area-b0/seg-b0-step1-448-fp32-20261030.onnx" \
 WAVE_STEP2_ONNX="$MODEL_DIR/area-b0/seg-b0-step2-384-to224-fp32-20261030.onnx" \
-WAVE_REGRESSOR_ONNX="$REGRESSOR_ONNX" python -u step_7_i_experimental_migraphx_server.py
+WAVE_REGRESSOR_ONNX="$REGRESSOR_ONNX" python -u experiment_scripts/step_7_i_experimental_migraphx_server.py
 
 ```
 
