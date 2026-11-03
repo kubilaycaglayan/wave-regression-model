@@ -129,7 +129,7 @@ def preprocess_raw_image(
 def preprocess_raw_image_with_projected_mask(
     image: Image.Image, segmentation_model: SegmentationModel
 ) -> tuple[Image.Image | None, np.ndarray | None]:
-    """Experimental single-pass mask reuse; Step 2 still receives Step 1 pixels."""
+    """Experimental single-pass mask reuse for the earlier two-pass preprocessing path."""
     water_mask = extract_water_mask(run_segmentation(image, segmentation_model), segmentation_model.water_class_ids)
     eroded = erode_water_mask(water_mask, image.size)
     standardized = _standardize_eroded_mask(image, eroded)
@@ -195,7 +195,7 @@ def warm_coordinate_crop_selector() -> float:
 
 
 def encode_step_1_output(image: Image.Image, *, full_chroma: bool = False) -> bytes:
-    """Encode exactly as Step 1 does before Step 2 reads the image."""
+    """Encode the standardized image for earlier two-pass preprocessing paths."""
     output = io.BytesIO()
     options = {"quality": 95, "subsampling": 0} if full_chroma else {"quality": 95}
     image.save(output, format="JPEG", **options)
@@ -309,13 +309,21 @@ def main() -> None:
     pending: list[tuple[int, Path, Path]] = []
     for index, source_path in enumerate(image_paths, 1):
         standardized_path = processed_paths(source_path, output_dir, names)
-        next_step_path = Path(profile.step2_dir) / f"step-2_{standardized_path.name.removeprefix('step-1_')}"
-        if next_step_path.exists():
-            print(f"[{index}/{total}] {source_path.name}: skipped (Step 2 output already exists)")
-            continue
         if standardized_path.exists():
             print(f"[{index}/{total}] {source_path.name}: skipped (standardized input already exists)")
             entries[index] = (source_path.name, source_path, standardized_path)
+        elif profile.name == "fast-v2.2":
+            prior_final = Path("step-2-coordinate-crop-data/fast-v2.2") / (
+                f"step-2_{standardized_path.name.removeprefix('step-1_')}"
+            )
+            if prior_final.is_file():
+                temporary_path = standardized_path.with_name(f".{standardized_path.name}.tmp")
+                temporary_path.write_bytes(prior_final.read_bytes())
+                os.replace(temporary_path, standardized_path)
+                print(f"[{index}/{total}] {source_path.name}: migrated existing final input to Step 1 directory")
+                entries[index] = (source_path.name, source_path, standardized_path)
+            else:
+                pending.append((index, source_path, standardized_path))
         else:
             pending.append((index, source_path, standardized_path))
     names.save()

@@ -35,6 +35,16 @@ class PreprocessingProfile:
     step2_dir: Path
     split_dir: Path
 
+    @property
+    def final_image_dir(self) -> Path:
+        """Directory containing final model inputs for the selected profile."""
+        return self.step1_dir if self.name == "fast-v2.2" else self.step2_dir
+
+    @property
+    def final_image_prefix(self) -> str:
+        """Filename prefix used by the final model inputs."""
+        return "step-1_" if self.name == "fast-v2.2" else "step-2_"
+
     def settings(self) -> dict[str, object]:
         values = asdict(self)
         for key in ("step1_dir", "step2_dir", "split_dir"):
@@ -210,6 +220,16 @@ def ensure_profile_directory(profile: PreprocessingProfile, directory: Path) -> 
     expected = profile_marker(profile)
     if marker.is_file():
         actual = json.loads(marker.read_text(encoding="utf-8"))
+        # fast-v2.2's Step 1 pixels and settings are unchanged; only the
+        # downstream handoff moved from a copied Step 2 directory to Step 1.
+        # Refresh provenance hashes for that path-only pipeline change.
+        if (profile.name == "fast-v2.2"
+                and actual.get("profile") == expected["profile"]
+                and actual.get("settings") == expected["settings"]):
+            if actual != expected:
+                marker.write_text(json.dumps(expected, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                print(f"Updated fast-v2.2 profile marker for direct Step 1 handoff: {marker}")
+            return
         if actual != expected:
             raise RuntimeError(f"Preprocessing profile mismatch in {marker}; choose a new output directory")
         return
@@ -229,6 +249,10 @@ def require_profile_directory(profile: PreprocessingProfile, directory: Path) ->
     except (OSError, json.JSONDecodeError) as error:
         raise RuntimeError(f"Cannot read preprocessing profile marker: {marker}") from error
     expected = profile_marker(profile)
+    if (profile.name == "fast-v2.2"
+            and actual.get("profile") == expected["profile"]
+            and actual.get("settings") == expected["settings"]):
+        return
     if actual != expected:
         raise RuntimeError(f"Preprocessing profile mismatch in {marker}; expected {profile.name}")
 

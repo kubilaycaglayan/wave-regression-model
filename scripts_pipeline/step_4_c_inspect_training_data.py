@@ -79,11 +79,11 @@ def main() -> None:
     args = parser.parse_args()
     started = time.perf_counter()
     profile = get_profile(args.profile)
-    require_profile_directory(profile, profile.step2_dir)
+    require_profile_directory(profile, profile.final_image_dir)
     module = WaveDataModule(
         args.data_dir,
         batch_size=args.batch_size,
-        image_dir=profile.step2_dir,
+        image_dir=profile.final_image_dir,
         split_dir=split_directory_for(profile),
     )
     module.setup()

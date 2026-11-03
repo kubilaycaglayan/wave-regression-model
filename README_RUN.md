@@ -6,8 +6,7 @@ steps. Put the input photos in `step-0-raw-data/` before starting.
 
 ```bash
 python scripts_pipeline/step_1_b_preprocess_water_inputs.py
-python scripts_pipeline/step_2_a_reduce_black_water_area.py
-python scripts_pipeline/step_2_b_label_data.py        # labeling UI at http://localhost:8055
+python scripts_pipeline/step_2_a_label_data.py        # labeling UI at http://localhost:8055
 python scripts_pipeline/step_3_a_prepare_dataset_split.py
 python scripts_pipeline/train.py                     # fast-v2.2 + EfficientNet-B0 defaults
 python scripts_pipeline/step_6_a_evaluate_test.py
@@ -27,17 +26,17 @@ python scripts_pipeline/step_7_a_predict.py --backend torch-v19 --threads 4
 # prediction histories -> step-7-predict-captures-holder/predictions/
 ```
 
-The default prediction backend is fast-v2.2: native HEIF decoding and orientation, 448×448 tensor preparation, distilled SegFormer-B0 ONNX segmentation on MIGraphX with FP16 enabled, nearest-exact mask projection to 224×224, lower-water coordinate selection, source-coordinate crop mapping, Lanczos4 resizing and mask application on a black 224×224 canvas, then a quality-95 full-chroma JPEG roundtrip. The fast-v2.2 EfficientNet-B0 regressor runs on ONNX Runtime CPU with ImageNet normalization. It skips intermediate Step 1/Step 2 segmentation files during inference and writes the final model-input preview under `step-7-inference-preview/fast-v2.2-migraphx/`. The service starts and stops with each prediction batch. Its default runtime interpreter is `/tmp/wave_migraphx_312_env/bin/python`; override it with `PREDICT_MIGRAPHX_PYTHON` if needed. The matched regressor is `models/fast-v2.2/wave-regression-efficientnet-b0-fast-v2.2.onnx` and can be overridden with `PREDICT_REGRESSOR_ONNX_PATH`. The previous PyTorch v19 route remains available as `--backend torch-v19`.
+The default prediction backend is fast-v2.2: native HEIF decoding and orientation, 448×448 tensor preparation, distilled SegFormer-B0 ONNX segmentation on MIGraphX with FP16 enabled, nearest-exact mask projection to 224×224, lower-water coordinate selection, source-coordinate crop mapping, Lanczos4 resizing and mask application on a black 224×224 canvas, then a quality-95 full-chroma JPEG roundtrip. The fast-v2.2 EfficientNet-B0 regressor runs on ONNX Runtime CPU with ImageNet normalization. It writes the final model-input preview under `step-7-inference-preview/fast-v2.2-migraphx/`. The service starts and stops with each prediction batch. Its default runtime interpreter is `/tmp/wave_migraphx_312_env/bin/python`; override it with `PREDICT_MIGRAPHX_PYTHON` if needed. The matched regressor is `models/fast-v2.2/wave-regression-efficientnet-b0-fast-v2.2.onnx` and can be overridden with `PREDICT_REGRESSOR_ONNX_PATH`. The previous PyTorch v19 route remains available as `--backend torch-v19`.
 
 The fast-v2.2 prediction route requires a Python 3.12 runtime with `onnxruntime` and `onnxruntime-ep-migraphx`, plus access to the ROCm libraries. Its regressor and model manifest are in `models/fast-v2.2/`; it reuses the distilled SegFormer-B0 ONNX file in `models/fast-v2.1/` with FP16 enabled by MIGraphX. If the runtime is missing, prediction stops with an error instead of silently falling back.
 
-Training and batch preprocessing default to the `fast-v2.2` profile. Step 1 calls the same MIGraphX FP16 SegFormer service as prediction and saves the exact final 224×224 RGB JPEG bytes used by the regressor. Step 2 passes that image through unchanged; split snapshots are marked `fast-v2.2`. Run the commands at the top of this guide in order to prepare, label, split, train, and evaluate data using that profile. `train.py` trains a PyTorch checkpoint; prediction uses the shipped fast-v2.2 ONNX export until you explicitly export and select a later checkpoint.
+Training and batch preprocessing default to the `fast-v2.2` profile. Step 1 calls the same MIGraphX FP16 SegFormer service as prediction and saves the final 224×224 RGB JPEG used by the regressor. This image goes directly to labeling, splitting, and training; split snapshots are marked `fast-v2.2`. Run the commands at the top of this guide in order to prepare, label, split, train, and evaluate data using that profile. `train.py` trains a PyTorch checkpoint; prediction uses the shipped fast-v2.2 ONNX export until you explicitly export and select a later checkpoint.
 
 Step 7 reuses valid cached inference previews when switching checkpoints.
 
 The repository’s retraining flow is:
 
-`new raw photos → Step 1 preprocessing → Step 2 lower-water crop → manual labels → dataset split → training → optional evaluation/inference`
+`new raw photos → Step 1 final model inputs → manual labels → dataset split → training → optional evaluation/inference`
 
 Run all commands from:
 
@@ -117,50 +116,22 @@ Open:
 step-1-processed-data/fast-v2.2/index.html
 ```
 
-The script skips images whose `step-1_<name>.jpg` output already exists, and skips earlier processing when the matching Step 2 output is already present.
+The script skips images whose `step-1_<name>.jpg` output already exists.
 
-## Step 2: Create and label the lower-water images
+For the default `fast-v2.2` profile, Step 1 calls the isolated MIGraphX runtime with FP16 enabled, predicts the water mask at 448 pixels, projects it to 224×224 using nearest-exact interpolation, selects the lower-water coordinate crop, and maps that crop back to the source photo. It creates the 224×224 masked RGB JPEG used by training and inference (Lanczos4 image resize, nearest-exact mask resize, quality 95 with 4:4:4 subsampling). Crop selection prefers the lower part of detected water, where waves are expected to be most visible. This is the final model input; no additional crop or copy stage is required.
 
-### Create the lower-water Step 2 images
-
-![Step 2 lower-water crop](readme_files/step-2-pick-lower-water-area.jpg)
-
-Run:
-
-```bash
-python scripts_pipeline/step_2_a_reduce_black_water_area.py
-```
-
-For CPU-only processing:
-
-```bash
-python scripts_pipeline/step_2_a_reduce_black_water_area.py --profile baseline-v16 --device cpu
-```
-
-Use the baseline-v16 command only when Step 1 was also run with `--profile baseline-v16`; it reads and writes the baseline-v16 directories.
-
-This reads the Step 1 outputs and writes:
+Inspect the final model inputs here:
 
 ```text
-step-2-coordinate-crop-data/fast-v2.2/
+step-1-processed-data/fast-v2.2/index.html
 ```
 
-For the default `fast-v2.2` profile, Step 1 calls the isolated MIGraphX runtime with FP16 enabled, predicts the water mask at 448 pixels, projects it to 224×224 using nearest-exact interpolation, selects the lower-water coordinate crop, and maps that crop back to the source photo. It creates the exact 224×224 masked RGB JPEG used in the experiment and inference path (Lanczos4 image resize, nearest-exact mask resize, quality 95 with 4:4:4 subsampling). Step 2 copies that image unchanged without another segmentation pass. Crop selection prefers the lower part of detected water, where waves are expected to be most visible.
-
-Inspect the result here:
-
-```text
-step-2-coordinate-crop-data/fast-v2.2/index.html
-```
-
-The script skips images whose `step-2_<name>.jpg` output already exists and copies the matching Step 1 coordinate-crop JPEG unchanged.
-
-### Label the new Step 2 images
+## Step 2: Label the final model inputs
 
 Start the labeling web app:
 
 ```bash
-python scripts_pipeline/step_2_b_label_data.py
+python scripts_pipeline/step_2_a_label_data.py
 ```
 
 Open this URL:
@@ -196,7 +167,7 @@ python scripts_pipeline/step_3_a_prepare_dataset_split.py
 
 This validates that:
 
-- every labeled image exists in the active profile's Step 2 output directory;
+- every labeled image exists in the final model-input directory;
 - labels are between `0.0` and `1.0`;
 - filenames are unique and contain an image number;
 - no capture group is split across train, validation, and test.
@@ -223,7 +194,7 @@ A timestamped immutable snapshot is also created under:
 step-3-dataset-splits/snapshots/
 ```
 
-The coordinate-crop Step 2 filenames match the existing label convention, so existing labels can be reused. Step 3 keeps existing train/validation/test membership in the shared registry and assigns only newly labeled images. Each snapshot records its preprocessing profile in the manifest, so the history remains identifiable without separate split directories.
+The first run migrates existing active labels, discarded-image records, and split membership from `step-2_` names to the final Step 1 `step-1_` filenames. Historical snapshots remain unchanged. Step 3 keeps existing train/validation/test membership in the shared registry and assigns only newly labeled images. Each snapshot records its preprocessing profile in the manifest, so the history remains identifiable without separate split directories.
 
 ## Step 4: Inspect the training data
 
@@ -249,7 +220,7 @@ Run:
 python scripts_pipeline/train.py
 ```
 
-The training script uses the coordinate-crop Step 2 images and profile-matched split snapshot. Existing checkpoints trained on the older two-segmentation preprocessing are not compatible; train a new checkpoint before running prediction. The training script:
+The training script uses the final Step 1 images and profile-matched split snapshot. Existing checkpoints trained on different preprocessing are not compatible; train a new checkpoint before running prediction. The training script:
 
 - loads `train.csv` and `validation.csv`;
 - uses the existing preprocessing outputs;
@@ -394,6 +365,6 @@ runs without training.
 ## Important notes
 
 - `step_1_a_prepare_water_masks.py` is an inspection step; `step_1_b_preprocess_water_inputs.py` is the actual Step 1 training-data preparation.
-- Do not train directly from raw photos. Training uses the Step 2 outputs.
+- Do not train directly from raw photos. Training uses the final Step 1 model inputs.
 - Existing sample split membership is preserved across updates. Label corrections and discarded samples are reflected in new snapshots; historical snapshots remain unchanged for reproducibility.
 - `step_6_a_evaluate_test.py` uses `test.csv` from the latest split snapshot by default and automatically selects the newest training manifest's best checkpoint. Set `EVALUATION_CHECKPOINT_PATH` to pin a historical checkpoint, or pass `--test-manifest` to select a test CSV. Results are stored under checkpoint- and split-manifest-specific directories in `step-6-test-evaluation/`; complete matching evaluations are reused on later runs.

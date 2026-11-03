@@ -307,6 +307,8 @@ def main() -> None:
     parser.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")
     args = parser.parse_args()
     profile = get_profile(args.profile)
+    if profile.name == "fast-v2.2":
+        raise SystemExit("fast-v2.2 creates final model inputs in Step 1; no Step 2 processing is needed")
     input_dir = args.input_dir or profile.step1_dir
     output_dir = args.output_dir or profile.step2_dir
     configure_segmentation(profile, segmentation)

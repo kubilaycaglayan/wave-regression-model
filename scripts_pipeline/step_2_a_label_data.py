@@ -34,6 +34,7 @@ from PIL import Image
 from image_loading import load_rgb_image
 from step_1_c_preprocessing_profiles import get_profile
 from step_3_b_split_paths import split_directory_for
+from step_3_b_migrate_fast_v22_records import migrate_fast_v22_records
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -290,7 +291,7 @@ def image_names() -> list[str]:
     return sorted(
         path.name for path in IMAGE_DIR.iterdir()
         if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
-        and path.name.startswith("step-2_")
+        and path.name.startswith(PROCESSED_PREFIX)
         and "original" not in path.stem.lower()
         and "overlay" not in path.stem.lower()
         and path.name not in discarded
@@ -298,7 +299,7 @@ def image_names() -> list[str]:
 
 
 def source_for_processed(filename: str) -> Path:
-    """Map `step-2_<stem>.jpg` back to the raw source recorded by step 1."""
+    """Map a final processed filename back to the raw source recorded by Step 1."""
     stem = Path(filename).stem
     if not stem.startswith(PROCESSED_PREFIX):
         raise ValueError(f"Expected a '{PROCESSED_PREFIX}<stem>' filename, got {filename!r}")
@@ -482,7 +483,7 @@ def restore_discarded_image(filename: str) -> float | None:
         if filename not in records:
             raise ValueError("Image is not in the discarded list")
         path = IMAGE_DIR / filename
-        if (Path(filename).name != filename or not filename.startswith("step-2_")
+        if (Path(filename).name != filename or not filename.startswith(PROCESSED_PREFIX)
                 or "original" in Path(filename).stem.lower() or "overlay" in Path(filename).stem.lower()
                 or path.suffix.lower() not in IMAGE_EXTENSIONS or not path.is_file()):
             raise ValueError("The processed image file is missing or invalid; nothing was changed")
@@ -702,7 +703,7 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) != 5:
                 self.send_error(HTTPStatus.NOT_FOUND); return
             snapshot_id, split, requested = parts[2], parts[3], unquote(parts[4])
-            if Path(requested).name != requested or not requested.startswith("step-2_"):
+            if Path(requested).name != requested or not requested.startswith(PROCESSED_PREFIX):
                 self.send_error(HTTPStatus.NOT_FOUND); return
             try:
                 members = read_snapshot_split(snapshot_id, split)
@@ -770,10 +771,12 @@ def main() -> None:
     args = parser.parse_args()
     profile = get_profile(args.profile)
     global IMAGE_DIR, SOURCE_MANIFEST_PATH, SPLIT_OUTPUT_DIR, SPLIT_SNAPSHOT_DIR
-    IMAGE_DIR = PROJECT_DIR / profile.step2_dir
+    IMAGE_DIR = PROJECT_DIR / profile.final_image_dir
+    PROCESSED_PREFIX = profile.final_image_prefix
     SOURCE_MANIFEST_PATH = PROJECT_DIR / profile.step1_dir / ".source-manifest.json"
     SPLIT_OUTPUT_DIR = PROJECT_DIR / split_directory_for(profile)
     SPLIT_SNAPSHOT_DIR = SPLIT_OUTPUT_DIR / "snapshots"
+    migrate_fast_v22_records(profile.name, PROJECT_DIR)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Labeling app: http://{args.host}:{args.port}")
     print(f"Preprocessing profile: {profile.name}")

@@ -231,16 +231,16 @@ def main() -> None:
     data = WaveDataModule(
         batch_size=BATCH_SIZE,
         num_workers=0,
-        image_dir=profile.step2_dir,
+        image_dir=profile.final_image_dir,
         split_dir=split_dir,
     )
-    require_profile_directory(profile, Path(profile.step2_dir))
+    require_profile_directory(profile, Path(profile.final_image_dir))
     preprocessing_contract = None
     if profile.name != "baseline-v16":
-        contract_path = Path(profile.step2_dir) / "preprocessing-contract.json"
+        contract_path = Path(profile.step1_dir) / "preprocessing-contract.json"
         if not contract_path.is_file():
             raise FileNotFoundError(
-                f"Missing {profile.name} preprocessing contract: run Step 2 with --profile {profile.name} first"
+                f"Missing {profile.name} preprocessing contract: run Step 1 with --profile {profile.name} first"
             )
         preprocessing_contract = json.loads(contract_path.read_text(encoding="utf-8"))
         if preprocessing_contract.get("profile") != profile.name:

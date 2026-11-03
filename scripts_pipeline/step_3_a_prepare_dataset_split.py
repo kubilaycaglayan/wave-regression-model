@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from step_1_c_preprocessing_profiles import get_profile, require_profile_directory
 from step_3_b_split_paths import split_directory_for
+from step_3_b_migrate_fast_v22_records import migrate_fast_v22_records
 
 
 LABELS_PATH = Path("labels.csv")
@@ -38,6 +39,7 @@ TARGET_FRACTIONS = {"train": 0.70, "validation": 0.15, "test": 0.15}
 BIN_NAMES = ("0.00-0.19", "0.20-0.39", "0.40-0.59", "0.60-0.79", "0.80-1.00")
 DEFAULT_SEED = 42
 ACTIVE_PROFILE = "baseline-v16"
+IMAGE_PREFIX = "step-2_"
 
 
 @dataclass(frozen=True)
@@ -268,7 +270,7 @@ def validate_images(samples: list[Sample]) -> list[str]:
         path.name
         for path in IMAGE_DIR.iterdir()
         if path.is_file()
-        and path.name.startswith("step-2_")
+        and path.name.startswith(IMAGE_PREFIX)
         and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
         and path.name not in discarded
     }
@@ -387,13 +389,15 @@ def main() -> int:
     )
     args = parser.parse_args()
     profile = get_profile(args.profile)
-    global IMAGE_DIR, OUTPUT_DIR, SNAPSHOT_DIR, BENCHMARK_DIR, BENCHMARK_TEST_PATH, ACTIVE_PROFILE
+    global IMAGE_DIR, IMAGE_PREFIX, OUTPUT_DIR, SNAPSHOT_DIR, BENCHMARK_DIR, BENCHMARK_TEST_PATH, ACTIVE_PROFILE
     ACTIVE_PROFILE = profile.name
-    IMAGE_DIR = Path(profile.step2_dir)
+    IMAGE_DIR = Path(profile.final_image_dir)
+    IMAGE_PREFIX = profile.final_image_prefix
     OUTPUT_DIR = split_directory_for(profile)
     SNAPSHOT_DIR = OUTPUT_DIR / "snapshots"
     BENCHMARK_DIR = OUTPUT_DIR / "benchmarks"
     BENCHMARK_TEST_PATH = BENCHMARK_DIR / "benchmark-v1-test.csv"
+    migrate_fast_v22_records(profile.name)
     try:
         samples = read_labels()
         if not IMAGE_DIR.is_dir():

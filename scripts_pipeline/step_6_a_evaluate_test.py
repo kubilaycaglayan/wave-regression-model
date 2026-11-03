@@ -114,7 +114,7 @@ _checkpoint_payload = torch.load(CHECKPOINT_PATH, map_location="cpu", weights_on
 _checkpoint_preprocessing = _checkpoint_payload.get("fast_preprocessing_experiment", {})
 _profile_name = _checkpoint_preprocessing.get("profile", "baseline-v16")
 PROFILE = get_profile(_profile_name)
-require_profile_directory(PROFILE, PROJECT_DIR / PROFILE.step2_dir)
+require_profile_directory(PROFILE, PROJECT_DIR / PROFILE.final_image_dir)
 SPLIT_DIR = split_directory_for(PROFILE)
 SPLIT_SNAPSHOT_DIR = SPLIT_DIR / "snapshots"
 _MODEL_NAME_MATCH = re.fullmatch(r"(.+?)-best-val-mae-epoch=\d+-val_mae=[\d.]+\.ckpt", CHECKPOINT_PATH.name)
@@ -125,7 +125,7 @@ _MODEL_VERSION_MATCH = re.search(r"(?:^|-)v(\d+)(?:-|$)", MODEL_NAME)
 if _MODEL_VERSION_MATCH is None:
     raise ValueError(f"Checkpoint filename does not contain a model version: {CHECKPOINT_PATH.name}")
 MODEL_VERSION = f"v{_MODEL_VERSION_MATCH.group(1)}"
-IMAGE_DIR = PROFILE.step2_dir
+IMAGE_DIR = PROFILE.final_image_dir
 def latest_test_manifest(
     snapshot_dir: Path = SPLIT_SNAPSHOT_DIR,
     preprocessing_profile: str = PROFILE.name,

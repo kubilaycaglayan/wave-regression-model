@@ -14,21 +14,21 @@ The repository contains an image-processing and model-training pipeline for a lo
 
 Photos are taken from roughly 200–300 metres from the sea, often from a few recurring locations and angles. The preprocessing pipeline focuses on the sea, removing visual distractions such as sky, buildings, beach, and sand. It then selects a region toward the bottom of the detected sea area, where waves near the coast are most relevant to the swimming experience.
 
-The model is trained on the final, lower-water image rather than the original photo:
+For the current fast-v2.2 pipeline, Step 1 segments the sea and selects a lower-water crop directly from the original photo to create the final model input. The model is trained on this image rather than the original photo:
 
 ```text
-Photo → sea segmentation and standardization → lower-water crop → waviness label → regression model
+Photo → sea segmentation and lower-water crop (Step 1) → waviness label → regression model
 ```
 
 <table>
   <tr>
     <td align="center" width="50%">
       <img src="readme_files/step-1-preprocessed-sea-example.jpg" alt="Example of sea-focused preprocessing" width="100%" />
-      <br /><em>The first preprocessing stage isolates and standardizes the sea area.</em>
+      <br /><em>Sea segmentation identifies the water area.</em>
     </td>
     <td align="center" width="50%">
       <img src="readme_files/step-2-pick-lower-water-area.jpg" alt="Example of the lower-water crop" width="100%" />
-      <br /><em>The next stage retains a lower section of the sea for model input.</em>
+      <br /><em>Lower-water crop selection keeps a region for model input.</em>
     </td>
   </tr>
 </table>
@@ -77,7 +77,7 @@ Next, we unfroze the final layer of the EfficientNet-B0 backbone to test whether
 ## Current status
 
 - The pipeline supports image preprocessing, labeling, dataset splits, training, evaluation, and inference.
-- Step 7 now defaults to **fast-v2.2**: native HEIF decoding, 448×448 SegFormer-B0 ONNX segmentation through MIGraphX FP16, lower-water coordinate crop from the source image, and the retrained EfficientNet-B0 ONNX regressor. The earlier fast-v2.1 and PyTorch v19 routes remain selectable.
+- Step 7 now defaults to **fast-v2.2**: native HEIF decoding when available (with a Pillow fallback), 448×448 SegFormer-B0 ONNX segmentation through MIGraphX FP16, lower-water coordinate crop from the source image, and the retrained EfficientNet-B0 ONNX regressor. The earlier fast-v2.1 and PyTorch v19 routes remain selectable.
 - EfficientNet-B0 is the current preferred backbone based on validation experiments.
 - The fast-v2.2 regressor was trained on fast-v2.2-preprocessed inputs and selected at **0.0985 validation MAE**. Its held-out test MAE was **0.1324** across 46 photos; the experiment dashboard includes the FP32 and FP16 reference comparisons and full per-photo results.
 - The first model version is available on [Hugging Face](https://huggingface.co/kubilaycaglayan/wave-regression).
