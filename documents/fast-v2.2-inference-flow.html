@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>fast-v2.2 · From Photo to Waviness Score</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --paper: #f5f5f5;
+      --paper-2: #ececec;
+      --ink: #2d3142;
+      --muted: #4f5d75;
+      --soft: #5a6580;
+      --rule: rgba(45,49,66,.16);
+      --accent: #bf4520;
+      --accent-tint: rgba(191,69,32,.08);
+      --link: #2e5aa8;
+      --sans: 'Geist', system-ui, sans-serif;
+      --serif: 'Instrument Serif', 'Noto Serif', serif;
+      --mono: 'Geist Mono', ui-monospace, monospace;
+    }
+    * { margin: 0; }
+    body { background: var(--paper); color: var(--ink); font-family: var(--sans); padding: 40px 32px 48px; }
+    main { max-width: 1280px; margin: 0 auto; }
+    .eyebrow { color: var(--muted); font: 500 11px var(--mono); letter-spacing: .16em; text-transform: uppercase; margin-bottom: 12px; }
+    h1 { font: 400 clamp(32px, 4vw, 48px)/1.05 var(--serif); letter-spacing: -.02em; max-width: 850px; }
+    .dek { color: var(--muted); font: 15px/1.55 var(--sans); max-width: 820px; margin: 14px 0 28px; }
+    .diagram-container { width: 100%; overflow-x: auto; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+    svg { display: block; width: 100%; min-width: 1280px; }
+    .notes { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding-top: 20px; }
+    .note { border-left: 2px solid var(--rule); padding-left: 12px; }
+    .note strong { display: block; color: var(--ink); font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 6px; }
+    .note p { color: var(--muted); font: 13px/1.5 var(--sans); }
+    @media (max-width: 680px) { body { padding: 28px 18px; } .notes { grid-template-columns: 1fr; } }
+    @media print { body { padding: 0; } .diagram-container { overflow: visible; border: 0; } svg { min-width: 0; } }
+  </style>
+</head>
+<body>
+<main>
+  <div class="diagram-container">
+    <svg viewBox="0 0 1280 628" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="fast-v22-inference-title fast-v22-inference-desc">
+      <title id="fast-v22-inference-title">fast-v2.2 inference: photo to waviness score</title>
+      <desc id="fast-v22-inference-desc">An eight-stage, two-row flowchart showing photo decoding, the SegFormer-B0 segmentation network, lower-water crop preparation, the EfficientNet-B0 regression network, and the saved waviness result.</desc>
+      <defs>
+        <marker id="flow-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#4f5d75"/></marker>
+        <marker id="flow-arrow-accent" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#bf4520"/></marker>
+      </defs>
+      <rect width="1280" height="628" fill="#f5f5f5"/>
+      <text x="32" y="34" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12" font-weight="500" letter-spacing="1.8">PHOTO TRANSFORMATION</text>
+      <text x="1248" y="34" text-anchor="end" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">FAST-V2.2</text>
+      <line x1="32" y1="48" x2="1248" y2="48" stroke="rgba(45,49,66,.16)"/>
+      <!-- Direction: 01 → 04 across the top, then 05 → 08 back across the bottom. -->
+      <g fill="none" stroke="#4f5d75" stroke-width="1.6" marker-end="url(#flow-arrow)">
+        <line x1="320" y1="207" x2="352" y2="207"/>
+        <line x1="608" y1="207" x2="640" y2="207"/>
+        <line x1="896" y1="207" x2="928" y2="207"/>
+        <line x1="1056" y1="322" x2="1056" y2="362"/>
+        <line x1="928" y1="457" x2="896" y2="457"/>
+        <line x1="640" y1="457" x2="608" y2="457"/>
+        <line x1="352" y1="457" x2="320" y2="457"/>
+      </g>
+      <g>
+        <rect x="64" y="112" width="256" height="210" rx="18" fill="#ececec" stroke="rgba(45,49,66,.36)" stroke-width="1.2"/>
+        <text x="82" y="136" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="10" font-weight="500" letter-spacing="1">01 · SOURCE</text>
+        <text x="192.0" y="170" text-anchor="middle" fill="#2d3142" font-family="'Geist', sans-serif" font-size="17" font-weight="600">Raw photo</text>
+        <text x="192.0" y="196" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">HEIC · JPEG · PNG</text>
+        <text x="192.0" y="214" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">TIFF · WebP</text>
+        <line x1="84" y1="240" x2="300" y2="240" stroke="rgba(45,49,66,.16)"/>
+        <text x="192.0" y="265" text-anchor="middle" fill="#5a6580" font-family="'Geist Mono', monospace" font-size="12">iPhone / camera</text>
+        <text x="192.0" y="310" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="9">INPUT FILE</text>
+      </g>
+      <g>
+        <rect x="352" y="112" width="256" height="210" rx="6" fill="#f5f5f5" stroke="rgba(45,49,66,.28)" stroke-width="1.2"/>
+        <text x="370" y="136" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="10" font-weight="500" letter-spacing="1">02 · DECODE</text>
+        <text x="480.0" y="170" text-anchor="middle" fill="#2d3142" font-family="'Geist', sans-serif" font-size="17" font-weight="600">Decode + orient</text>
+        <text x="480.0" y="196" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">RGB pixels</text>
+        <text x="480.0" y="214" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">EXIF applied</text>
+        <line x1="372" y1="240" x2="588" y2="240" stroke="rgba(45,49,66,.16)"/>
+        <text x="480.0" y="265" text-anchor="middle" fill="#5a6580" font-family="'Geist Mono', monospace" font-size="12">Native libheif</text>
+        <text x="480.0" y="283" text-anchor="middle" fill="#5a6580" font-family="'Geist Mono', monospace" font-size="12">OpenCV · Pillow</text>
+        <text x="480.0" y="310" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="9">RGB IMAGE</text>
+      </g>
+      <g>
+        <rect x="640" y="112" width="256" height="210" rx="6" fill="#f5f5f5" stroke="rgba(45,49,66,.28)" stroke-width="1.2"/>
+        <text x="658" y="136" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="10" font-weight="500" letter-spacing="1">03 · PREP</text>
+        <text x="768.0" y="170" text-anchor="middle" fill="#2d3142" font-family="'Geist', sans-serif" font-size="17" font-weight="600">Build model input</text>
+        <text x="768.0" y="196" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">448 × 448</text>
+        <text x="768.0" y="214" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">normalized tensor</text>
+        <line x1="660" y1="240" x2="876" y2="240" stroke="rgba(45,49,66,.16)"/>
+        <text x="768.0" y="265" text-anchor="middle" fill="#5a6580" font-family="'Geist Mono', monospace" font-size="12">OpenCV INTER_AREA</text>
+        <text x="768.0" y="283" text-anchor="middle" fill="#5a6580" font-family="'Geist Mono', monospace" font-size="12">NumPy</text>
+        <text x="768.0" y="310" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="9">FLOAT32 TENSOR</text>
+      </g>
+      <g>
+        <rect x="928" y="112" width="256" height="210" rx="6" fill="rgba(191,69,32,.08)" stroke="#bf4520" stroke-width="1.6"/>
+        <text x="946" y="136" fill="#bf4520" font-family="'Geist Mono', monospace" font-size="10" font-weight="500" letter-spacing="1">04 · SEGMENT · NN</text>
+        <text x="1056.0" y="170" text-anchor="middle" fill="#2d3142" font-family="'Geist', sans-serif" font-size="17" font-weight="600">Detect water</text>
+        <text x="1056.0" y="196" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">Water-class mask</text>
+        <text x="1056.0" y="214" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">448 px output</text>
+        <line x1="948" y1="240" x2="1164" y2="240" stroke="rgba(45,49,66,.16)"/>
+        <text x="1056.0" y="265" text-anchor="middle" fill="#bf4520" font-family="'Geist Mono', monospace" font-size="12" font-weight="500">SegFormer-B0 ONNX</text>
+        <text x="1056.0" y="283" text-anchor="middle" fill="#5a6580" font-family="'Geist Mono', monospace" font-size="12">ONNX Runtime · MIGraphX</text>
+        <text x="1056.0" y="301" text-anchor="middle" fill="#5a6580" font-family="'Geist Mono', monospace" font-size="12">FP16</text>
+      </g>
+      <g>
+        <rect x="928" y="362" width="256" height="210" rx="6" fill="#f5f5f5" stroke="rgba(45,49,66,.28)" stroke-width="1.2"/>
+        <text x="946" y="386" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="10" font-weight="500" letter-spacing="1">05 · SELECT</text>
+        <text x="1056.0" y="420" text-anchor="middle" fill="#2d3142" font-family="'Geist', sans-serif" font-size="17" font-weight="600">Choose lower-water crop</text>
+        <text x="1056.0" y="446" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">Mask → 224 grid</text>
+        <text x="1056.0" y="464" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">→ source coordinates</text>
+        <line x1="948" y1="490" x2="1164" y2="490" stroke="rgba(45,49,66,.16)"/>
+        <text x="1056.0" y="515" text-anchor="middle" fill="#5a6580" font-family="'Geist Mono', monospace" font-size="12">OpenCV nearest-exact</text>
+        <text x="1056.0" y="533" text-anchor="middle" fill="#5a6580" font-family="'Geist Mono', monospace" font-size="12">Numba crop selector</text>
+        <text x="1056.0" y="560" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="9">SOURCE ROI</text>
+      </g>
+      <g>
+        <rect x="640" y="362" width="256" height="210" rx="6" fill="#f5f5f5" stroke="rgba(45,49,66,.28)" stroke-width="1.2"/>
+        <text x="658" y="386" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="10" font-weight="500" letter-spacing="1">06 · PREPARE</text>
+        <text x="768.0" y="420" text-anchor="middle" fill="#2d3142" font-family="'Geist', sans-serif" font-size="17" font-weight="600">Build final model image</text>
+        <text x="768.0" y="446" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">Resize + mask on</text>
+        <text x="768.0" y="464" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">black 224 × 224 canvas</text>
+        <line x1="660" y1="490" x2="876" y2="490" stroke="rgba(45,49,66,.16)"/>
+        <text x="768.0" y="515" text-anchor="middle" fill="#5a6580" font-family="'Geist Mono', monospace" font-size="12">OpenCV Lanczos4</text>
+        <text x="768.0" y="533" text-anchor="middle" fill="#5a6580" font-family="'Geist Mono', monospace" font-size="12">JPEG Q95 · 4:4:4</text>
+        <text x="768.0" y="560" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="9">224 × 224 RGB JPEG</text>
+      </g>
+      <g>
+        <rect x="352" y="362" width="256" height="210" rx="6" fill="rgba(191,69,32,.08)" stroke="#bf4520" stroke-width="1.6"/>
+        <text x="370" y="386" fill="#bf4520" font-family="'Geist Mono', monospace" font-size="10" font-weight="500" letter-spacing="1">07 · REGRESS · NN</text>
+        <text x="480.0" y="420" text-anchor="middle" fill="#2d3142" font-family="'Geist', sans-serif" font-size="17" font-weight="600">Predict waviness</text>
+        <text x="480.0" y="446" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">ImageNet normalize</text>
+        <text x="480.0" y="464" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="12">frozen backbone + head</text>
+        <line x1="372" y1="490" x2="588" y2="490" stroke="rgba(45,49,66,.16)"/>
+        <text x="480.0" y="515" text-anchor="middle" fill="#bf4520" font-family="'Geist Mono', monospace" font-size="12" font-weight="500">EfficientNet-B0 ONNX</text>
+        <text x="480.0" y="533" text-anchor="middle" fill="#5a6580" font-family="'Geist Mono', monospace" font-size="12">ONNX Runtime · CPU</text>
+        <text x="480.0" y="551" text-anchor="middle" fill="#5a6580" font-family="'Geist Mono', monospace" font-size="12">sigmoid · [0, 1]</text>
+      </g>
+      <g>
+        <rect x="64" y="362" width="256" height="210" rx="18" fill="#ececec" stroke="rgba(45,49,66,.36)" stroke-width="1.2"/>
+        <text x="82" y="386" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="10" font-weight="500" letter-spacing="1">08 · OUTPUT</text>
+        <text x="192.0" y="420" text-anchor="middle" fill="#2d3142" font-family="'Geist', sans-serif" font-size="17" font-weight="600">Waviness score</text>
+        <text x="192.0" y="444" text-anchor="middle" fill="#2d3142" font-family="'Geist Mono', monospace" font-size="12">0.00–1.00</text>
+        <line x1="84" y1="490" x2="300" y2="490" stroke="rgba(45,49,66,.16)"/>
+        <text x="192.0" y="533" text-anchor="middle" fill="#5a6580" font-family="'Geist Mono', monospace" font-size="12">JPEG preview</text>
+        <text x="192.0" y="560" text-anchor="middle" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="9">PREDICTION RECORD</text>
+      </g>
+      <line x1="32" y1="584" x2="1248" y2="584" stroke="rgba(45,49,66,.16)"/>
+      <text x="32" y="610" fill="#4f5d75" font-family="'Geist Mono', monospace" font-size="10" font-weight="500" letter-spacing="1.2">FLOW DIRECTION</text>
+      <line x1="166" y1="606" x2="202" y2="606" stroke="#4f5d75" stroke-width="1.5" marker-end="url(#flow-arrow)"/>
+      <rect x="700" y="599" width="14" height="14" rx="3" fill="rgba(191,69,32,.08)" stroke="#bf4520"/>
+      <text x="722" y="610" fill="#4f5d75" font-family="'Geist', sans-serif" font-size="12">neural network model</text>
+    </svg>
+  </div>
+
+</main>
+</body>
+</html>

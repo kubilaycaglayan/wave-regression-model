@@ -6,6 +6,18 @@ This neural network takes a photo of the **sea** and estimates water waviness as
 
 <img src="readme_files/waviness-scale.svg" alt="Waviness score scale from 0, very calm water, to 1, very wavy water that may be dangerous to swim, with guidance for fun waves and taking precautions" width="85%" />
 
+**Live app:** [Swimmable](https://swimmable.blaqc.space/) — see how wavy the sea is today. **Model repository:** [Hugging Face](https://huggingface.co/kubilaycaglayan/wave-regression).
+
+**Best checkpoint:** v21 (fast-v2.2), validation MAE **0.0971**; held-out test MAE **0.1250** on 46 photos ([checkpoint evaluation](experiments/from-one-to-zero/fast-v2.2-current-checkpoint/screen-20261102T103640Z.json)).
+
+**Warm inference benchmarks** (raw photo to score; model startup excluded):
+
+| Hardware | Warm inference time |
+| --- | ---: |
+| NVIDIA GeForce GTX 1050 (4 GB VRAM), CUDA | ~195–201 ms/photo |
+| Intel Core i7-8750H @ 2.20 GHz, CPU | ~259–283 ms/photo |
+| Radeon 8060S GPU | **42 ms median per photo** |
+
 This project explores whether a photo of the sea can help answer a familiar local question: **how wavy is the water today, and is it a good day to swim?** Swimming is part of everyday life where I live, and I used to check the sea from my window each morning. I started collecting photos to see whether a computer vision model could make that daily check more consistent.
 
 The repository contains an image-processing and model-training pipeline for a local swimming application. The model estimates **water waviness from an image**; it does not yet make a complete safety judgment.
@@ -20,6 +32,12 @@ Photos are taken from roughly 200–300 metres from the sea, often from a few re
 </p>
 
 For the current fast-v2.2 pipeline, during pre-processing the pipeline segments the sea and selects a lower-water crop directly from the original photo to create the final model input. The model is trained on this image.
+
+<p align="center">
+  <a href="documents/fast-v2.2-inference-flow.html">
+    <img src="readme_files/fast-v2.2-inference-flow.svg" alt="fast-v2.2 inference flow from raw sea photo through water segmentation and EfficientNet regression to a waviness score" width="100%" />
+  </a>
+</p>
 
 ### Inference speed improvements
 
@@ -132,7 +150,7 @@ Next, we unfroze the final layer of the EfficientNet-B0 backbone to test whether
 - The pipeline supports image preprocessing, labeling, dataset splits, training, evaluation, and inference.
 - Step 7 now defaults to **fast-v2.2**: native HEIF decoding when available (with a Pillow fallback), 448×448 SegFormer-B0 ONNX segmentation through MIGraphX FP16, lower-water coordinate crop from the source image, and the retrained EfficientNet-B0 ONNX regressor. The earlier fast-v2.1 and PyTorch v19 routes remain selectable.
 - EfficientNet-B0 is the current preferred backbone based on validation experiments.
-- The fast-v2.2 regressor was trained on fast-v2.2-preprocessed inputs and selected at **0.0985 validation MAE**. Its held-out test MAE was **0.1324** across 46 photos; the experiment dashboard includes the FP32 and FP16 reference comparisons and full per-photo results.
+- The v21 fast-v2.2 checkpoint was selected at **0.0971 validation MAE** and reached **0.1250 test MAE** across 46 held-out photos; see the [checkpoint evaluation](experiments/from-one-to-zero/fast-v2.2-current-checkpoint/screen-20261102T103640Z.json).
 - The first model version is available on [Hugging Face](https://huggingface.co/kubilaycaglayan/wave-regression).
 - More varied, carefully labeled data is needed to evaluate how well predictions generalize across days, weather, locations, and camera angles.
 
