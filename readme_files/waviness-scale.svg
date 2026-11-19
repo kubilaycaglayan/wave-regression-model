@@ -7,6 +7,7 @@
       <stop offset="100%" stop-color="#d94a45"/>
     </linearGradient>
   </defs>
+  <rect width="900" height="138" rx="8" fill="#fff"/>
   <text x="16" y="16" fill="#333" font-family="Arial, sans-serif" font-size="12" font-weight="700">WAVINESS SCORE</text>
   <rect x="16" y="23" width="868" height="18" rx="9" fill="url(#waviness)"/>
   <g fill="#333" font-family="Arial, sans-serif" font-size="9" font-weight="700" text-anchor="middle">
